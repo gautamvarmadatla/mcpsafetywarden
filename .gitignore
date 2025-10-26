@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.pyo
+behavior_profiles.db
+.env
+*.key
