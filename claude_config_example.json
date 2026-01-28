@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "behavior-wrapper": {
+      "command": "python",
+      "args": ["D:/code/mcp-behavior-wrapper/server.py"],
+      "env": {}
+    }
+  }
+}
