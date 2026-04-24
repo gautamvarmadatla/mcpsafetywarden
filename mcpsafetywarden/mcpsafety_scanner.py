@@ -1701,7 +1701,7 @@ async def _hacker_anthropic(
     allow_destructive_probes: bool,
 ) -> str:
     import anthropic
-    from scanner import _LLM_HTTP_TIMEOUT
+    from .scanner import _LLM_HTTP_TIMEOUT
     client = anthropic.Anthropic(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT) if api_key \
         else anthropic.Anthropic(timeout=_LLM_HTTP_TIMEOUT)
     ant_tools = _tools_to_anthropic(tools)
@@ -1846,7 +1846,7 @@ async def _hacker_openai(
     allow_destructive_probes: bool,
 ) -> str:
     import openai
-    from scanner import _LLM_HTTP_TIMEOUT
+    from .scanner import _LLM_HTTP_TIMEOUT
     client = openai.OpenAI(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT) if api_key \
         else openai.OpenAI(timeout=_LLM_HTTP_TIMEOUT)
     return await _hacker_openai_compat(
@@ -1869,7 +1869,7 @@ async def _hacker_ollama(
 ) -> str:
     """Hacker agent using a local Ollama model via its OpenAI-compatible API."""
     import openai
-    from scanner import _LLM_HTTP_TIMEOUT, _OLLAMA_BASE_URL
+    from .scanner import _LLM_HTTP_TIMEOUT, _OLLAMA_BASE_URL
     base_url = os.environ.get("OLLAMA_BASE_URL", _OLLAMA_BASE_URL)
     model    = model_id or os.environ.get("OLLAMA_MODEL", "llama3.1")
     client   = openai.OpenAI(api_key="ollama", base_url=base_url, timeout=_LLM_HTTP_TIMEOUT)
@@ -1899,7 +1899,7 @@ async def _hacker_gemini(
     except ImportError:
         pass
     else:
-        from scanner import _LLM_HTTP_TIMEOUT
+        from .scanner import _LLM_HTTP_TIMEOUT
         client = genai.Client(api_key=key, http_options={"timeout": int(_LLM_HTTP_TIMEOUT * 1000)})
 
         func_decls = []
@@ -2097,7 +2097,7 @@ async def _run_auditor(
     skip_web_research: bool,
     burp_evidence: str = "",
 ) -> List[Dict]:
-    from scanner import call_llm
+    from .scanner import call_llm
 
     if not hacker_findings: return []
 
@@ -2145,7 +2145,7 @@ async def _run_supervisor(
     model_id: Optional[str],
     api_key: Optional[str],
 ) -> Dict[str, Any]:
-    from scanner import call_llm
+    from .scanner import call_llm
 
     safe_hacker   = _sanitise_finding_texts(hacker_findings)
     safe_auditor  = _sanitise_finding_texts(auditor_findings)
@@ -2438,7 +2438,7 @@ async def _run_recon(
     'network_scan' so the Planner has real port/service data to work from.
     Failure is non-fatal - returns empty recon so the pipeline continues.
     """
-    from scanner import call_llm
+    from .scanner import call_llm
 
     slim = [
         {
@@ -2496,7 +2496,7 @@ async def _run_planner(
     targets, type confusion targets, and race condition targets.
     Failure is non-fatal - returns empty plan so the hacker probes opportunistically.
     """
-    from scanner import call_llm
+    from .scanner import call_llm
 
     slim_tools = [
         {

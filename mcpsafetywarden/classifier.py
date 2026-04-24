@@ -489,7 +489,7 @@ def _classify_with_llm(
     model_id: Optional[str]  = None,
     api_key: Optional[str]  = None,
 ) -> Dict[str, Any]:
-    from scanner import call_llm  # lazy import - scanner is heavy
+    from .scanner import call_llm
 
     prompt = _LLM_CLASSIFY_PROMPT.format(
         tool_name       = _sanitise_for_prompt(tool_name, 100),
