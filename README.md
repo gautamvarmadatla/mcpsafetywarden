@@ -4,26 +4,11 @@
 
 MCP safety warden is a proxy server that wraps any MCP server and adds behavioral profiling, security scanning, risk gating, and safe execution to its tools.
 
-Instead of calling a wrapped server's tools directly, you route calls through this wrapper. It classifies each tool, builds a behavior profile from observed runs, checks for injection attacks, and can block or gate risky tools before they execute.
-
 ## Overview
 
 Most MCP servers expose tools with no information about what those tools actually do at runtime: whether they write data, call external services, delete things, or produce outputs that contain adversarial content.
 
-This wrapper solves that by sitting between an MCP client and one or more wrapped servers. It:
-
-- Classifies every tool by effect class, destructiveness, and retry safety using static rules and optionally an LLM.
-- Builds observed behavior profiles from live execution data: latency percentiles, failure rates, output size, schema stability.
-- Scans tool call arguments for injection attacks (SSRF, SQL/NoSQL injection, command injection, prompt injection, path traversal, and more) before forwarding the call.
-- Scans tool output for prompt injection using regex rules and an LLM deep scan.
-- Runs security audits using a five-stage pentest pipeline, Cisco AI Defense, or Snyk.
-- Optionally integrates with **Kali Linux MCP** (nmap network recon, service fingerprinting, traceroute) and **Burp Suite MCP** (raw HTTP probes, Collaborator OOB detection, proxy history evidence) to add real network and HTTP-layer data to every scan.
-- Gates tool execution: low or medium-low risk tools run immediately, medium/high-risk tools are blocked until a user approves or picks a safer alternative.
-- Stores all run telemetry in a local SQLite database.
-
-Use it when you need to audit what third-party or internal MCP tools actually do before trusting them in an agent workflow.
-
-## Features
+Instead of calling a wrapped server's tools directly, you route calls through this wrapper. It classifies each tool, builds a behavior profile from observed runs, checks for injection attacks, and blocks or gates risky tools before they execute.
 
 **Behavioral profiling**
 - Static classification of effect class (read_only, additive_write, mutating_write, external_action, destructive), retry safety, and destructiveness.
@@ -58,10 +43,14 @@ Use it when you need to audit what third-party or internal MCP tools actually do
 - stdio (default), SSE, and streamable_http.
 - Bearer token auth middleware for HTTP transports.
 
+Use it when you need to audit what third-party or internal MCP tools actually do before trusting them in an agent workflow.
+
+---
+
 ## Architecture
 
 ```
-MCP Client (Claude Desktop, agent, cli.py)
+MCP Client (Claude Desktop, agent, mcpsafetywarden CLI)
         |
         v
   server.py  (FastMCP, 17 tools, rate limiting, bearer auth)
@@ -94,6 +83,104 @@ MCP Client (Claude Desktop, agent, cli.py)
 
 ---
 
+## Prerequisites
+
+- Python 3.10 or later.
+- `pip` for dependency installation.
+- At least one wrapped MCP server to proxy (stdio subprocess, SSE endpoint, or streamable_http endpoint).
+- **Recommended: an API key for at least one LLM provider** (Anthropic, OpenAI, Gemini, or a local Ollama instance).
+
+**Why an LLM key matters:**
+
+The wrapper has two operating modes depending on whether an LLM is available:
+
+| Capability | Without LLM key | With LLM key |
+|---|---|---|
+| Tool classification | Rule-based heuristics only - low confidence on ambiguous tool names | LLM resolves ambiguous cases; higher confidence across the board |
+| Injection scanning | Regex patterns only (40+ rules) | Regex + LLM deep scan - catches obfuscated and novel injections |
+| Risk gate alternatives | None - gate shows "More options" only | LLM ranks safer substitute tools by risk reduction and functional coverage |
+| Security scanning | Snyk and Cisco only (metadata/static analysis, no LLM needed) | Full 5-stage pentest: Recon, Planner, Hacker, Auditor, Supervisor |
+
+Set at minimum `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` before starting the server. For a fully local setup with no API keys, run [Ollama](https://ollama.com) and set `OLLAMA_MODEL` - then pass `--provider ollama` (or `scan_provider="ollama"`) explicitly on every command, as Ollama is not auto-detected from environment variables.
+
+---
+
+## Installation
+
+```bash
+git clone <YOUR_REPO_URL>
+cd mcpsafetywarden
+pip install .
+```
+
+With all optional LLM providers and scanners:
+
+```bash
+pip install ".[all]"
+```
+
+Or pick specific extras:
+
+```bash
+pip install ".[anthropic,snyk]"
+```
+
+Verify the install:
+
+```bash
+mcpsafetywarden --help
+mcpsafetywarden-server --help
+```
+
+The SQLite database is created automatically on first run in the platform user data directory (e.g. `~/.local/share/mcpsafetywarden/` on Linux, `~/Library/Application Support/mcpsafetywarden/` on macOS, `%APPDATA%\mcpsafetywarden\` on Windows). Set `MCP_DB_PATH` to override the location.
+
+**Optional: at-rest encryption for stored credentials**
+
+The wrapper stores server env vars and HTTP headers in the database. To encrypt them at rest:
+
+```bash
+pip install cryptography
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Set the printed key as `MCP_DB_ENCRYPTION_KEY` before starting the server. Keep this key safe; losing it makes stored credentials unrecoverable.
+
+---
+
+## Configuration
+
+All configuration is via environment variables. No config file is required.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MCP_TRANSPORT` | `stdio` | Transport mode: `stdio`, `sse`, or `streamable_http` |
+| `MCP_HOST` | `127.0.0.1` | Bind address for HTTP transports |
+| `MCP_PORT` | `8000` | Bind port for HTTP transports |
+| `MCP_AUTH_TOKEN` | (unset) | Bearer token for HTTP transport auth. Unset means no auth (log warning is emitted). |
+| `MCP_DB_ENCRYPTION_KEY` | (unset) | Fernet key to encrypt `env_json` and `headers_json` at rest |
+| `ANTHROPIC_API_KEY` | (unset) | Enables Anthropic as LLM provider for classification and scanning |
+| `OPENAI_API_KEY` | (unset) | Enables OpenAI as LLM provider |
+| `GEMINI_API_KEY` | (unset) | Enables Gemini as LLM provider |
+| `GOOGLE_API_KEY` | (unset) | Legacy alias for `GEMINI_API_KEY` |
+| `OLLAMA_MODEL` | (unset) | Model name for Ollama provider (e.g. `llama3.1`, `mistral`) |
+| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama API base URL (OpenAI-compatible) |
+| `SNYK_TOKEN` | (unset) | Enables Snyk E001 prompt-injection detection |
+| `MCP_SCANNER_API_KEY` | (unset) | Cisco AI Defense API key for cloud ML engine |
+| `MCP_SCANNER_LLM_API_KEY` | (unset) | LLM key for Cisco internal AST analysis (falls back to `OPENAI_API_KEY`) |
+| `MCP_DB_PATH` | (unset) | Override the SQLite database file path |
+
+**Example `.env` for local development:**
+
+```bash
+MCP_TRANSPORT=stdio
+ANTHROPIC_API_KEY=sk-ant-...
+MCP_DB_ENCRYPTION_KEY=<generated_fernet_key>
+```
+
+**Security note:** Never commit API keys or the encryption key to version control. Pass them via environment variables or a secrets manager. The wrapper strips all keys from the environment before spawning stdio child processes.
+
+---
+
 ## Auxiliary Security Tool Integrations
 
 The wrapper detects Kali and Burp by looking for registered servers whose `server_id` contains `"kali"` or `"burp"` (case-insensitive). Registration is the only setup step - once registered, the tools activate automatically on every scan, ping, and replay test.
@@ -123,7 +210,7 @@ cd awsome_kali_MCPServers
 docker build -t kali-mcps:latest .
 
 # 3. Register with the wrapper (server_id must contain "kali")
-python cli.py register kali-mcp \
+mcpsafetywarden register kali-mcp \
   --transport stdio \
   --command docker \
   --args '["run", "-i", "kali-mcps:latest"]'
@@ -133,7 +220,7 @@ Note: `vulnerability_scan` runs nmap vuln scripts which can take 60-90 seconds p
 
 ### Burp Suite MCP (`PortSwigger/mcp-server`)
 
-Kotlin, GPL-3.0, no auth, runs as a stdio proxy to a local Burp Suite instance on port 9876. Community edition tools run always; Pro-only tools (Collaborator, scanner) are tried and silently skipped on failure.
+Kotlin, GPL-3.0, no auth, runs as an SSE server on port 9876. Community edition tools run always; Pro-only tools (Collaborator, scanner) are tried and silently skipped on failure.
 
 **What it contributes:**
 
@@ -158,12 +245,12 @@ cd mcp-server
 # produces build/libs/burp-mcp-all.jar
 
 # 3. Load into Burp
-#    Burp → Extensions → Add → Java type → select burp-mcp-all.jar
+#    Burp -> Extensions -> Add -> Java type -> select burp-mcp-all.jar
 #    Then go to the "MCP" tab in Burp and enable the server.
 #    SSE endpoint starts at http://127.0.0.1:9876/sse
 
 # 4. Register with the wrapper (server_id must contain "burp")
-python cli.py register burp-mcp \
+mcpsafetywarden register burp-mcp \
   --transport sse \
   --url http://127.0.0.1:9876/sse
 ```
@@ -217,156 +304,37 @@ export SNYK_TOKEN=snyk_uat.<your_token>
 Or pass it directly on the scan command:
 
 ```bash
-python cli.py scan my-server --provider snyk --api-key snyk_uat.<your_token> --yes
+mcpsafetywarden scan my-server --provider snyk --api-key snyk_uat.<your_token> --yes
 ```
 
 Unlike Kali and Burp, Snyk is **not** auto-activated on every scan - it only runs when explicitly chosen as the provider via `--provider snyk` or `provider="snyk"`.
 
 ---
 
-## Prerequisites
+## CLI Reference
 
-- Python 3.10 or later.
-- `pip` for dependency installation.
-- At least one wrapped MCP server to proxy (stdio subprocess, SSE endpoint, or streamable_http endpoint).
-- **Recommended: an API key for at least one LLM provider** (Anthropic, OpenAI, Gemini, or a local Ollama instance).
+### Global flags
 
-**Why an LLM key matters:**
+All commands support `--json` for machine-readable output. Commands with confirmation prompts support `--yes` / `-y` to skip them.
 
-The wrapper has two operating modes depending on whether an LLM is available:
-
-| Capability | Without LLM key | With LLM key |
-|---|---|---|
-| Tool classification | Rule-based heuristics only - low confidence on ambiguous tool names | LLM resolves ambiguous cases; higher confidence across the board |
-| Injection scanning | Regex patterns only (40+ rules) | Regex + LLM deep scan - catches obfuscated and novel injections |
-| Risk gate alternatives | None - gate shows "More options" only | LLM ranks safer substitute tools by risk reduction and functional coverage |
-| Security scanning | Snyk and Cisco only (metadata/static analysis, no LLM needed) | Full 5-stage pentest: Recon, Planner, Hacker, Auditor, Supervisor |
-
-Set at minimum `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` before starting the server. For a fully local setup with no API keys, run [Ollama](https://ollama.com) and set `OLLAMA_MODEL` - then pass `--provider ollama` (or `scan_provider="ollama"`) explicitly on every command, as Ollama is not auto-detected from environment variables.
-
----
-
-## Installation
-
-```bash
-git clone <YOUR_REPO_URL>
-cd mcpsafetywarden
-pip install -r requirements.txt
-```
-
-Verify the install:
-
-```bash
-python server.py --help 2>&1 || echo "Server starts on run, not --help"
-python cli.py --help
-```
-
-The SQLite database is created automatically on first run in the platform user data directory (e.g. `~/.local/share/mcpsafetywarden/` on Linux, `~/Library/Application Support/mcpsafetywarden/` on macOS, `%APPDATA%\mcpsafetywarden\` on Windows). Set `MCP_DB_PATH` to override the location.
-
-**Optional: at-rest encryption for stored credentials**
-
-The wrapper stores server env vars and HTTP headers in the database. To encrypt them at rest:
-
-```bash
-pip install cryptography
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
-
-Set the printed key as `MCP_DB_ENCRYPTION_KEY` before starting the server. Keep this key safe; losing it makes stored credentials unrecoverable.
-
----
-
-## Configuration
-
-All configuration is via environment variables. No config file is required.
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `MCP_TRANSPORT` | `stdio` | Transport mode: `stdio`, `sse`, or `streamable_http` |
-| `MCP_HOST` | `127.0.0.1` | Bind address for HTTP transports |
-| `MCP_PORT` | `8000` | Bind port for HTTP transports |
-| `MCP_AUTH_TOKEN` | (unset) | Bearer token for HTTP transport auth. Unset means no auth (log warning is emitted). |
-| `MCP_DB_ENCRYPTION_KEY` | (unset) | Fernet key to encrypt `env_json` and `headers_json` at rest |
-| `ANTHROPIC_API_KEY` | (unset) | Enables Anthropic as LLM provider for classification and scanning |
-| `OPENAI_API_KEY` | (unset) | Enables OpenAI as LLM provider |
-| `GEMINI_API_KEY` | (unset) | Enables Gemini as LLM provider |
-| `GOOGLE_API_KEY` | (unset) | Legacy alias for `GEMINI_API_KEY` |
-| `OLLAMA_MODEL` | (unset) | Model name for Ollama provider (e.g. `llama3.1`, `mistral`) |
-| `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama API base URL (OpenAI-compatible) |
-| `SNYK_TOKEN` | (unset) | Enables Snyk E001 prompt-injection detection |
-| `MCP_SCANNER_API_KEY` | (unset) | Cisco AI Defense API key for cloud ML engine |
-| `MCP_SCANNER_LLM_API_KEY` | (unset) | LLM key for Cisco internal AST analysis (falls back to `OPENAI_API_KEY`) |
-| `MCP_DB_PATH` | (unset) | Override the SQLite database file path |
-
-**Example `.env` for local development:**
-
-```bash
-MCP_TRANSPORT=stdio
-ANTHROPIC_API_KEY=sk-ant-...
-MCP_DB_ENCRYPTION_KEY=<generated_fernet_key>
-```
-
-**Security note:** Never commit API keys or the encryption key to version control. Pass them via environment variables or a secrets manager. The wrapper strips all keys from the environment before spawning stdio child processes.
-
----
-
-## Running the MCP Server
-
-**stdio (default):**
-
-```bash
-python server.py
-```
-
-The server reads from stdin and writes to stdout. This is the mode used by Claude Desktop and other MCP clients that manage the subprocess.
-
-**HTTP (streamable_http):**
-
-```bash
-MCP_TRANSPORT=streamable_http MCP_PORT=8000 python server.py
-```
-
-Set `MCP_AUTH_TOKEN` to require bearer auth on all requests:
-
-```bash
-MCP_TRANSPORT=streamable_http MCP_AUTH_TOKEN=mysecrettoken python server.py
-```
-
-**SSE:**
-
-```bash
-MCP_TRANSPORT=sse MCP_PORT=8000 python server.py
-```
-
----
-
-## Using the CLI
-
-The CLI wraps every MCP tool as a subcommand. It imports server functions directly so no running server process is needed.
-
-```bash
-python cli.py --help
-python cli.py <command> --help
-```
-
-**Typical onboarding workflow:**
+### Typical workflow
 
 ```bash
 # Register, inspect, and scan a local stdio server in one step
-python cli.py onboard my-server \
+mcpsafetywarden onboard my-server \
   --transport stdio \
   --command python \
   --args '["my_mcp_server.py"]' \
   --scan-provider anthropic
 
 # Check what tools were discovered
-python cli.py list my-server
+mcpsafetywarden list my-server
 
 # Execute a tool safely
-python cli.py call my-server read_file --args '{"path": "/tmp/data.txt"}'
+mcpsafetywarden call my-server read_file --args '{"path": "/tmp/data.txt"}'
 
 # Execute a risky tool (interactive menu appears if blocked)
-python cli.py call my-server delete_file --args '{"path": "/tmp/old.txt"}'
+mcpsafetywarden call my-server delete_file --args '{"path": "/tmp/old.txt"}'
 ```
 
 **`call` interactive flow when a tool is blocked:**
@@ -389,18 +357,10 @@ Pick [B/b/C/c]: B
 To bypass the menu in scripts, pass `--approved`:
 
 ```bash
-python cli.py call my-server delete_file \
+mcpsafetywarden call my-server delete_file \
   --args '{"path": "/tmp/old.txt"}' \
   --approved
 ```
-
----
-
-## CLI Reference
-
-### Global flags
-
-All commands support `--json` for machine-readable output. Commands with confirmation prompts support `--yes` / `-y` to skip them.
 
 ### Commands
 
@@ -408,17 +368,17 @@ All commands support `--json` for machine-readable output. Commands with confirm
 List all registered servers. Pass `server_id` to list tools on a specific server.
 
 ```bash
-python cli.py list
-python cli.py list my-server
-python cli.py list my-server --json
+mcpsafetywarden list
+mcpsafetywarden list my-server
+mcpsafetywarden list my-server --json
 ```
 
 **`onboard <server_id>`**
 Register + inspect + security scan in one call. Prompts for authorization before scanning unless `--yes` is passed.
 
 ```bash
-python cli.py onboard my-server --transport stdio --command python --args '["server.py"]'
-python cli.py onboard my-server --transport streamable_http --url https://mcp.example.com/mcp \
+mcpsafetywarden onboard my-server --transport stdio --command python --args '["server.py"]'
+mcpsafetywarden onboard my-server --transport streamable_http --url https://mcp.example.com/mcp \
   --headers '{"Authorization": "Bearer TOKEN"}' \
   --scan-provider anthropic --scan-model claude-opus-4-7 --scan-api-key sk-ant-... --yes
 ```
@@ -427,17 +387,17 @@ python cli.py onboard my-server --transport streamable_http --url https://mcp.ex
 Register only, without scanning.
 
 ```bash
-python cli.py register my-server --transport stdio --command python --args '["server.py"]'
-python cli.py register my-server --transport stdio --command python --no-inspect
-python cli.py register my-server --transport stdio --command python --args '["server.py"]' --provider anthropic
+mcpsafetywarden register my-server --transport stdio --command python --args '["server.py"]'
+mcpsafetywarden register my-server --transport stdio --command python --no-inspect
+mcpsafetywarden register my-server --transport stdio --command python --args '["server.py"]' --provider anthropic
 ```
 
 **`inspect <server_id>`**
 Reconnect to a registered server, refresh tools, re-classify.
 
 ```bash
-python cli.py inspect my-server --provider anthropic
-python cli.py inspect my-server --provider anthropic --model claude-opus-4-7 --api-key sk-ant-...
+mcpsafetywarden inspect my-server --provider anthropic
+mcpsafetywarden inspect my-server --provider anthropic --model claude-opus-4-7 --api-key sk-ant-...
 ```
 
 **`scan <server_id>`**
@@ -452,21 +412,21 @@ For Ollama set `OLLAMA_MODEL` before running. Web research (DuckDuckGo/HackerNew
 If a **Kali MCP** server is registered, nmap and traceroute results are shown after the findings table and included in `--json` output under `network_scan`. If a **Burp Suite MCP** server is registered, the number of HTTP-layer findings Burp contributed is shown as a summary line; use `--json` for the full evidence.
 
 ```bash
-python cli.py scan my-server --provider anthropic
-python cli.py scan my-server --provider anthropic --model claude-opus-4-7 --api-key sk-ant-...
-python cli.py scan my-server --provider ollama              # local model, no API key
-python cli.py scan my-server --provider cisco
-python cli.py scan my-server --provider anthropic --web-research --destructive --timeout 600 --yes
+mcpsafetywarden scan my-server --provider anthropic
+mcpsafetywarden scan my-server --provider anthropic --model claude-opus-4-7 --api-key sk-ant-...
+mcpsafetywarden scan my-server --provider ollama              # local model, no API key
+mcpsafetywarden scan my-server --provider cisco
+mcpsafetywarden scan my-server --provider anthropic --web-research --destructive --timeout 600 --yes
 ```
 
 **`scan-all`**
 Run the full 5-stage mcpsafety+ pipeline against every registered server (or a comma-separated subset via `--servers`). Results are stored per server and displayed as a combined risk table. Only mcpsafety+ providers are supported (not `cisco` or `snyk`). Web research is skipped by default; pass `--web-research` to enable.
 
 ```bash
-python cli.py scan-all --provider anthropic
-python cli.py scan-all --provider anthropic --model claude-opus-4-7 --api-key sk-ant-...
-python cli.py scan-all --provider ollama --servers my-server,other-server --yes
-python cli.py scan-all --provider openai --web-research --timeout 600 --json
+mcpsafetywarden scan-all --provider anthropic
+mcpsafetywarden scan-all --provider anthropic --model claude-opus-4-7 --api-key sk-ant-...
+mcpsafetywarden scan-all --provider ollama --servers my-server,other-server --yes
+mcpsafetywarden scan-all --provider openai --web-research --timeout 600 --json
 ```
 
 **`call <server_id> <tool_name>`**
@@ -475,11 +435,9 @@ Execute a tool through the risk gate. Interactive menu appears if the tool is bl
 Every argument value is scanned for 20+ attack categories (SSRF, SQL/NoSQL/LDAP/XPath injection, command injection, path traversal, XXE, prompt injection, deserialization payloads, base64-encoded variants, and more) before the call is forwarded. If an LLM key is set, a second-pass LLM verification runs on flagged args to clear false positives. Without an LLM key, the CLI prompts you to confirm before proceeding.
 
 ```bash
-python cli.py call my-server search_web --args '{"query": "site:example.com"}'
-python cli.py call my-server delete_file --args '{"path": "/tmp/x"}' --approved
-
-# Skip arg safety scan - only use when you have verified the args are safe
-python cli.py call my-server run_query --args '{"sql": "SELECT id FROM users"}' --args-scan-override
+mcpsafetywarden call my-server search_web --args '{"query": "site:example.com"}'
+mcpsafetywarden call my-server delete_file --args '{"path": "/tmp/x"}' --approved
+mcpsafetywarden call my-server run_query --args '{"sql": "SELECT id FROM users"}' --args-scan-override
 ```
 
 | Flag | Effect |
@@ -492,37 +450,37 @@ python cli.py call my-server run_query --args '{"sql": "SELECT id FROM users"}' 
 Assess risk without executing.
 
 ```bash
-python cli.py preflight my-server delete_file
-python cli.py preflight my-server delete_file --provider anthropic --model claude-opus-4-7 --api-key sk-ant-...
+mcpsafetywarden preflight my-server delete_file
+mcpsafetywarden preflight my-server delete_file --provider anthropic --model claude-opus-4-7 --api-key sk-ant-...
 ```
 
 **`profile <server_id> <tool_name>`**
 Print the full behavior profile.
 
 ```bash
-python cli.py profile my-server read_file --json
+mcpsafetywarden profile my-server read_file --json
 ```
 
 **`retry-policy <server_id> <tool_name>`**
 Print retry and timeout recommendations.
 
 ```bash
-python cli.py retry-policy my-server call_api
-python cli.py retry-policy my-server call_api --provider anthropic --model claude-opus-4-7 --api-key sk-ant-...
+mcpsafetywarden retry-policy my-server call_api
+mcpsafetywarden retry-policy my-server call_api --provider anthropic --model claude-opus-4-7 --api-key sk-ant-...
 ```
 
 **`alternatives <server_id> <tool_name>`**
 List safer alternatives to a tool.
 
 ```bash
-python cli.py alternatives my-server delete_file --provider anthropic
+mcpsafetywarden alternatives my-server delete_file --provider anthropic
 ```
 
 **`replay <server_id> <tool_name>`**
 Run the tool twice and compare outputs. Prompts for confirmation. If a **Burp Suite MCP** server is registered, Burp proxy traffic captured during both calls is appended to the result - useful for spotting network-level differences even when output text is identical.
 
 ```bash
-python cli.py replay my-server get_status --args '{"id": "123"}' --yes
+mcpsafetywarden replay my-server get_status --args '{"id": "123"}' --yes
 ```
 
 **`policy <server_id> <tool_name>`**
@@ -531,31 +489,31 @@ Read or set a permanent execution policy. Without `--set`, prints the current po
 By default no policy is set and `safe_tool_call` decides at runtime based on the behavior profile: low or medium-low risk tools run immediately, medium/high-risk tools trigger the approval gate. Setting a policy overrides that completely - `allow` bypasses the risk gate (argument scanning still runs unless `--args-scan-override` is also passed), `block` rejects unconditionally.
 
 ```bash
-python cli.py policy my-server read_file             # read current policy
-python cli.py policy my-server read_file --set allow  # always execute without preflight
-python cli.py policy my-server drop_table --set block # never execute
-python cli.py policy my-server read_file --set clear  # remove policy, resume normal flow
+mcpsafetywarden policy my-server read_file             # read current policy
+mcpsafetywarden policy my-server read_file --set allow  # always execute without preflight
+mcpsafetywarden policy my-server drop_table --set block # never execute
+mcpsafetywarden policy my-server read_file --set clear  # remove policy, resume normal flow
 ```
 
 **`history <server_id> <tool_name>`**
 Show recent execution history.
 
 ```bash
-python cli.py history my-server delete_file --limit 50
+mcpsafetywarden history my-server delete_file --limit 50
 ```
 
 **`ping <server_id>`**
 Check if a server is reachable. If a **Kali MCP** server is registered, also runs `quick_scan` and `traceroute` against the target host and displays the output in labeled panels.
 
 ```bash
-python cli.py ping my-server
+mcpsafetywarden ping my-server
 ```
 
 **`get-scan <server_id>`**
 Print the latest stored security scan report.
 
 ```bash
-python cli.py get-scan my-server --json
+mcpsafetywarden get-scan my-server --json
 ```
 
 **Exit codes:**
@@ -574,8 +532,8 @@ Add the wrapper to `claude_desktop_config.json`:
 {
   "mcpServers": {
     "mcpsafetywarden": {
-      "command": "python",
-      "args": ["/absolute/path/to/mcpsafetywarden/server.py"],
+      "command": "mcpsafetywarden-server",
+      "args": [],
       "env": {
         "ANTHROPIC_API_KEY": "sk-ant-...",
         "MCP_DB_ENCRYPTION_KEY": "<generated_fernet_key>"
@@ -601,11 +559,11 @@ Add the wrapper to `claude_desktop_config.json`:
 The wrapper and the servers it proxies are registered separately in Claude Desktop. Claude sees all of them - but you route calls through `mcpsafetywarden` (using `safe_tool_call`, `preflight_tool_call`, etc.) instead of calling `filesystem` or `github` directly. First register each server with the wrapper:
 
 ```bash
-python cli.py register filesystem --transport stdio \
+mcpsafetywarden register filesystem --transport stdio \
   --command npx \
   --args '["-y", "@modelcontextprotocol/server-filesystem", "/Users/yourname/Documents"]'
 
-python cli.py register github --transport stdio \
+mcpsafetywarden register github --transport stdio \
   --command npx \
   --args '["-y", "@modelcontextprotocol/server-github"]' \
   --env '{"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..."}'
@@ -623,8 +581,8 @@ python cli.py register github --transport stdio \
 > {
 >   "mcpServers": {
 >     "mcpsafetywarden": {
->       "command": "python",
->       "args": ["/absolute/path/to/mcpsafetywarden/server.py"],
+>       "command": "mcpsafetywarden-server",
+>       "args": [],
 >       "env": {
 >         "ANTHROPIC_API_KEY": "sk-ant-..."
 >       }
@@ -636,12 +594,12 @@ python cli.py register github --transport stdio \
 > **Register your servers once via CLI before starting Claude Desktop:**
 >
 > ```bash
-> python cli.py register github --transport stdio \
+> mcpsafetywarden register github --transport stdio \
 >   --command npx \
 >   --args '["-y", "@modelcontextprotocol/server-github"]' \
 >   --env '{"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..."}'
 >
-> python cli.py register slack --transport stdio \
+> mcpsafetywarden register slack --transport stdio \
 >   --command npx \
 >   --args '["-y", "@modelcontextprotocol/server-slack"]' \
 >   --env '{"SLACK_BOT_TOKEN": "xoxb-..."}'
@@ -653,7 +611,7 @@ python cli.py register github --transport stdio \
 
 | Field | Required | Notes |
 |---|---|---|
-| `args` | Yes | Absolute path to `server.py`. Relative paths fail when Claude Desktop launches from a different working directory. |
+| `command` | Yes | `mcpsafetywarden-server` after pip install. |
 | `ANTHROPIC_API_KEY` | Strongly recommended | Enables LLM classification, deep injection scanning, risk gate alternatives, and the full mcpsafety+ pentest pipeline. Use `OPENAI_API_KEY` or `GEMINI_API_KEY` instead if preferred. Without any key the wrapper operates in rule-based-only mode - see [Prerequisites](#prerequisites). |
 | `MCP_DB_ENCRYPTION_KEY` | Recommended | Encrypts stored server credentials (env vars, headers) at rest. Generate with: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `MCP_TRANSPORT` | No | Defaults to `stdio`. Leave as-is for Claude Desktop. |
@@ -664,7 +622,7 @@ Restart Claude Desktop. All 17 wrapper tools appear in Claude's tool list.
 ### Connecting with an HTTP client
 
 ```bash
-MCP_TRANSPORT=streamable_http MCP_AUTH_TOKEN=mytoken python server.py
+MCP_TRANSPORT=streamable_http MCP_AUTH_TOKEN=mytoken mcpsafetywarden-server
 ```
 
 Configure your MCP client to connect to `http://127.0.0.1:8000/mcp` with header `Authorization: Bearer mytoken`.
@@ -697,16 +655,23 @@ Configure your MCP client to connect to `http://127.0.0.1:8000/mcp` with header 
 
 ```
 mcpsafetywarden/
-├── server.py               # FastMCP server, all MCP tools, rate limiting, bearer auth
-├── cli.py                  # CLI (typer + rich), imports server.py functions directly
-├── client_manager.py       # Connects to wrapped servers, injection scanning, telemetry
-├── database.py             # SQLite persistence (servers, tools, runs, profiles, scans, policies)
-├── classifier.py           # Static rule-based + LLM tool classification
-├── profiler.py             # Builds behavior profiles from run history
-├── scanner.py              # LLM, Cisco AI Defense, Snyk scan orchestration
-├── mcpsafety_scanner.py    # Five-stage pentest pipeline (Recon, Planner, Hacker, Auditor, Supervisor)
-├── security_utils.py       # Text normalisation, redaction, credential detection
-└── requirements.txt
+├── mcpsafetywarden/
+│   ├── server.py               # FastMCP server, all MCP tools, rate limiting, bearer auth
+│   ├── cli.py                  # CLI entry point (typer + rich)
+│   ├── client_manager.py       # Connects to wrapped servers, injection scanning, telemetry
+│   ├── database.py             # SQLite persistence (servers, tools, runs, profiles, scans, policies)
+│   ├── classifier.py           # Static rule-based + LLM tool classification
+│   ├── profiler.py             # Builds behavior profiles from run history
+│   ├── scanner.py              # LLM, Cisco AI Defense, Snyk scan orchestration
+│   ├── mcpsafety_scanner.py    # Five-stage pentest pipeline (Recon, Planner, Hacker, Auditor, Supervisor)
+│   └── security_utils.py       # Text normalisation, redaction, credential detection
+├── tests/
+│   └── test_suite.py
+├── docs/
+│   └── COMPARISON.md
+├── assets/
+│   └── logo.png
+└── pyproject.toml
 ```
 
 The database (`behavior_profiles.db`) is stored in the platform user data directory, not in the project root. Override with `MCP_DB_PATH`.
@@ -715,31 +680,31 @@ The database (`behavior_profiles.db`) is stored in the platform user data direct
 
 ## Development
 
-**Install dependencies:**
+**Install in editable mode with all extras:**
 
 ```bash
-pip install -r requirements.txt
+pip install -e ".[all]"
 ```
 
 **Run the server in stdio mode and observe logs:**
 
 ```bash
-python server.py 2>server.log
+mcpsafetywarden-server 2>server.log
 ```
 
 **Run the CLI against a test server:**
 
 ```bash
-python cli.py onboard test-server --transport stdio --command python --args '["<YOUR_TEST_SERVER>.py"]'
-python cli.py list test-server
-python cli.py call test-server <tool_name>
+mcpsafetywarden onboard test-server --transport stdio --command python --args '["<YOUR_TEST_SERVER>.py"]'
+mcpsafetywarden list test-server
+mcpsafetywarden call test-server <tool_name>
 ```
 
 **Adding a new MCP tool:**
 
-1. Define an async (or sync) function in `server.py` decorated with `@mcp.tool()`.
+1. Define an async (or sync) function in `mcpsafetywarden/server.py` decorated with `@mcp.tool()`.
 2. Use `db.*` for persistence, `cm.call_tool_with_telemetry` for proxied execution.
-3. Add a corresponding CLI command in `cli.py` with `@app.command()`.
+3. Add a corresponding CLI command in `mcpsafetywarden/cli.py` with `@app.command()`.
 4. Follow the existing pattern: validate input, check rate limit if it is a management operation, return `json.dumps(...)`.
 
 **Logging:**
@@ -755,8 +720,8 @@ There is no automated test suite at this time. To validate behavior manually:
 **Verify tool classification:**
 
 ```bash
-python cli.py onboard test-server --transport stdio --command python --args '["<YOUR_MCP_SERVER>.py"]'
-python cli.py list test-server --json
+mcpsafetywarden onboard test-server --transport stdio --command python --args '["<YOUR_MCP_SERVER>.py"]'
+mcpsafetywarden list test-server --json
 ```
 
 Check that `effect_class` values match what you expect for each tool.
@@ -768,29 +733,57 @@ Call a tool that returns text content. Inject a test pattern such as `"Ignore al
 **Verify risk gating:**
 
 ```bash
-python cli.py preflight test-server <high_risk_tool>
-python cli.py call test-server <high_risk_tool>
+mcpsafetywarden preflight test-server <high_risk_tool>
+mcpsafetywarden call test-server <high_risk_tool>
 # Should block and show alternatives menu
-python cli.py call test-server <high_risk_tool> --approved
+mcpsafetywarden call test-server <high_risk_tool> --approved
 # Should execute
 ```
 
 **Verify policy enforcement:**
 
 ```bash
-python cli.py policy test-server <tool_name> --set block
-python cli.py call test-server <tool_name>
+mcpsafetywarden policy test-server <tool_name> --set block
+mcpsafetywarden call test-server <tool_name>
 # Should return policy_blocked immediately
-python cli.py policy test-server <tool_name> --set clear
+mcpsafetywarden policy test-server <tool_name> --set clear
 ```
 
 ---
 
 ## Deployment
 
+### Starting the server
+
+**stdio (default):**
+
+```bash
+mcpsafetywarden-server
+```
+
+The server reads from stdin and writes to stdout. This is the mode used by Claude Desktop and other MCP clients that manage the subprocess.
+
+**HTTP (streamable_http):**
+
+```bash
+MCP_TRANSPORT=streamable_http MCP_PORT=8000 mcpsafetywarden-server
+```
+
+Set `MCP_AUTH_TOKEN` to require bearer auth on all requests:
+
+```bash
+MCP_TRANSPORT=streamable_http MCP_AUTH_TOKEN=mysecrettoken mcpsafetywarden-server
+```
+
+**SSE:**
+
+```bash
+MCP_TRANSPORT=sse MCP_PORT=8000 mcpsafetywarden-server
+```
+
 ### Local (stdio with Claude Desktop)
 
-Set the absolute path in `claude_desktop_config.json` as shown in the MCP Integration section. No additional setup is needed.
+Set up `claude_desktop_config.json` as shown in the MCP Integration section. No additional setup is needed.
 
 ### Local HTTP server
 
@@ -800,7 +793,7 @@ MCP_HOST=127.0.0.1 \
 MCP_PORT=8000 \
 MCP_AUTH_TOKEN=<your_secret_token> \
 ANTHROPIC_API_KEY=<your_key> \
-python server.py
+mcpsafetywarden-server
 ```
 
 ### Container
@@ -811,12 +804,12 @@ A `Dockerfile` is not included. A minimal setup:
 FROM python:3.11-slim
 WORKDIR /app
 COPY . .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir .
 ENV MCP_TRANSPORT=streamable_http
 ENV MCP_HOST=0.0.0.0
 ENV MCP_PORT=8000
 EXPOSE 8000
-CMD ["python", "server.py"]
+CMD ["mcpsafetywarden-server"]
 ```
 
 Pass `MCP_AUTH_TOKEN`, `MCP_DB_ENCRYPTION_KEY`, and API keys as container environment variables. Do not bake them into the image.
@@ -834,13 +827,13 @@ Pass `MCP_AUTH_TOKEN`, `MCP_DB_ENCRYPTION_KEY`, and API keys as container enviro
 ## Troubleshooting
 
 **`Tool '<name>' not found on server '<id>'.`**
-Run `python cli.py inspect <server_id>` to refresh the tool list from the live server.
+Run `mcpsafetywarden inspect <server_id>` to refresh the tool list from the live server.
 
 **`Server '<id>' not registered.`**
-Run `python cli.py register` or `python cli.py onboard` first.
+Run `mcpsafetywarden register` or `mcpsafetywarden onboard` first.
 
 **`Rate limit exceeded.`**
-Management operations are limited to 10 calls per 60 seconds per server and 100 globally. Wait for the window to expire. For heavy automation, batch operations or increase limits in `server.py`.
+Management operations are limited to 10 calls per 60 seconds per server and 100 globally. Wait for the window to expire. For heavy automation, batch operations or increase limits in `mcpsafetywarden/server.py`.
 
 **`URL targets a private or restricted address.`**
 The SSRF filter blocked a private IP, localhost, or cloud metadata endpoint. This is intentional. If you are proxying a legitimate internal server over stdio instead, use the `stdio` transport.
@@ -925,4 +918,3 @@ Code standards:
 - Redis-backed rate limiting for multi-replica deployments.
 - Schema drift detection: alert when a wrapped tool's input or output schema changes between runs.
 - Web dashboard for server health, tool risk overview, and run history.
-- `mcp-wrapper` as an installable package with a proper entry point.
