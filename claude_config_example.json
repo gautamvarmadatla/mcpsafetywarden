@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "behavior-wrapper": {
+    "mcpsafetywarden": {
       "command": "python",
-      "args": ["D:/code/mcp-behavior-wrapper/server.py"],
+      "args": ["D:/code/mcpsafetywarden/server.py"],
       "env": {}
     }
   }

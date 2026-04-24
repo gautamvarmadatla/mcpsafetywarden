@@ -110,7 +110,7 @@ _MAX_HEADER_PAIRS  = 20
 db.init_db()
 
 mcp = FastMCP(
-    "mcp-behavior-wrapper",
+    "mcpsafetywarden",
     instructions=(
         "This server wraps other MCP servers and provides behavioral analysis of their tools. "
         "Typical flow: onboard_server -> safe_tool_call. "

@@ -1,4 +1,4 @@
-# mcp-behavior-wrapper
+# mcpsafetywarden
 
 A proxy server that wraps any MCP server and adds behavioral profiling, security scanning, risk gating, and safe execution to its tools.
 
@@ -189,7 +189,7 @@ Set at minimum `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` before
 
 ```bash
 git clone <YOUR_REPO_URL>
-cd mcp-behavior-wrapper
+cd mcpsafetywarden
 pip install -r requirements.txt
 ```
 
@@ -511,9 +511,9 @@ Add the wrapper to `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "mcp-behavior-wrapper": {
+    "mcpsafetywarden": {
       "command": "python",
-      "args": ["/absolute/path/to/mcp-behavior-wrapper/server.py"],
+      "args": ["/absolute/path/to/mcpsafetywarden/server.py"],
       "env": {
         "ANTHROPIC_API_KEY": "sk-ant-...",
         "MCP_DB_ENCRYPTION_KEY": "<generated_fernet_key>"
@@ -536,7 +536,7 @@ Add the wrapper to `claude_desktop_config.json`:
 }
 ```
 
-The wrapper and the servers it proxies are registered separately in Claude Desktop. Claude sees all of them - but you route calls through `mcp-behavior-wrapper` (using `safe_tool_call`, `preflight_tool_call`, etc.) instead of calling `filesystem` or `github` directly. First register each server with the wrapper:
+The wrapper and the servers it proxies are registered separately in Claude Desktop. Claude sees all of them - but you route calls through `mcpsafetywarden` (using `safe_tool_call`, `preflight_tool_call`, etc.) instead of calling `filesystem` or `github` directly. First register each server with the wrapper:
 
 ```bash
 python cli.py register filesystem --transport stdio \
@@ -560,9 +560,9 @@ python cli.py register github --transport stdio \
 > ```json
 > {
 >   "mcpServers": {
->     "mcp-behavior-wrapper": {
+>     "mcpsafetywarden": {
 >       "command": "python",
->       "args": ["/absolute/path/to/mcp-behavior-wrapper/server.py"],
+>       "args": ["/absolute/path/to/mcpsafetywarden/server.py"],
 >       "env": {
 >         "ANTHROPIC_API_KEY": "sk-ant-..."
 >       }
@@ -634,7 +634,7 @@ Configure your MCP client to connect to `http://127.0.0.1:8000/mcp` with header 
 ## Project Structure
 
 ```
-mcp-behavior-wrapper/
+mcpsafetywarden/
 ├── server.py               # FastMCP server, all MCP tools, rate limiting, bearer auth
 ├── cli.py                  # CLI (typer + rich), imports server.py functions directly
 ├── client_manager.py       # Connects to wrapped servers, injection scanning, telemetry
