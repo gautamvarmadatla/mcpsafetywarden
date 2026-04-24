@@ -2338,7 +2338,7 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
                 {"content": raw_req, "targetHostname": host, "targetPort": port, "usesHttps": uses_https},
                 timeout=20.0,
             )
-            if out and not out.startswith("[AUX"):
+            if out and not out.startswith("[AUX") and "denied by Burp Suite" not in out:
                 findings.append({
                     "tool": "send_http1_request",
                     "finding": f"HTTP probe response: {probe_name}",
@@ -2375,15 +2375,18 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
             if _aux_tool_exists(sid, "get_collaborator_interactions"):
                 interactions = await _call_aux_tool(burp, "get_collaborator_interactions", {}, timeout=15.0)
                 if interactions and not interactions.startswith("[AUX") and "No interactions detected" not in interactions:
-                    try:
-                        _parsed = json.loads(interactions)
-                        _has_callbacks = (
-                            bool(_parsed) if isinstance(_parsed, list)
-                            else any(_parsed.get(k) for k in ("results", "interactions", "data"))
-                            if isinstance(_parsed, dict) else False
-                        )
-                    except (json.JSONDecodeError, ValueError):
-                        _has_callbacks = False
+                    _has_callbacks = False
+                    for _chunk in interactions.split("\n\n"):
+                        _chunk = _chunk.strip()
+                        if not _chunk:
+                            continue
+                        try:
+                            _item = json.loads(_chunk)
+                            if isinstance(_item, dict) and _item.get("type"):
+                                _has_callbacks = True
+                                break
+                        except (json.JSONDecodeError, ValueError):
+                            pass
                     if _has_callbacks:
                         findings.append({
                             "tool": "get_collaborator_interactions",
@@ -2408,7 +2411,7 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
                         findings.append({
                             "tool": "get_scanner_issues",
                             "finding": issue.get("name") or issue.get("issueName") or "Scanner issue",
-                            "severity": str(issue.get("severity", "MEDIUM")).upper(),
+                            "severity": {"INFORMATION": "LOW", "FALSE_POSITIVE": "LOW"}.get(str(issue.get("severity", "MEDIUM")).upper(), str(issue.get("severity", "MEDIUM")).upper()),
                             "evidence": (issue.get("detail") or issue.get("issueDetail") or str(issue))[:300],
                             "source": "burp_scanner",
                         })

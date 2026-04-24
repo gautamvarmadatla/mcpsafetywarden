@@ -72,6 +72,8 @@ mcpsafetywarden onboard burp-mcp \
   --url http://127.0.0.1:9876/sse
 ```
 
+Note: Burp prompts for approval before sending each HTTP request to a new target. Pre-approve the target host in Burp's MCP tab under "Auto-approve targets" (e.g. `mcp.example.com`) to allow automated probes without a dialog. Without pre-approval, HTTP probes will timeout and be silently skipped.
+
 ### Snyk (`snyk-agent-scan`)
 
 Python, Apache 2.0, requires a free Snyk account token. Connects to the target MCP server, lists its tools, and runs static analysis on the tool metadata (names, descriptions, schemas). It does **not** call any tools - it only reads what the server advertises.
