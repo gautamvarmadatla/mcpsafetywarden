@@ -2697,11 +2697,11 @@ async def run_mcpsafety_scan(
 
     try: report = await asyncio.wait_for(_pipeline(), timeout=scan_timeout_s)
     except asyncio.TimeoutError:
-            report = {
+        report = {
             "overall_risk_level": "UNKNOWN",
             "summary": f"Scan timed out after {scan_timeout_s}s.",
             "tool_findings": [],
-            "server_level_risks": [f"Scan did not complete - exceeded {scan_timeout_s}s timeout."],
+            "server_level_risks": [{"risk": f"Scan did not complete - exceeded {scan_timeout_s}s timeout.", "risk_level": "UNKNOWN", "tools_involved": [], "basis": "timeout"}],
             "server_id": server_id,
         }
 
