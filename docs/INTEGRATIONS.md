@@ -37,34 +37,44 @@ Note: `vulnerability_scan` runs nmap vuln scripts which can take 60-90 seconds p
 
 ### Burp Suite MCP (`PortSwigger/mcp-server`)
 
-Kotlin, GPL-3.0, no auth, runs as an SSE server on port 9876. Community edition tools run always; Pro-only tools (Collaborator, scanner) are tried and silently skipped on failure.
+- **Extension repo**: [github.com/PortSwigger/mcp-server](https://github.com/PortSwigger/mcp-server)
+- **Burp Suite download**: [portswigger.net/burp/releases](https://portswigger.net/burp/releases) (Community or Professional)
+- **BApp Store**: search "MCP Server" inside Burp (Extensions → BApp Store) — no build needed
+- License: GPL-3.0, no auth, runs as an SSE server on port 9876
+
+Community edition tools run always; Pro-only tools (Collaborator, scanner) are tried and silently skipped on failure.
 
 **What it contributes:**
 
 | Pipeline stage / tool | Burp tools called | Edition | What it adds |
 |---|---|---|---|
-| Hacker (after LLM probing) | `SendHttp1Request` x3 | Community | Raw HTTP probes: malformed JSON body, missing Content-Type, oversized method field |
-| Hacker | `GenerateCollaboratorPayload`, `GetCollaboratorInteractions` | Pro | Out-of-band DNS/HTTP callbacks - detects blind SSRF and blind injection |
-| Hacker | `GetScannerIssues` | Pro | Automated active scanner findings against the MCP endpoint |
-| Auditor | `GetProxyHttpHistoryRegex` | Community | Raw HTTP traffic evidence for every finding the Auditor validates |
-| `run_replay_test` | `GetProxyHttpHistoryRegex` | Community | HTTP traffic captured during both tool calls, appended to the replay result |
+| Hacker (after LLM probing) | `send_http1_request` x3 | Community | Raw HTTP probes: malformed JSON body, missing Content-Type, oversized method field |
+| Hacker | `generate_collaborator_payload`, `get_collaborator_interactions` | Pro | Out-of-band DNS/HTTP callbacks - detects blind SSRF and blind injection |
+| Hacker | `get_scanner_issues` | Pro | Automated active scanner findings against the MCP endpoint |
+| Auditor | `get_proxy_http_history_regex` | Community | Raw HTTP traffic evidence for every finding the Auditor validates |
+| `run_replay_test` | `get_proxy_http_history_regex` | Community | HTTP traffic captured during both tool calls, appended to the replay result |
 
 **Setup:**
 
 ```bash
 # 1. Install Burp Suite (Community or Professional)
-#    Download from https://portswigger.net/burp/releases
+#    https://portswigger.net/burp/releases
+#    Requires Java 21+ (https://adoptium.net or https://oracle.com/java/technologies/downloads/#java21-windows)
 
-# 2. Build the MCP extension JAR
+# 2a. Install via BApp Store (easiest - no build required)
+#     Burp -> Extensions -> BApp Store -> search "MCP Server" -> Install
+
+# 2b. OR build from source
 git clone https://github.com/PortSwigger/mcp-server.git
 cd mcp-server
-./gradlew embedProxyJar
+./gradlew embedProxyJar          # Linux/macOS
+gradlew.bat embedProxyJar        # Windows
 # produces build/libs/burp-mcp-all.jar
+# Load: Burp -> Extensions -> Add -> Java -> select burp-mcp-all.jar
 
-# 3. Load into Burp
-#    Burp -> Extensions -> Add -> Java type -> select burp-mcp-all.jar
-#    Then go to the "MCP" tab in Burp and enable the server.
-#    SSE endpoint starts at http://127.0.0.1:9876/sse
+# 3. Enable in Burp
+#    Go to the MCP tab -> set Enabled toggle ON
+#    Server starts at http://127.0.0.1:9876
 
 # 4. Onboard with the wrapper (server_id must contain "burp")
 mcpsafetywarden onboard burp-mcp \
@@ -73,8 +83,8 @@ mcpsafetywarden onboard burp-mcp \
 ```
 
 Note: Burp requires approval for two things by default — both must be configured for fully automated scanning:
-- **HTTP probes**: Pre-approve the target host under "Auto-approve targets" (e.g. `mcp.example.com`). Without this, `send_http1_request` probes show a dialog and will timeout.
-- **Proxy history access**: Enable "Always Allow HTTP History" in Burp's MCP tab. Without this, `get_proxy_http_history_regex` (used for audit evidence) shows a dialog and returns empty.
+- **HTTP probes**: Pre-approve the target host under "Auto-Approved HTTP Targets" in the MCP tab (e.g. `mcp.example.com`). Without this, `send_http1_request` probes show a dialog and will timeout.
+- **Proxy history access**: Check "Always allow HTTP history access" in the MCP tab. Without this, `get_proxy_http_history_regex` (used for audit evidence) shows a dialog and returns empty.
 
 ### Snyk (`snyk-agent-scan`)
 
