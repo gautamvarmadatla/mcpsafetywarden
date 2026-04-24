@@ -280,9 +280,11 @@ Examples:
     if headers and len(headers) > _MAX_HEADER_PAIRS:
         return json.dumps({"error": f"headers dict exceeds maximum of {_MAX_HEADER_PAIRS} entries."})
 
-    if url and SSRF_RE.search(url):
+    _parsed_host = url and __import__("urllib.parse", fromlist=["urlparse"]).urlparse(url).hostname or ""
+    _is_loopback = _parsed_host in ("localhost", "127.0.0.1") or _parsed_host.startswith("127.")
+    if url and not _is_loopback and SSRF_RE.search(url):
         return json.dumps({"error": "URL targets a private or restricted address and cannot be registered."})
-    if url and await _is_ssrf_hostname(url):
+    if url and not _is_loopback and await _is_ssrf_hostname(url):
         return json.dumps({"error": "URL targets a private or restricted address and cannot be registered."})
 
     if transport == "stdio" and command:
