@@ -69,7 +69,7 @@ cd mcp-server
 # 4. Onboard with the wrapper (server_id must contain "burp")
 mcpsafetywarden onboard burp-mcp \
   --transport sse \
-  --url http://127.0.0.1:9876/sse
+  --url http://127.0.0.1:9876
 ```
 
 Note: Burp requires approval for two things by default — both must be configured for fully automated scanning:
