@@ -340,7 +340,7 @@ async def _llm_scan_for_injection(
         return None
 
 
-async def _scan_for_injection(
+async def scan_for_injection(
     content: list,
     llm_provider: Optional[str] = None,
     llm_model: Optional[str] = None,
@@ -409,7 +409,7 @@ def _check_rate_limit(tool_id: str) -> Optional[str]:
 
 
 @asynccontextmanager
-async def _open_streams(server: Dict[str, Any]) -> AsyncGenerator[Tuple[Any, Any], None]:
+async def open_streams(server: Dict[str, Any]) -> AsyncGenerator[Tuple[Any, Any], None]:
     """
     - stdio          -> subprocess
     - sse            -> legacy SSE (2-tuple)
@@ -483,7 +483,7 @@ _WRAPPER_SECRET_KEYS = frozenset({
 
 
 async def _list_tools_raw(server: Dict[str, Any]) -> List[Dict[str, Any]]:
-    async with _open_streams(server) as (read, write):
+    async with open_streams(server) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.list_tools()
@@ -617,7 +617,7 @@ async def call_tool_with_telemetry(
     )
 
     async def _do_call():
-        async with _open_streams(server) as (read, write):
+        async with open_streams(server) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 return await session.call_tool(tool_name, args)
@@ -649,7 +649,7 @@ async def call_tool_with_telemetry(
         latency_ms = (time.monotonic() - start) * 1000
         error_msg  = _redact_text(str(exc))[0]
 
-    injection_warning = await _scan_for_injection(content) if content else None
+    injection_warning = await scan_for_injection(content) if content else None
 
     run_id = None
     try:

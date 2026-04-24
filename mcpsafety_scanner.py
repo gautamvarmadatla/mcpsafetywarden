@@ -43,7 +43,7 @@ import urllib.parse as _urlparse
 from typing import Any, Dict, List, Optional, Tuple
 
 import database as db
-from client_manager import _open_streams, _scan_for_injection
+from client_manager import open_streams as _open_streams, scan_for_injection as _scan_for_injection
 from scanner import call_llm as _call_llm_scanner
 from security_utils import normalise_arg as _normalise_probe_str
 from security_utils import redact_args as _redact_probe_args
