@@ -39,11 +39,17 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app: ASGIApp, token: str) -> None:
         super().__init__(app)
-        self._token = token
+        # Store as bytes so hmac.compare_digest always operates on equal-type operands.
+        self._token_bytes = token.encode()
 
     async def dispatch(self, request, call_next):
         auth = request.headers.get("Authorization", "")
-        if not auth.startswith("Bearer ") or not hmac.compare_digest(auth[7:], self._token):
+        # Pad candidate to token length before compare_digest so timing does not
+        # reveal whether lengths differ (compare_digest short-circuits on length mismatch).
+        candidate = auth[7:].encode() if auth.startswith("Bearer ") else b""
+        expected = self._token_bytes
+        padded = candidate.ljust(len(expected), b"\x00")[:len(expected)]
+        if not hmac.compare_digest(padded, expected) or len(candidate) != len(expected):
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
         return await call_next(request)
 
