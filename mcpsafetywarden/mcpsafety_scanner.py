@@ -2353,10 +2353,12 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
         collab_out = await _call_aux_tool(burp, "generate_collaborator_payload", {"customData": "mcp-scan"}, timeout=15.0)
         if collab_out and not collab_out.startswith("[AUX"):
             collab_host = None
+            collab_payload_id = None
             for line in collab_out.splitlines():
-                if line.startswith("Payload:"):
+                if line.startswith("Payload:") and collab_host is None:
                     collab_host = line.split(":", 1)[1].strip()
-                    break
+                elif line.startswith("Payload ID:"):
+                    collab_payload_id = line.split(":", 1)[1].strip()
             if collab_host and _aux_tool_exists(sid, "send_http1_request"):
                 oob_body = json.dumps({
                     "jsonrpc": "2.0", "method": "tools/list",
@@ -2373,7 +2375,8 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
                 )
             await asyncio.sleep(5)
             if _aux_tool_exists(sid, "get_collaborator_interactions"):
-                interactions = await _call_aux_tool(burp, "get_collaborator_interactions", {}, timeout=15.0)
+                interact_args = {"payloadId": collab_payload_id} if collab_payload_id else {}
+                interactions = await _call_aux_tool(burp, "get_collaborator_interactions", interact_args, timeout=15.0)
                 if interactions and not interactions.startswith("[AUX") and "No interactions detected" not in interactions:
                     _has_callbacks = False
                     for _chunk in interactions.split("\n\n"):
@@ -2442,7 +2445,7 @@ async def burp_proxy_evidence(target_config: Dict[str, Any]) -> str:
         {"regex": host, "count": 50, "offset": 0},
         timeout=20.0,
     )
-    if not raw or raw.startswith("[AUX"):
+    if not raw or raw.startswith("[AUX") or "access denied by Burp Suite" in raw or "Reached end of items" == raw.strip():
         return ""
     return raw[:4096]
 

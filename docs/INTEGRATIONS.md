@@ -72,7 +72,9 @@ mcpsafetywarden onboard burp-mcp \
   --url http://127.0.0.1:9876/sse
 ```
 
-Note: Burp prompts for approval before sending each HTTP request to a new target. Pre-approve the target host in Burp's MCP tab under "Auto-approve targets" (e.g. `mcp.example.com`) to allow automated probes without a dialog. Without pre-approval, HTTP probes will timeout and be silently skipped.
+Note: Burp requires approval for two things by default — both must be configured for fully automated scanning:
+- **HTTP probes**: Pre-approve the target host under "Auto-approve targets" (e.g. `mcp.example.com`). Without this, `send_http1_request` probes show a dialog and will timeout.
+- **Proxy history access**: Enable "Always Allow HTTP History" in Burp's MCP tab. Without this, `get_proxy_http_history_regex` (used for audit evidence) shows a dialog and returns empty.
 
 ### Snyk (`snyk-agent-scan`)
 
