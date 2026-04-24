@@ -26,8 +26,8 @@ git clone https://github.com/ccq1/awsome_kali_MCPServers
 cd awsome_kali_MCPServers
 docker build -t kali-mcps:latest .
 
-# 3. Register with the wrapper (server_id must contain "kali")
-mcpsafetywarden register kali-mcp \
+# 3. Onboard with the wrapper (server_id must contain "kali")
+mcpsafetywarden onboard kali-mcp \
   --transport stdio \
   --command docker \
   --args '["run", "-i", "kali-mcps:latest"]'
@@ -66,8 +66,8 @@ cd mcp-server
 #    Then go to the "MCP" tab in Burp and enable the server.
 #    SSE endpoint starts at http://127.0.0.1:9876/sse
 
-# 4. Register with the wrapper (server_id must contain "burp")
-mcpsafetywarden register burp-mcp \
+# 4. Onboard with the wrapper (server_id must contain "burp")
+mcpsafetywarden onboard burp-mcp \
   --transport sse \
   --url http://127.0.0.1:9876/sse
 ```
