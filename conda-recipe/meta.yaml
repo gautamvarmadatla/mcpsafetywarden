@@ -1,5 +1,5 @@
 {% set name = "mcpsafetywarden" %}
-{% set version = "0.1.0" %}
+{% set version = "0.1.3" %}
 
 package:
   name: {{ name|lower }}
@@ -7,7 +7,7 @@ package:
 
 source:
   url: https://pypi.org/packages/source/{{ name[0] }}/{{ name }}/{{ name }}-{{ version }}.tar.gz
-  sha256: 03605d488d3c83b40060b005efa07d4ce6c76b5f431fccde9759755d0ed8a8a3
+  sha256: 93c0903d285c7eb75d3d9f8f19971c9ddf5f39a3229916d839a4a7c6e3098ae3
 
 build:
   number: 0
