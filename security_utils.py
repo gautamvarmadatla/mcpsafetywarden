@@ -22,8 +22,9 @@ _CTRL_CHARS_RE  = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 def sanitise_for_prompt(text: str, max_len: int = 300) -> str:
-    """Strip control characters and collapse whitespace before embedding text in an LLM prompt."""
+    """Strip control characters, zero-width chars, and collapse whitespace before embedding text in an LLM prompt."""
     text = _CTRL_CHARS_RE.sub("", text)
+    text = _ZERO_WIDTH_RE.sub("", text)
     text = _MULTI_SPACE_RE.sub(" ", text).strip()
     return text[:max_len]
 
