@@ -1307,6 +1307,9 @@ async def onboard_server(
         server_id=server_id, transport=transport,
         command=command, args=args, url=url, env=env, headers=headers,
         auto_inspect=True,
+        classify_provider=scan_provider,
+        classify_model=scan_model,
+        classify_api_key=scan_api_key,
     )
     reg_result = json.loads(reg_json)
     result: Dict[str, Any] = {"server_id": server_id, "register": reg_result, "security_scan": None}
