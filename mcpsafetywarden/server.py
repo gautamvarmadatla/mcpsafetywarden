@@ -459,6 +459,7 @@ async def preflight_tool_call(
                 effective_llm, llm_model, llm_api_key,
             ),
         )
+        profile.pop("_security_finding", None)
         db.upsert_profile(tool["tool_id"], profile)
     return json.dumps(_preflight_assessment(profile, tool_name, server_id), indent=2)  # type: ignore[arg-type]
 
@@ -495,6 +496,7 @@ def get_retry_policy(
             tool_name, tool.get("description", ""), tool.get("schema", {}), tool.get("annotations", {}),
             effective_llm, llm_model, llm_api_key,
         )
+        profile.pop("_security_finding", None)
         db.upsert_profile(tool["tool_id"], profile)
     retry  = profile.get("retry_safety", "unknown")
     p95    = profile.get("latency_p95_ms")
@@ -656,6 +658,7 @@ def suggest_safer_alternative(
             tool["tool_name"], tool.get("description", ""), tool.get("schema", {}), tool.get("annotations", {}),
             effective_llm, llm_model, llm_api_key,
         )
+        profile.pop("_security_finding", None)
         db.upsert_profile(tool["tool_id"], profile)
     current_effect = profile.get("effect_class", "unknown")
     current_destr  = profile.get("destructiveness", "unknown")
@@ -769,6 +772,7 @@ async def run_replay_test(
                 tool_name, tool.get("description", ""), tool.get("schema", {}), tool.get("annotations", {}),
             ),
         )
+        profile.pop("_security_finding", None)
         db.upsert_profile(tool["tool_id"], profile)
     assessment  = _preflight_assessment(profile, tool_name, server_id)
     effect      = profile.get("effect_class", "unknown")
@@ -1134,6 +1138,7 @@ async def safe_tool_call(
                     llm_provider or _detect_llm_provider(), llm_model, llm_api_key,
                 ),
             )
+            alt_profile.pop("_security_finding", None)
             db.upsert_profile(alt_tool["tool_id"], alt_profile)
         alt_assessment = _preflight_assessment(alt_profile, use_alternative, server_id)
         if alt_assessment["assessment"]["approval_recommended"] and not approved:
@@ -1205,6 +1210,7 @@ async def safe_tool_call(
                 llm_provider or _detect_llm_provider(), llm_model, llm_api_key,
             ),
         )
+        profile.pop("_security_finding", None)
         db.upsert_profile(tool["tool_id"], profile)
     assessment = _preflight_assessment(profile, tool_name, server_id)
     risk_level = assessment["assessment"]["risk_level"]
