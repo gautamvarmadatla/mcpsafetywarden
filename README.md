@@ -196,7 +196,7 @@ python server.py --help 2>&1 || echo "Server starts on run, not --help"
 python cli.py --help
 ```
 
-The SQLite database (`behavior_profiles.db`) is created automatically in the project directory on first run.
+The SQLite database is created automatically on first run in the platform user data directory (e.g. `~/.local/share/mcpsafetywarden/` on Linux, `~/Library/Application Support/mcpsafetywarden/` on macOS, `%APPDATA%\mcpsafetywarden\` on Windows). Set `MCP_DB_PATH` to override the location.
 
 **Optional: at-rest encryption for stored credentials**
 
@@ -231,6 +231,7 @@ All configuration is via environment variables. No config file is required.
 | `SNYK_TOKEN` | (unset) | Enables Snyk E001 prompt-injection detection |
 | `MCP_SCANNER_API_KEY` | (unset) | Cisco AI Defense API key for cloud ML engine |
 | `MCP_SCANNER_LLM_API_KEY` | (unset) | LLM key for Cisco internal AST analysis (falls back to `OPENAI_API_KEY`) |
+| `MCP_DB_PATH` | (unset) | Override the SQLite database file path |
 
 **Example `.env` for local development:**
 
@@ -640,9 +641,10 @@ mcpsafetywarden/
 ├── scanner.py              # LLM, Cisco AI Defense, Snyk scan orchestration
 ├── mcpsafety_scanner.py    # Five-stage pentest pipeline (Recon, Planner, Hacker, Auditor, Supervisor)
 ├── security_utils.py       # Text normalisation, redaction, credential detection
-├── requirements.txt
-└── behavior_profiles.db    # Created at runtime
+└── requirements.txt
 ```
+
+The database (`behavior_profiles.db`) is stored in the platform user data directory, not in the project root. Override with `MCP_DB_PATH`.
 
 ---
 
