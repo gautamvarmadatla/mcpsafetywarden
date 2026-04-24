@@ -2593,6 +2593,7 @@ async def run_mcpsafety_scan(
         )
 
     max_hacker_turns = max(1, min(max_hacker_turns, _MAX_HACKER_TURNS))
+    scan_timeout_s   = max(10, min(scan_timeout_s, 3600))
     hacker_template  = _FULL_HACKER_SYSTEM if allow_destructive_probes else _SAFE_HACKER_SYSTEM
     call_counter     = [0]
 
