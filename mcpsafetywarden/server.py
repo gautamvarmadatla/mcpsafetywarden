@@ -1413,7 +1413,7 @@ async def ping_server(server_id: str) -> str:
         return json.dumps({"error": "Internal error. Check server logs."})
 
     server = db.get_server(server_id)
-    if server:
+    if server and server.get("transport") in ("sse", "streamable_http"):
         network_scan = await kali_recon(server, fast=True)
         if network_scan:
             result["network_scan"] = network_scan
