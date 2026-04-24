@@ -147,8 +147,7 @@ def _call_gemini(model_id: str, api_key: Optional[str], prompt: str) -> str:
     key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     try:
         from google import genai
-        # http_options timeout is in milliseconds for google-genai
-        client = genai.Client(api_key=key, http_options={"timeout": int(_LLM_HTTP_TIMEOUT * 1000)})
+        client = genai.Client(api_key=key, http_options={"timeout": _LLM_HTTP_TIMEOUT})
         response = client.models.generate_content(
             model=model_id or "gemini-2.5-flash",
             contents=prompt,
