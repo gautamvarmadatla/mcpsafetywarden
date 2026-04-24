@@ -21,7 +21,7 @@ Instead of calling a wrapped server's tools directly, you route calls through th
 - Multi-server scan: run the full pipeline against every registered server in one call via `scan_all_servers`.
 - Cisco AI Defense: AST and taint analysis, YARA rules, optional cloud ML engine.
 - Snyk: prompt injection, tool shadowing, toxic data flows, hardcoded secrets.
-- **Kali MCP integration**: if a Kali Linux MCP server is registered, the Recon stage automatically runs `quick_scan`, `vulnerability_scan`, and `traceroute` against the target host before the LLM analyzes tool schemas. Real port and service data feeds the Planner so attack hypotheses are grounded in what is actually running.
+- **Kali MCP integration**: if a Kali Linux MCP server is registered, `quick_scan`, `vulnerability_scan`, and `traceroute` run against the target host at the start of the pipeline. The results are embedded in the Recon output so the Planner can ground its attack hypotheses in real port and service data rather than guessing from tool schemas alone.
 - **Burp Suite MCP integration**: if a Burp Suite MCP server is registered, the Hacker stage sends raw HTTP/1.1 probes directly to the MCP endpoint (malformed JSON, missing headers, oversized payloads), triggers Collaborator out-of-band payloads to detect blind SSRF (Pro edition), and pulls automated scanner findings (Pro edition). Proxy history feeds the Auditor as raw evidence. Community edition tools run automatically; Pro-only tools are tried and silently skipped if unavailable.
 - All findings stored and surfaced automatically in subsequent preflight assessments.
 
@@ -53,24 +53,24 @@ Use it when you need to audit what third-party or internal MCP tools actually do
 MCP Client (Claude Desktop, agent, mcpsafetywarden CLI)
         |
         v
-  server.py  (FastMCP, 17 tools, rate limiting, bearer auth)
+  mcpsafetywarden/server.py  (FastMCP, 17 tools, rate limiting, bearer auth)
         |
-        +---> client_manager.py  (connects to wrapped servers, records telemetry, injection scan)
+        +---> mcpsafetywarden/client_manager.py  (connects to wrapped servers, records telemetry, injection scan)
         |
-        +---> database.py        (SQLite: servers, tools, runs, profiles, scans, policies)
+        +---> mcpsafetywarden/database.py        (SQLite: servers, tools, runs, profiles, scans, policies)
         |
-        +---> classifier.py      (rule-based + LLM tool classification)
+        +---> mcpsafetywarden/classifier.py      (rule-based + LLM tool classification)
         |
-        +---> profiler.py        (computes behavior profiles from run history)
+        +---> mcpsafetywarden/profiler.py        (computes behavior profiles from run history)
         |
-        +---> scanner.py         (LLM, Cisco, Snyk scan orchestration)
+        +---> mcpsafetywarden/scanner.py         (LLM, Cisco, Snyk scan orchestration)
         |
-        +---> mcpsafety_scanner.py (five-stage pentest pipeline)
+        +---> mcpsafetywarden/mcpsafety_scanner.py (five-stage pentest pipeline)
         |
-        +---> security_utils.py  (redaction, normalisation, injection detection helpers)
+        +---> mcpsafetywarden/security_utils.py  (redaction, normalisation, injection detection helpers)
 ```
 
-`cli.py` imports from `server.py` and `database.py` directly. It does not use the MCP protocol; it calls the same Python functions that the MCP tools call, which means no network hop for CLI usage.
+`mcpsafetywarden/cli.py` imports from `mcpsafetywarden/server.py` and `mcpsafetywarden/database.py` directly. It does not use the MCP protocol; it calls the same Python functions that the MCP tools call, which means no network hop for CLI usage.
 
 **Request flow for `safe_tool_call`:**
 
@@ -177,7 +177,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 MCP_DB_ENCRYPTION_KEY=<generated_fernet_key>
 ```
 
-**Security note:** Never commit API keys or the encryption key to version control. Pass them via environment variables or a secrets manager. The wrapper strips all keys from the environment before spawning stdio child processes.
+**Security note:** Never commit API keys or the encryption key to version control. Pass them via environment variables or a secrets manager. The wrapper strips its own secrets (`MCP_AUTH_TOKEN`, `MCP_DB_ENCRYPTION_KEY`, and all LLM/scanner API keys) from the child process environment before spawning stdio servers. Other variables present in the parent environment are passed through.
 
 ---
 
@@ -715,7 +715,13 @@ Every module uses `logging.getLogger(__name__)`. The server does not call `loggi
 
 ## Testing
 
-There is no automated test suite at this time. To validate behavior manually:
+A test suite is available at `tests/test_suite.py`. Run it with:
+
+```bash
+python tests/test_suite.py
+```
+
+Set `ANTHROPIC_API_KEY` (or another provider key) before running if you want LLM-assisted classification and scanning tests to execute. To validate behavior manually:
 
 **Verify tool classification:**
 
@@ -833,7 +839,11 @@ Run `mcpsafetywarden inspect <server_id>` to refresh the tool list from the live
 Run `mcpsafetywarden register` or `mcpsafetywarden onboard` first.
 
 **`Rate limit exceeded.`**
-Management operations are limited to 10 calls per 60 seconds per server and 100 globally. Wait for the window to expire. For heavy automation, batch operations or increase limits in `mcpsafetywarden/server.py`.
+There are two separate rate limits:
+- **Management operations** (register, inspect, scan, replay, etc.): 10 calls per 60 seconds per server and 100 globally. Limits are in `mcpsafetywarden/server.py` (`_MGMT_RATE_LIMIT_MAX`, `_GLOBAL_RATE_LIMIT_MAX`).
+- **Tool calls** via `safe_tool_call`: 20 calls per 60 seconds per tool. Limit is in `mcpsafetywarden/client_manager.py` (`_RATE_LIMIT_MAX_CALLS`).
+
+Wait for the window to expire. For heavy automation, batch operations or increase the relevant limit constants.
 
 **`URL targets a private or restricted address.`**
 The SSRF filter blocked a private IP, localhost, or cloud metadata endpoint. This is intentional. If you are proxying a legitimate internal server over stdio instead, use the `stdio` transport.
