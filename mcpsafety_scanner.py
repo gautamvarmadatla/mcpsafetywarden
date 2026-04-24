@@ -1079,6 +1079,36 @@ async def scan_args_for_threats(
 
 
 
+def _extract_json_fence(raw: str, open_ch: str, close_ch: str) -> Optional[str]:
+    """Find the first balanced open_ch...close_ch block without regex backtracking."""
+    start = raw.find(open_ch)
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i in range(start, len(raw)):
+        ch = raw[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\" and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == open_ch:
+            depth += 1
+        elif ch == close_ch:
+            depth -= 1
+            if depth == 0:
+                return raw[start:i + 1]
+    return None
+
+
 def _safe_json_list(raw: str) -> List[Dict[str, Any]]:
     raw = raw.strip()
     if raw.startswith("```"): raw = "\n".join(l for l in raw.splitlines() if not l.strip().startswith("```"))
@@ -1087,12 +1117,10 @@ def _safe_json_list(raw: str) -> List[Dict[str, Any]]:
         parsed = json.loads(raw)
         return parsed if isinstance(parsed, list) else []
     except json.JSONDecodeError:
-        # Limit search to first 200 KB to prevent catastrophic backtracking on huge outputs.
-        search_space = raw[:204_800]
-        m = re.search(r"\[[\s\S]*\]", search_space)
-        if m:
+        fragment = _extract_json_fence(raw[:204_800], "[", "]")
+        if fragment:
             try:
-                parsed = json.loads(m.group())
+                parsed = json.loads(fragment)
                 return parsed if isinstance(parsed, list) else []
             except json.JSONDecodeError: pass
         return []
@@ -1106,11 +1134,10 @@ def _safe_json_dict(raw: str) -> Dict[str, Any]:
         parsed = json.loads(raw)
         return parsed if isinstance(parsed, dict) else {}
     except json.JSONDecodeError:
-        search_space = raw[:204_800]
-        m = re.search(r"\{[\s\S]*\}", search_space)
-        if m:
+        fragment = _extract_json_fence(raw[:204_800], "{", "}")
+        if fragment:
             try:
-                parsed = json.loads(m.group())
+                parsed = json.loads(fragment)
                 return parsed if isinstance(parsed, dict) else {}
             except json.JSONDecodeError: pass
         return {}
