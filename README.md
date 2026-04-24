@@ -45,8 +45,6 @@ Instead of calling a wrapped server's tools directly, you route calls through th
 
 Use it when you need to audit what third-party or internal MCP tools actually do before trusting them in an agent workflow.
 
----
-
 ## Architecture
 
 ```
@@ -81,7 +79,6 @@ MCP Client (Claude Desktop, agent, mcpsafetywarden CLI)
 5. If medium/high risk and not approved: fetch LLM-ranked alternatives, return blocked response with numbered menu.
 6. If approved or alternative selected: scan args for threats -> execute -> scan output -> record telemetry -> return result.
 
----
 
 ## Prerequisites
 
@@ -103,7 +100,6 @@ The wrapper has two operating modes depending on whether an LLM is available:
 
 Set at minimum `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` before starting the server. For a fully local setup with no API keys, run [Ollama](https://ollama.com) and set `OLLAMA_MODEL` - then pass `--provider ollama` (or `scan_provider="ollama"`) explicitly on every command, as Ollama is not auto-detected from environment variables.
 
----
 
 ## Installation
 
@@ -145,7 +141,6 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 Set the printed key as `MCP_DB_ENCRYPTION_KEY` before starting the server. Keep this key safe; losing it makes stored credentials unrecoverable.
 
----
 
 ## Configuration
 
@@ -179,7 +174,6 @@ MCP_DB_ENCRYPTION_KEY=<generated_fernet_key>
 
 **Security note:** Never commit API keys or the encryption key to version control. Pass them via environment variables or a secrets manager. The wrapper strips its own secrets (`MCP_AUTH_TOKEN`, `MCP_DB_ENCRYPTION_KEY`, and all LLM/scanner API keys) from the child process environment before spawning stdio servers. Other variables present in the parent environment are passed through.
 
----
 
 ## Auxiliary Security Tool Integrations
 
@@ -187,7 +181,6 @@ Kali Linux MCP, Burp Suite MCP, and Snyk each integrate automatically once regis
 
 See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) for full setup instructions, contribution tables, and per-tool details.
 
----
 
 ## CLI Reference
 
@@ -195,7 +188,6 @@ See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) for full setup instructions, co
 
 See [docs/CLI.md](docs/CLI.md) for the full command reference with flags and examples.
 
----
 
 ## MCP Integration
 
@@ -324,7 +316,6 @@ Configure your MCP client to connect to `http://127.0.0.1:8000/mcp` with header 
 | `get_run_history` | Recent execution history |
 | `ping_server` | Reachability check with latency; adds Kali nmap + traceroute if Kali is registered |
 
----
 
 ## Project Structure
 
@@ -349,12 +340,13 @@ mcpsafetywarden/
 │   └── COMPARISON.md
 ├── assets/
 │   └── logo.png
+├── CONTRIBUTING.md
+├── ROADMAP.md
 └── pyproject.toml
 ```
 
 The database (`behavior_profiles.db`) is stored in the platform user data directory, not in the project root. Override with `MCP_DB_PATH`.
 
----
 
 ## Development
 
@@ -378,18 +370,10 @@ mcpsafetywarden list test-server
 mcpsafetywarden call test-server <tool_name>
 ```
 
-**Adding a new MCP tool:**
-
-1. Define an async (or sync) function in `mcpsafetywarden/server.py` decorated with `@mcp.tool()`.
-2. Use `db.*` for persistence, `cm.call_tool_with_telemetry` for proxied execution.
-3. Add a corresponding CLI command in `mcpsafetywarden/cli.py` with `@app.command()`.
-4. Follow the existing pattern: validate input, check rate limit if it is a management operation, return `json.dumps(...)`.
-
 **Logging:**
 
 Every module uses `logging.getLogger(__name__)`. The server does not call `logging.basicConfig` itself - configure logging in your entry point or launcher script before importing the server. Example: `logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(name)s %(levelname)s %(message)s")`.
 
----
 
 ## Testing
 
@@ -433,7 +417,6 @@ mcpsafetywarden call test-server <tool_name>
 mcpsafetywarden policy test-server <tool_name> --set clear
 ```
 
----
 
 ## Deployment
 
@@ -506,7 +489,6 @@ Pass `MCP_AUTH_TOKEN`, `MCP_DB_ENCRYPTION_KEY`, and API keys as container enviro
 - **Logging** goes to stderr by default via Python's `logging` module. Redirect and aggregate as needed for your observability stack.
 - **Database permissions** are set to owner-only (0o600) on POSIX systems. On Windows this is a no-op; use filesystem ACLs.
 
----
 
 ## Troubleshooting
 
@@ -553,7 +535,6 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 **Decryption failure logged at ERROR level.**
 The encryption key changed after data was written (key rotation). The affected server's env and headers fields will read as empty until the data is re-written with the new key by re-registering the server.
 
----
 
 ## Security
 
@@ -578,31 +559,17 @@ Every tool call argument is scanned for 20+ attack categories before the call is
 **Injection quarantine**
 Tool output flagged as a prompt injection attempt is stored in the database under the run ID but is never returned to the calling agent. The response contains a quarantine notice and the run ID for forensic review.
 
----
 
 ## Contributing
 
-1. Fork the repository and create a branch from `main`.
-2. Make your changes. Keep functions focused. Follow the existing pattern: validation first, then logic, then return `json.dumps(...)` for MCP tools.
-3. Test manually using the CLI against a real or mock MCP server.
-4. Open a pull request with a clear description of what changed and why.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for code standards, pull request guidelines, and instructions for adding new MCP tools.
 
-Code standards:
-- No inline comments unless the reason is non-obvious.
-- No docstring blocks beyond the existing MCP tool docstrings (which are user-facing).
-- Match the surrounding code style: `Optional[str]` type hints, `_log.warning/error` for operator-visible events, `_log.debug` for internal traces.
-
----
 
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE) for details.
 
----
 
 ## Roadmap
 
-- Automated test suite (unit tests for classifier, profiler, and security_utils; integration tests with a mock MCP server).
-- Redis-backed rate limiting for multi-replica deployments.
-- Schema drift detection: alert when a wrapped tool's input or output schema changes between runs.
-- Web dashboard for server health, tool risk overview, and run history.
+See [ROADMAP.md](ROADMAP.md) for planned features and improvements.
