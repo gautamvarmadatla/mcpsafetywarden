@@ -55,7 +55,8 @@ def _decrypt_field(ciphertext: str) -> str:
 def _jloads(s: str, default: Any) -> Any:
     try:
         return json.loads(s)
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError) as exc:
+        _log.warning("_jloads: failed to parse stored JSON (%s) - returning default. Data may be corrupted or from a key rotation.", exc)
         return default
 
 DB_PATH = Path(__file__).parent / "behavior_profiles.db"
