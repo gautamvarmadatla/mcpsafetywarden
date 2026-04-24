@@ -1043,6 +1043,9 @@ async def _call_and_format(
     llm_api_key: Optional[str] = None,
     tool_description: str = "",
 ) -> str:
+    if args_scan_override:
+        _log.warning("args_scan_override=True used for %s::%s — arg scan bypassed", server_id, tool_name)
+
     if args and not args_scan_override:
         threat = await scan_args_for_threats(
             tool_name, args, tool_description,
