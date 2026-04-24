@@ -180,38 +180,19 @@ _DESC_FILESYSTEM_SIGNALS = re.compile(
 )
 
 _SCHEMA_SIGNALS: List[Tuple[re.Pattern, str, float, str]] = [
-    # Outbound communication
     (re.compile(r"^(recipient|to|email|phone|mobile|sms_to|channel|topic|webhook_url|slack_channel|teams_channel)$", re.IGNORECASE), "external_action", 0.82, "schema_has_recipient_field"),
     (re.compile(r"^(subject|body|content|message|text|payload|html|template|attachment)$",                           re.IGNORECASE), "external_action", 0.55, "schema_has_message_body_field"),
-
-    # Arbitrary execution
     (re.compile(r"^(command|cmd|shell|bash|script|code|eval|expression|statement|program|binary|executable|args|arguments|argv)$", re.IGNORECASE), "external_action", 0.88, "schema_has_execution_field"),
-
-    # Credential / secret access
     (re.compile(r"^(password|passwd|secret|token|api_key|apikey|access_key|private_key|pem|cert|certificate|passphrase|credential|auth_token|bearer|signing_key|encryption_key|ssh_key)$", re.IGNORECASE), "read_only", 0.60, "schema_has_credential_field"),
-
-    # File mutation
     (re.compile(r"^(path|file_path|filepath|filename|file|directory|dir|dest|destination|target_path|output_path)$", re.IGNORECASE), "additive_write", 0.55, "schema_has_file_path"),
     (re.compile(r"^(overwrite|force|replace|truncate|clobber|mode|flags)$",                                           re.IGNORECASE), "mutating_write", 0.70, "schema_has_overwrite_flag"),
-
-    # Database / destructive
     (re.compile(r"^(table|collection|index|database|db|keyspace|namespace|schema)$",                                  re.IGNORECASE), "mutating_write", 0.58, "schema_has_db_target"),
     (re.compile(r"^(cascade|recursive|hard_delete|permanent|purge_all|wipe|drop_table|force_delete)$",                re.IGNORECASE), "destructive",    0.85, "schema_has_destructive_flag"),
-
-    # Network / lateral movement
     (re.compile(r"^(host|hostname|ip|ip_address|port|endpoint|url|base_url|server|remote|ssh_host|rdp_host)$",        re.IGNORECASE), "external_action", 0.72, "schema_has_network_target"),
-
-    # Privilege / access control
     (re.compile(r"^(role|permission|policy|acl|scope|grant|privilege|access_level|user_role|group)$",                 re.IGNORECASE), "mutating_write", 0.68, "schema_has_permission_field"),
-
-    # Read / search
     (re.compile(r"^(query|filter|search|q|keyword|term|expression|pattern|regex|selector|xpath|jq)$",                re.IGNORECASE), "read_only", 0.65, "schema_has_query_field"),
     (re.compile(r"^(page|limit|offset|cursor|per_page|page_size|max_results|count|skip|from|size)$",                 re.IGNORECASE), "read_only", 0.60, "schema_has_pagination_field"),
-
-    # Scheduling / async triggers
     (re.compile(r"^(cron|schedule|interval|delay|at|run_at|trigger_at|timeout|ttl|retry_count|retry_policy)$",       re.IGNORECASE), "external_action", 0.62, "schema_has_scheduling_field"),
-
-    # Financial
     (re.compile(r"^(amount|price|cost|charge|fee|currency|payment_method|card|stripe_token|billing)$",               re.IGNORECASE), "external_action", 0.80, "schema_has_financial_field"),
 ]
 
@@ -652,7 +633,6 @@ def classify_tool(
     elif final_effect in RETRY_UNSAFE_EFFECTS: retry_safety = "unsafe"
     else: retry_safety = "caution"
 
-    # Open world - prefer LLM when available (better at detecting external API calls etc.)
     if ann_open_world:
         open_world = True
         # annotation evidence is already in ann_ev / evidence via _classify_by_annotations
@@ -663,7 +643,6 @@ def classify_tool(
         open_world, ow_ev = _infer_open_world(description, schema, final_effect)
         evidence.extend(ow_ev)
 
-    # Output risk - prefer LLM when available
     if llm_result:
         output_risk = llm_result.get("output_risk", "low")
         evidence.append(f"llm_output_risk={output_risk}")

@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import stat
+import sys
 import tempfile
 from typing import Any, Dict, List, Optional
 
@@ -109,7 +110,7 @@ Tools to analyze:
 """
 
 
-_LLM_HTTP_TIMEOUT = 120.0  # seconds - applied to all LLM provider clients
+_LLM_HTTP_TIMEOUT = 120.0
 _OLLAMA_BASE_URL  = "http://localhost:11434/v1"  # overridable via OLLAMA_BASE_URL env var
 
 
@@ -279,7 +280,7 @@ _SEVERITY_MAP = {
     "MEDIUM": "MEDIUM",
     "LOW": "LOW",
     "SAFE": "NONE",
-    "UNKNOWN": "LOW",   # conservative
+    "UNKNOWN": "LOW",
 }
 
 _OVERALL_ORDER = {"HIGH": 3, "MEDIUM": 2, "LOW": 1, "NONE": 0}
@@ -311,7 +312,7 @@ def _normalize_cisco_results(server_id: str, results: list) -> Dict[str, Any]:
         tool_findings.append({
             "name": result.tool_name,
             "risk_level": tool_risk,
-            "risk_tags": list(dict.fromkeys(risk_tags)),  # dedupe, preserve order
+            "risk_tags": list(dict.fromkeys(risk_tags)),
             "finding": " | ".join(finding_lines) or "No issues found",
             "exploitation_scenario": "",   # Cisco reports findings, not exploit narratives
             "remediation": "",
@@ -419,7 +420,7 @@ _SNYK_CODES: Dict[str, tuple] = {
     "W012": ("HIGH",   "unverifiable_external_dependency"),
     "W013": ("MEDIUM", "system_service_modification"),
     "W014": ("LOW",    "missing_skill_md"),
-    "W015": ("MEDIUM", "untrusted_content_toxic_flow"),
+    "W015": ("MEDIUM", "untrusted_content"),
     "W016": ("LOW",    "potential_untrusted_content"),
     "W017": ("MEDIUM", "sensitive_data_exposure"),
     "W018": ("LOW",    "workspace_data_exposure"),
@@ -442,6 +443,7 @@ def _build_snyk_config(server_id: str, server_config: Dict[str, Any]) -> Dict[st
     entry: Dict[str, Any] = {}
 
     if transport == "stdio":
+        entry["type"] = "stdio"
         entry["command"] = server_config["command"]
         if server_config.get("args"): entry["args"] = server_config["args"]
         if server_config.get("env"): entry["env"] = server_config["env"]
@@ -449,7 +451,7 @@ def _build_snyk_config(server_id: str, server_config: Dict[str, Any]) -> Dict[st
     elif transport in ("sse", "streamable_http"):
         entry["url"] = server_config["url"]
         if server_config.get("headers"): entry["headers"] = server_config["headers"]
-        if transport == "sse": entry["type"] = "sse"
+        entry["type"] = "sse" if transport == "sse" else "http"
 
     else: raise ValueError(f"Unsupported transport '{transport}' for Snyk scanner.")
 
@@ -525,7 +527,9 @@ def _normalize_snyk_results(
                 "remediation": "",
             })
 
-    if top_error: server_level_risks.insert(0, f"[scan_error] {top_error}")
+    if top_error:
+        err_msg = top_error.get("message") if isinstance(top_error, dict) else str(top_error)
+        server_level_risks.insert(0, f"[scan_error] {err_msg}")
 
     high   = sum(1 for t in all_findings if t["risk_level"] == "HIGH")
     medium = sum(1 for t in all_findings if t["risk_level"] == "MEDIUM")
@@ -591,15 +595,28 @@ snyk_token:
         except OSError:
             pass
 
-        env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "TEMP", "TMP", "SYSTEMROOT", "COMSPEC")}
+        env = {k: v for k, v in os.environ.items() if k in (
+            "PATH", "HOME", "TEMP", "TMP", "SYSTEMROOT", "COMSPEC",
+            "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA",
+            "USERNAME", "USER", "LOGNAME", "LNAME",
+        )}
         token = snyk_token or os.environ.get("SNYK_TOKEN")
-        if token:
-            env["SNYK_TOKEN"] = token
+        if not token:
+            raise ValueError(
+                "SNYK_TOKEN is required for snyk-agent-scan. "
+                "Set the SNYK_TOKEN environment variable or pass snyk_token. "
+                "Obtain a token at https://app.snyk.io/account"
+            )
+        env["SNYK_TOKEN"] = token
 
-        candidates = [
-            ["snyk-agent-scan", config_path, "--json"],
-            ["uvx", "snyk-agent-scan@latest", config_path, "--json"],
-        ]
+        storage_file = os.path.join(tmpdir, "snyk-state.json")
+        base_args = [config_path, "--json", "--storage-file", storage_file]
+        candidates: list[list[str]] = []
+        bin_path = shutil.which("snyk-agent-scan")
+        if bin_path:
+            candidates.append([bin_path] + base_args)
+        candidates.append([sys.executable, "-m", "agent_scan.cli"] + base_args)
+        candidates.append(["uvx", "snyk-agent-scan@latest"] + base_args)
 
         last_error = ""
         for cmd in candidates:

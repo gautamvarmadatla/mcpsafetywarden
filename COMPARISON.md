@@ -2,7 +2,7 @@
 
 Most MCP gateways solve the same problem: routing and access control. They sit in front of your MCP servers and decide who can call what. That is a governance problem.
 
-This project solves a different problem: what happens at execution time. It intercepts every tool call, inspects every argument, runs the tool, inspects every output, and blocks or quarantines anything that looks dangerous — regardless of who made the call or whether they were authorized.
+This project solves a different problem: what happens at execution time. It intercepts every tool call, inspects every argument, runs the tool, inspects every output, and blocks or quarantines anything that looks dangerous - regardless of who made the call or whether they were authorized.
 
 The distinction matters because authorization and safety are not the same thing. A fully authorized agent can still pass a prompt injection payload as an argument. A trusted server can still return output that hijacks the calling agent. Governance layers do not catch this. Runtime interception does.
 

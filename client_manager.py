@@ -27,12 +27,12 @@ _RATE_LIMIT_MAX_CALLS  = 20
 _RATE_LIMIT_WINDOW_S   = 60
 _INSPECT_TIMEOUT_S     = 30
 _MAX_B64_DECODES       = 50   # cap base64 decode iterations to prevent CPU exhaustion on dense payloads
-_CALL_TIMES_MAX_ENTRIES = 10_000  # evict oldest when dict exceeds this
+_CALL_TIMES_MAX_ENTRIES = 10_000
 _call_times: Dict[str, collections.deque] = {}
 _tool_call_counters: Dict[str, int] = {}
 
 TOOL_CALL_TIMEOUT_S = 60
-MAX_OUTPUT_BYTES    = 10 * 1024 * 1024  # 10 MB
+MAX_OUTPUT_BYTES    = 10 * 1024 * 1024
 
 _INJECTION_RULES: List[Tuple[str, re.Pattern]] = [
     ("instruction_override",   re.compile(r"ignore\s+(previous|prior|all|above|earlier)\s+(instructions?|prompts?|commands?|context|rules?|guidelines?|constraints?)", re.I)),

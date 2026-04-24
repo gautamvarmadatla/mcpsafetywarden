@@ -392,7 +392,7 @@ Return ONLY valid JSON. No markdown. No text outside the JSON object.
 
 
 HACKER_CALL_TIMEOUT_S    = 30
-HACKER_MAX_RESULT_BYTES  = 8 * 1024   # 8 KB per result fed to LLM
+HACKER_MAX_RESULT_BYTES  = 8 * 1024
 HACKER_MAX_CALLS_PER_TURN = 5
 _MAX_ARG_VALUE_LEN        = 50_000    # 50 KB - always blocked regardless of mode
 _MAX_HACKER_TURNS         = 20        # server-side cap; callers cannot exceed this
@@ -738,10 +738,6 @@ def _inspect_probe_args(
         )
     return None
 
-
-# ---------------------------------------------------------------------------
-# Production arg scanning - used by safe_tool_call (not the hacker stage)
-# ---------------------------------------------------------------------------
 
 def _detect_base64_payloads(value: str) -> List[str]:
     """Decode base64 substrings ≥24 chars and re-scan them for attack patterns."""
@@ -2199,10 +2195,6 @@ _PLAN_EMPTY: Dict[str, Any] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Auxiliary server helpers - Kali MCP and Burp Suite MCP integration
-# ---------------------------------------------------------------------------
-
 def _find_aux_server(*name_keywords: str) -> Optional[Dict[str, Any]]:
     """Find a registered server whose server_id contains any keyword (case-insensitive)."""
     try:
@@ -2316,7 +2308,6 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
     uses_https = url.startswith("https")
     path = _urlparse.urlparse(url).path or "/"
 
-    # HTTP/1.1 raw probes
     if _aux_tool_exists(sid, "SendHttp1Request"):
         probes = [
             (
@@ -2606,7 +2597,6 @@ async def run_mcpsafety_scan(
     call_counter     = [0]
 
     async def _pipeline() -> Dict[str, Any]:
-        # Optional Kali nmap before Recon - real port/service data for the Planner
         network_scan = await kali_recon(server_config)
         if network_scan:
             _log.info("Kali network scan attached to recon (target=%s)", network_scan.get("nmap_target", "?"))
@@ -2635,13 +2625,11 @@ async def run_mcpsafety_scan(
         )
         hacker_findings = _redact_findings(_safe_json_list(hacker_raw))
 
-        # Optional Burp HTTP-layer attacks after Hacker stage
         burp_findings = await _burp_hacker(server_config)
         if burp_findings:
             _log.info("Burp hacker added %d findings", len(burp_findings))
             hacker_findings = hacker_findings + _redact_findings(burp_findings)
 
-        # Optional Burp proxy history as evidence for the Auditor
         burp_evidence = await burp_proxy_evidence(server_config)
 
         _log.info("mcpsafety Stage 2: Auditor (server=%s findings=%d)", server_id, len(hacker_findings))

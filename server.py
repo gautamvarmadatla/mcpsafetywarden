@@ -845,7 +845,6 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama"):
 
     Results are stored and automatically included in future preflight_tool_call responses.
     """
-    # Normalize shorthand LLM provider names -> mcpsafety+<provider>
     if provider in _LLM_SHORTHANDS:
         provider = f"mcpsafety+{provider}"
 
@@ -1401,7 +1400,6 @@ async def ping_server(server_id: str) -> str:
 if __name__ == "__main__":
     transport = _os.environ.get("MCP_TRANSPORT", "stdio").lower()
     if transport == "stdio":
-        # stdio: trusted by OS process ownership; no network auth needed.
         mcp.run()
     else:
         import uvicorn

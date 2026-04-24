@@ -96,7 +96,7 @@ MCP Client (Claude Desktop, agent, cli.py)
 
 ## Auxiliary Security Tool Integrations
 
-The wrapper detects Kali and Burp by looking for registered servers whose `server_id` contains `"kali"` or `"burp"` (case-insensitive). Registration is the only setup step — once registered, the tools activate automatically on every scan, ping, and replay test.
+The wrapper detects Kali and Burp by looking for registered servers whose `server_id` contains `"kali"` or `"burp"` (case-insensitive). Registration is the only setup step - once registered, the tools activate automatically on every scan, ping, and replay test.
 
 ### Kali Linux MCP (`ccq1/awsome_kali_MCPServers`)
 
@@ -112,14 +112,21 @@ Docker-based, Apache 2.0, no auth. Adds real network reconnaissance to the Recon
 **Setup:**
 
 ```bash
-# Pull and run the Kali MCP Docker image
-docker pull ccq1/awsome-kali-mcp   # adjust image name to match the published tag
+# 1. Install Docker Desktop (if not already installed)
+#    Windows: winget install Docker.DockerDesktop
+#    macOS:   brew install --cask docker
+#    Linux:   https://docs.docker.com/engine/install/
 
-# Register it with the wrapper (server_id must contain "kali")
+# 2. Clone and build the image
+git clone https://github.com/ccq1/awsome_kali_MCPServers
+cd awsome_kali_MCPServers
+docker build -t kali-mcps:latest .
+
+# 3. Register with the wrapper (server_id must contain "kali")
 python cli.py register kali-mcp \
   --transport stdio \
   --command docker \
-  --args '["run", "-i", "--rm", "ccq1/awsome-kali-mcp"]'
+  --args '["run", "-i", "kali-mcps:latest"]'
 ```
 
 Note: `vulnerability_scan` runs nmap vuln scripts which can take 60-90 seconds per target. On `scan-all` across many servers this adds up. Register only when you want network recon in your scans.
@@ -140,22 +147,80 @@ Kotlin, GPL-3.0, no auth, runs as a stdio proxy to a local Burp Suite instance o
 
 **Setup:**
 
-1. Install [Burp Suite](https://portswigger.net/burp) (Community or Professional).
-2. Install the [MCP Server extension](https://portswigger.net/bappstore/9952290f04ed4f628e624d0aa9dccebc) from the BApp Store.
-3. Start Burp Suite - the extension starts an MCP server on `127.0.0.1:9876`.
-4. Register it with the wrapper (server_id must contain `"burp"`):
+```bash
+# 1. Install Burp Suite (Community or Professional)
+#    Download from https://portswigger.net/burp/releases
+
+# 2. Build the MCP extension JAR
+git clone https://github.com/PortSwigger/mcp-server.git
+cd mcp-server
+./gradlew embedProxyJar
+# produces build/libs/burp-mcp-all.jar
+
+# 3. Load into Burp
+#    Burp → Extensions → Add → Java type → select burp-mcp-all.jar
+#    Then go to the "MCP" tab in Burp and enable the server.
+#    SSE endpoint starts at http://127.0.0.1:9876/sse
+
+# 4. Register with the wrapper (server_id must contain "burp")
+python cli.py register burp-mcp \
+  --transport sse \
+  --url http://127.0.0.1:9876/sse
+```
+
+### Snyk (`snyk-agent-scan`)
+
+Python, Apache 2.0, requires a free Snyk account token. Connects to the target MCP server, lists its tools, and runs static analysis on the tool metadata (names, descriptions, schemas). It does **not** call any tools - it only reads what the server advertises.
+
+**What it checks:**
+
+| Code | Severity | Check |
+|---|---|---|
+| E001 | HIGH | Prompt injection strings in tool descriptions or schemas |
+| E002 | HIGH | Tool shadowing (a tool impersonates another) |
+| E004 | HIGH | Prompt injection embedded in skill definitions |
+| E005 | HIGH | Suspicious download URLs in tool metadata |
+| E006 | HIGH | Malicious code patterns in descriptions |
+| W007 | HIGH | Insecure credential handling patterns |
+| W008 | HIGH | Hardcoded secrets in tool metadata |
+| W009 | MEDIUM | Direct financial execution capabilities |
+| W011 | MEDIUM | Untrusted third-party content references |
+| W012 | HIGH | Unverifiable external dependencies |
+| W013 | MEDIUM | System service modification capabilities |
+| W015 | MEDIUM | Untrusted content flows |
+| W017 | MEDIUM | Sensitive data exposure patterns |
+| W019 | MEDIUM | Destructive capabilities |
+| W001 | LOW | Suspicious words |
+| W014 | LOW | Missing skill documentation |
+| W016 | LOW | Potential untrusted content |
+| W018 | LOW | Workspace data exposure |
+| W020 | LOW | Local destructive capabilities |
+
+E001 (prompt injection) requires a Snyk token for Snyk's AI-based detection. All other checks run with the token present but also degrade gracefully if the token is invalid - structural and pattern-based checks are fully offline.
+
+**How it runs:**
+
+Snyk is invoked as a subprocess (`snyk-agent-scan`) with a temporary config JSON pointing at the target server. The binary opens its own live MCP connection, fetches the tool list, analyzes the metadata, and returns JSON findings. The wrapper normalizes these into its common findings format and stores them in the database, where they are automatically included in future `preflight_tool_call` responses.
+
+**Setup:**
 
 ```bash
-# Clone the PortSwigger MCP server proxy
-git clone https://github.com/PortSwigger/mcp-server
-cd mcp-server
-
-# Register (the proxy connects stdio -> Burp's localhost:9876)
-python cli.py register burp-mcp \
-  --transport stdio \
-  --command java \
-  --args '["-jar", "/path/to/burp-mcp-server.jar"]'
+pip install snyk-agent-scan
 ```
+
+Get a free token at [app.snyk.io/account](https://app.snyk.io/account). Set it as an environment variable:
+
+```bash
+export SNYK_TOKEN=snyk_uat.<your_token>
+```
+
+Or pass it directly on the scan command:
+
+```bash
+python cli.py scan my-server --provider snyk --api-key snyk_uat.<your_token> --yes
+```
+
+Unlike Kali and Burp, Snyk is **not** auto-activated on every scan - it only runs when explicitly chosen as the provider via `--provider snyk` or `provider="snyk"`.
 
 ---
 
@@ -175,7 +240,7 @@ The wrapper has two operating modes depending on whether an LLM is available:
 | Tool classification | Rule-based heuristics only - low confidence on ambiguous tool names | LLM resolves ambiguous cases; higher confidence across the board |
 | Injection scanning | Regex patterns only (40+ rules) | Regex + LLM deep scan - catches obfuscated and novel injections |
 | Risk gate alternatives | None - gate shows "More options" only | LLM ranks safer substitute tools by risk reduction and functional coverage |
-| Security scanning | Not available (mcpsafety+ requires an LLM) | Full 5-stage pentest: Recon, Planner, Hacker, Auditor, Supervisor |
+| Security scanning | Snyk and Cisco only (metadata/static analysis, no LLM needed) | Full 5-stage pentest: Recon, Planner, Hacker, Auditor, Supervisor |
 
 Set at minimum `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` before starting the server. For a fully local setup with no API keys, run [Ollama](https://ollama.com) and set `OLLAMA_MODEL` - then pass `--provider ollama` (or `scan_provider="ollama"`) explicitly on every command, as Ollama is not auto-detected from environment variables.
 
@@ -788,6 +853,15 @@ No LLM API key was found. Set `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_
 
 **Scan fails immediately with `confirm_authorized must be True`.**
 The mcpsafety+ scanner requires explicit authorization before sending live probes. Pass `--yes` on the CLI or `confirm_authorized=True` on the MCP tool.
+
+**`snyk-agent-scan not available.`**
+Install with `pip install snyk-agent-scan`. If the binary is installed but not on `PATH`, the wrapper falls back to the Python module invocation automatically. If both fail, check that the install completed without errors and that `pip show snyk-agent-scan` shows the package.
+
+**`SNYK_TOKEN is required for snyk-agent-scan.`**
+Set `SNYK_TOKEN=snyk_uat.<your_token>` in your environment or pass `--api-key snyk_uat.<your_token>` on the CLI. Get a free token at [app.snyk.io/account](https://app.snyk.io/account).
+
+**Snyk scan returns 0 findings on a server that has obvious issues.**
+Snyk analyzes tool metadata only - it does not call tools or inspect server-side logic. If the malicious content is not present in tool names, descriptions, or schemas as advertised by the server, Snyk will not detect it. Use `--provider anthropic` (or another LLM) with `--yes` for active probing.
 
 **`MCP_DB_ENCRYPTION_KEY is set but Fernet init failed.`**
 The key is malformed. Regenerate it with:
