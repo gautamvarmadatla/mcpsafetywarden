@@ -2352,7 +2352,11 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
         _log.info("Burp Hacker: generating Collaborator payload")
         collab_out = await _call_aux_tool(burp, "GenerateCollaboratorPayload", {"customData": "mcp-scan"}, timeout=15.0)
         if collab_out and not collab_out.startswith("[AUX"):
-            collab_host = collab_out.strip()
+            collab_host = None
+            for line in collab_out.splitlines():
+                if line.startswith("Payload:"):
+                    collab_host = line.split(":", 1)[1].strip()
+                    break
             if collab_host and _aux_tool_exists(sid, "SendHttp1Request"):
                 oob_body = json.dumps({
                     "jsonrpc": "2.0", "method": "tools/list",
@@ -2370,7 +2374,7 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
             await asyncio.sleep(5)
             if _aux_tool_exists(sid, "GetCollaboratorInteractions"):
                 interactions = await _call_aux_tool(burp, "GetCollaboratorInteractions", {}, timeout=15.0)
-                if interactions and not interactions.startswith("[AUX"):
+                if interactions and not interactions.startswith("[AUX") and "No interactions detected" not in interactions:
                     try:
                         _parsed = json.loads(interactions)
                         _has_callbacks = (
@@ -2379,7 +2383,7 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
                             if isinstance(_parsed, dict) else False
                         )
                     except (json.JSONDecodeError, ValueError):
-                        _has_callbacks = interactions.strip() not in ("{}", "[]", "")
+                        _has_callbacks = False
                     if _has_callbacks:
                         findings.append({
                             "tool": "GetCollaboratorInteractions",
