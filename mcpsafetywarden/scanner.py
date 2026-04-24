@@ -12,12 +12,15 @@ Cisco MCP Scanner (cisco):
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import stat
 import sys
 import tempfile
 from typing import Any, Dict, List, Optional
+
+_log = logging.getLogger(__name__)
 
 from .security_utils import sanitise_for_prompt as _sanitise_for_prompt
 from .security_utils import redact_text as _redact_text
@@ -198,12 +201,20 @@ ALL_PROVIDERS = [
 ]
 
 
+def _pkg_importable(name: str) -> bool:
+    try:
+        __import__(name)
+        return True
+    except ImportError:
+        return False
+
+
 def detect_llm_provider() -> Optional[str]:
-    if os.environ.get("ANTHROPIC_API_KEY"):
+    if os.environ.get("ANTHROPIC_API_KEY") and _pkg_importable("anthropic"):
         return "anthropic"
-    if os.environ.get("OPENAI_API_KEY"):
+    if os.environ.get("OPENAI_API_KEY") and _pkg_importable("openai"):
         return "openai"
-    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+    if (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")) and _pkg_importable("google.generativeai"):
         return "gemini"
     return None
 
@@ -565,12 +576,13 @@ def _normalize_snyk_results(
     """Convert snyk-agent-scan --json output -> our common format."""
     if not isinstance(raw, dict):
         raw = {}
-    if config_path not in raw:
+    normalized = config_path.replace("\\", "/")
+    if config_path not in raw and normalized not in raw:
         _log.warning(
             "snyk-agent-scan output key %r not found (available: %s) - results may be misattributed",
             config_path, list(raw.keys())[:3],
         )
-    path_data = raw.get(config_path) or {}
+    path_data = raw.get(config_path) or raw.get(normalized) or {}
 
     top_error = path_data.get("error")
     servers   = path_data.get("servers", [])

@@ -924,6 +924,12 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
     else:
         providers_to_run = [provider]
 
+    if not confirm_authorized:
+        return json.dumps({
+            "error": "Authorization required.",
+            "hint": "Set confirm_authorized=True to confirm you own or are authorized to test this server.",
+        })
+
     _log.info("security_scan_server server_id=%s providers=%s timeout=%ds", server_id, providers_to_run, scan_timeout_s)
 
     async def _run_one(prov: str) -> Dict[str, Any]:
@@ -954,7 +960,10 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
 
         scan_id = db.store_security_scan(server_id, findings)
         findings["scan_id"] = scan_id
-        findings.pop("provider", None)
+        if "providers" not in findings:
+            findings["providers"] = [findings.pop("provider", providers_to_run[0])]
+        else:
+            findings.pop("provider", None)
         findings.pop("model", None)
         return json.dumps(findings, indent=2)
 
