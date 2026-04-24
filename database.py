@@ -80,7 +80,9 @@ def get_connection() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    conn = get_connection()
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 5000")
     try:
         conn.executescript("""
             PRAGMA journal_mode = WAL;
