@@ -9,7 +9,6 @@ description = "MCP proxy server with behavioral profiling, security scanning, ri
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
-license-expression = "Apache-2.0"
 authors = [
     {name = "Gautam Datla", email = "gautamdsrc@gmail.com"},
 ]
