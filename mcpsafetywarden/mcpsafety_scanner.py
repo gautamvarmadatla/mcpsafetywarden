@@ -2398,9 +2398,12 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
         _log.info("Burp Hacker: fetching scanner issues")
         issues_raw = await _call_aux_tool(burp, "get_scanner_issues", {"count": 50, "offset": 0}, timeout=20.0)
         if issues_raw and not issues_raw.startswith("[AUX"):
-            try:
-                _parsed_issues = json.loads(issues_raw)
-                for issue in (_parsed_issues if isinstance(_parsed_issues, list) else []):
+            for chunk in issues_raw.split("\n\n"):
+                chunk = chunk.strip()
+                if not chunk or chunk == "Reached end of items":
+                    continue
+                try:
+                    issue = json.loads(chunk)
                     if isinstance(issue, dict):
                         findings.append({
                             "tool": "get_scanner_issues",
@@ -2409,8 +2412,8 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
                             "evidence": (issue.get("detail") or issue.get("issueDetail") or str(issue))[:300],
                             "source": "burp_scanner",
                         })
-            except (json.JSONDecodeError, ValueError):
-                pass
+                except (json.JSONDecodeError, ValueError):
+                    pass
 
     _log.info("Burp hacker: %d findings from %s:%d", len(findings), host, port)
     return findings
