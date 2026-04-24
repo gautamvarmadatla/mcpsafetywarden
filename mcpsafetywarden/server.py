@@ -16,10 +16,9 @@ from . import database as db
 from . import client_manager as cm
 from .classifier import classify_tool
 from .scanner import ALL_PROVIDERS, call_llm, detect_llm_provider as _detect_llm_provider, run_cisco_scan, run_snyk_scan, run_security_scan, auto_detect_providers as _auto_detect_providers, merge_findings as _merge_findings
-from .mcpsafety_scanner import (
-    run_mcpsafety_scan, run_mcpsafety_scan_multi, SSRF_RE, scan_args_for_threats,
-    kali_recon, burp_proxy_evidence,
-)
+from .mcpsafety_scanner import run_mcpsafety_scan, run_mcpsafety_scan_multi
+from .arg_scanner import SSRF_RE, scan_args_for_threats
+from .aux_integrations import kali_recon, burp_proxy_evidence
 from .security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
 
 _log = logging.getLogger(__name__)
