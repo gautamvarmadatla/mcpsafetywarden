@@ -569,7 +569,7 @@ def cmd_retry_policy(
         f"Policy:      {result.get('recommended_policy')}\n"
         f"Max retries: {result.get('max_retries')}\n"
         f"Backoff:     {result.get('backoff_strategy')}\n"
-        f"Timeout:     {result.get('suggested_timeout_ms')}ms\n"
+        f"Timeout:     {result.get('suggested_timeout_ms') or 'N/A'}{'ms' if result.get('suggested_timeout_ms') else ''}\n"
         f"Retry safety:{result.get('retry_safety', 'unknown')}",
         title=f"Retry Policy - {tool_name}",
     ))
