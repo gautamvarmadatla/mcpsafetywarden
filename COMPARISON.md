@@ -1,4 +1,4 @@
-# MCP Safety Proxy vs. The Market
+# MCP Safety Warden vs. The Market
 
 Most MCP gateways solve the same problem: routing and access control. They sit in front of your MCP servers and decide who can call what. That is a governance problem.
 
