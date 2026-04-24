@@ -16,8 +16,8 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-import database as _db
-from server import (
+from . import database as _db
+from .server import (
     get_run_history as _get_run_history,
     get_retry_policy as _get_retry_policy,
     get_security_scan as _get_security_scan,

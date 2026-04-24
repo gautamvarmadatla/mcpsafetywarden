@@ -12,15 +12,15 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
-import database as db
-import client_manager as cm
-from classifier import classify_tool
-from scanner import ALL_PROVIDERS, call_llm, detect_llm_provider as _detect_llm_provider, run_cisco_scan, run_snyk_scan, run_security_scan
-from mcpsafety_scanner import (
+from . import database as db
+from . import client_manager as cm
+from .classifier import classify_tool
+from .scanner import ALL_PROVIDERS, call_llm, detect_llm_provider as _detect_llm_provider, run_cisco_scan, run_snyk_scan, run_security_scan
+from .mcpsafety_scanner import (
     run_mcpsafety_scan, run_mcpsafety_scan_multi, SSRF_RE, scan_args_for_threats,
     kali_recon, burp_proxy_evidence,
 )
-from security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
+from .security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
 
 _log = logging.getLogger(__name__)
 
@@ -1397,7 +1397,7 @@ async def ping_server(server_id: str) -> str:
     return json.dumps({"server_id": server_id, **result}, indent=2)
 
 
-if __name__ == "__main__":
+def main():
     transport = _os.environ.get("MCP_TRANSPORT", "stdio").lower()
     if transport == "stdio":
         mcp.run()
@@ -1407,3 +1407,6 @@ if __name__ == "__main__":
         port = int(_os.environ.get("MCP_PORT", "8000"))
         t = "streamable_http" if transport in ("http", "streamable_http") else "sse"
         uvicorn.run(create_http_app(t), host=host, port=port)
+
+if __name__ == "__main__":
+    main()

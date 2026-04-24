@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.png" alt="MCP Safety Warden" width="1080"/>
+  <img src="assets/logo.png" alt="MCP Safety Warden" width="1080"/>
 </p>
 
 MCP safety warden is a proxy server that wraps any MCP server and adds behavioral profiling, security scanning, risk gating, and safe execution to its tools.

@@ -19,9 +19,9 @@ import sys
 import tempfile
 from typing import Any, Dict, List, Optional
 
-from security_utils import sanitise_for_prompt as _sanitise_for_prompt
-from security_utils import redact_text as _redact_text
-from security_utils import strip_json_fence as _strip_json_fence
+from .security_utils import sanitise_for_prompt as _sanitise_for_prompt
+from .security_utils import redact_text as _redact_text
+from .security_utils import strip_json_fence as _strip_json_fence
 
 SECURITY_PROMPT = """\
 You are performing a static security analysis of an MCP (Model Context Protocol) server.

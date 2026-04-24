@@ -2,7 +2,7 @@ import math
 from collections import Counter
 from typing import Dict, Any, List, Optional
 
-import database as db
+from . import database as db
 
 
 def _percentiles(values: List[float], *pcts: float) -> List[Optional[float]]:

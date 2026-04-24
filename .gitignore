@@ -4,3 +4,6 @@ __pycache__/
 behavior_profiles.db
 .env
 *.key
+*.egg-info/
+dist/
+build/
