@@ -308,8 +308,8 @@ def cmd_scan(
 
     risk = (result.get("overall_risk_level") or "unknown").lower()
     console.print(f"Overall risk: {_risk_badge(risk)}")
-    if result.get("summary_text"):
-        console.print(result["summary_text"])
+    if result.get("summary"):
+        console.print(result["summary"])
 
     findings = result.get("tool_findings", [])
     if findings:
