@@ -15,7 +15,7 @@ from starlette.types import ASGIApp
 import database as db
 import client_manager as cm
 from classifier import classify_tool
-from scanner import ALL_PROVIDERS, call_llm, run_cisco_scan, run_snyk_scan, run_security_scan
+from scanner import ALL_PROVIDERS, call_llm, detect_llm_provider as _detect_llm_provider, run_cisco_scan, run_snyk_scan, run_security_scan
 from mcpsafety_scanner import (
     run_mcpsafety_scan, run_mcpsafety_scan_multi, _SSRF_RE, scan_args_for_threats,
     _kali_recon, _burp_proxy_evidence,
@@ -622,16 +622,6 @@ def _llm_suggest_alternatives(
         _log.debug("alternatives LLM call failed (provider=%s): %s", provider, exc)
         return []
 
-
-def _detect_llm_provider() -> Optional[str]:
-    """Return the first LLM provider whose API key is set in the environment."""
-    if _os.environ.get("ANTHROPIC_API_KEY"):
-        return "anthropic"
-    if _os.environ.get("OPENAI_API_KEY"):
-        return "openai"
-    if _os.environ.get("GEMINI_API_KEY") or _os.environ.get("GOOGLE_API_KEY"):
-        return "gemini"
-    return None
 
 
 @mcp.tool()

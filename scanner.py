@@ -196,6 +196,16 @@ ALL_PROVIDERS = [
 ]
 
 
+def detect_llm_provider() -> Optional[str]:
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    if os.environ.get("OPENAI_API_KEY"):
+        return "openai"
+    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+        return "gemini"
+    return None
+
+
 def call_llm(provider: str, model_id: Optional[str], api_key: Optional[str], prompt: str) -> str:
     """Unified LLM caller. Provider must be 'anthropic', 'openai', or 'gemini'."""
     if provider not in LLM_PROVIDERS:
