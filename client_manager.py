@@ -702,8 +702,12 @@ async def run_replay_test(
 ) -> Dict[str, Any]:
     """Call the tool twice with identical args and compare results to estimate idempotency."""
     content1, tel1 = await call_tool_with_telemetry(server_id, tool_name, args)
+    if tel1.get("injection_warning"):
+        raise RuntimeError(f"Replay aborted: injection detected in call 1. {tel1['injection_warning']}")
     await asyncio.sleep(0.5)
     content2, tel2 = await call_tool_with_telemetry(server_id, tool_name, args)
+    if tel2.get("injection_warning"):
+        raise RuntimeError(f"Replay aborted: injection detected in call 2. {tel2['injection_warning']}")
 
     r1 = _serialise_content(content1)
     r2 = _serialise_content(content2)
