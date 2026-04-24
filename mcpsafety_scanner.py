@@ -1665,6 +1665,9 @@ def _tools_to_openai(tools: List[Dict]) -> List[Dict]:
     ]
 
 
+_HACKER_MAX_HISTORY_PAIRS = 6  # keep last N assistant+tool_results pairs to cap context size
+
+
 async def _hacker_anthropic(
     server_id: str,
     tools: List[Dict],
@@ -1682,7 +1685,8 @@ async def _hacker_anthropic(
     client = anthropic.Anthropic(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT) if api_key \
         else anthropic.Anthropic(timeout=_LLM_HTTP_TIMEOUT)
     ant_tools = _tools_to_anthropic(tools)
-    messages = [{"role": "user", "content": "Begin the security audit. Probe all available tools."}]
+    seed = {"role": "user", "content": "Begin the security audit. Probe all available tools."}
+    messages = [seed]
     loop = asyncio.get_running_loop()
 
     for _ in range(max_turns):
@@ -1725,8 +1729,14 @@ async def _hacker_anthropic(
                 })
                 calls_this_turn += 1
 
-        if tool_results: messages.append({"role": "user", "content": tool_results})
-        else: break
+        if tool_results:
+            messages.append({"role": "user", "content": tool_results})
+            # Trim to seed + last N pairs to avoid context window exhaustion.
+            max_tail = _HACKER_MAX_HISTORY_PAIRS * 2
+            if len(messages) > 1 + max_tail:
+                messages = [seed] + messages[-(max_tail):]
+        else:
+            break
 
     for msg in reversed(messages):
         if isinstance(msg, dict) and msg.get("role") == "assistant":
@@ -1751,10 +1761,11 @@ async def _hacker_openai_compat(
 ) -> str:
     """Shared agentic hacker loop for any OpenAI-compatible API (OpenAI, Ollama, etc.)."""
     oai_tools = _tools_to_openai(tools)
-    messages: list = [
+    oai_seed = [
         {"role": "system", "content": hacker_system},
         {"role": "user", "content": "Begin the security audit. Probe all available tools."},
     ]
+    messages: list = list(oai_seed)
     loop = asyncio.get_running_loop()
 
     for _ in range(max_turns):
@@ -1789,6 +1800,11 @@ async def _hacker_openai_compat(
             )
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
             calls_this_turn += 1
+
+        # Trim to seed + last N pairs to avoid context window exhaustion.
+        max_tail = _HACKER_MAX_HISTORY_PAIRS * 2
+        if len(messages) > len(oai_seed) + max_tail:
+            messages = list(oai_seed) + messages[-(max_tail):]
 
     for msg in reversed(messages):
         if hasattr(msg, "role") and msg.role == "assistant" and msg.content:
