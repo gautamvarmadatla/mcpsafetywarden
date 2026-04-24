@@ -49,7 +49,7 @@ from security_utils import normalise_arg as _normalise_probe_str
 from security_utils import redact_args as _redact_probe_args
 from security_utils import redact_text as _redact_in_text
 from security_utils import redact_findings as _redact_findings
-from security_utils import sanitise_for_prompt as _sanitise_for_prompt
+from security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
 
 _log = logging.getLogger(__name__)
 
@@ -1111,8 +1111,7 @@ def _extract_json_fence(raw: str, open_ch: str, close_ch: str) -> Optional[str]:
 
 def _safe_json_list(raw: str) -> List[Dict[str, Any]]:
     raw = raw.strip()
-    if raw.startswith("```"): raw = "\n".join(l for l in raw.splitlines() if not l.strip().startswith("```"))
-    raw = raw.strip()
+    raw = _strip_json_fence(raw).strip()
     try:
         parsed = json.loads(raw)
         return parsed if isinstance(parsed, list) else []
@@ -1128,8 +1127,7 @@ def _safe_json_list(raw: str) -> List[Dict[str, Any]]:
 
 def _safe_json_dict(raw: str) -> Dict[str, Any]:
     raw = raw.strip()
-    if raw.startswith("```"): raw = "\n".join(l for l in raw.splitlines() if not l.strip().startswith("```"))
-    raw = raw.strip()
+    raw = _strip_json_fence(raw).strip()
     try:
         parsed = json.loads(raw)
         return parsed if isinstance(parsed, dict) else {}

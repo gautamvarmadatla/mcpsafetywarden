@@ -20,7 +20,7 @@ from mcpsafety_scanner import (
     run_mcpsafety_scan, run_mcpsafety_scan_multi, SSRF_RE, scan_args_for_threats,
     kali_recon, burp_proxy_evidence,
 )
-from security_utils import sanitise_for_prompt as _sanitise_for_prompt
+from security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
 
 _log = logging.getLogger(__name__)
 
@@ -621,8 +621,7 @@ def _llm_suggest_alternatives(
     )
     try:
         raw = call_llm(provider, model_id, api_key, prompt)
-        raw = raw.strip()
-        if raw.startswith("```"): raw = "\n".join(l for l in raw.splitlines() if not l.strip().startswith("```"))
+        raw = _strip_json_fence(raw.strip())
         parsed = json.loads(raw)
         return parsed if isinstance(parsed, list) else []
     except Exception as exc:

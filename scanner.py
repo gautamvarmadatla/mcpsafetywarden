@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from security_utils import sanitise_for_prompt as _sanitise_for_prompt
 from security_utils import redact_text as _redact_text
+from security_utils import strip_json_fence as _strip_json_fence
 
 SECURITY_PROMPT = """\
 You are performing a static security analysis of an MCP (Model Context Protocol) server.
@@ -227,14 +228,7 @@ def _format_tools_for_prompt(tools: List[Dict[str, Any]]) -> str:
 
 
 def _parse_llm_response(raw: str) -> Dict[str, Any]:
-    raw = raw.strip()
-    # Strip markdown code fences if the model added them despite instructions
-    if raw.startswith("```"):
-        lines = raw.splitlines()
-        raw = "\n".join(
-            line for line in lines
-            if not line.strip().startswith("```")
-        )
+    raw = _strip_json_fence(raw.strip())
     try: return json.loads(raw)
     except json.JSONDecodeError:
         redacted_raw, _ = _redact_text(raw[:2000])

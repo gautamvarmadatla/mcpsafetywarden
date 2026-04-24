@@ -18,7 +18,7 @@ from mcp.client.stdio import stdio_client
 import database as db
 from classifier import classify_tool
 from profiler import get_or_build_profile, update_tool_profile, maybe_update_tool_profile
-from security_utils import normalise_output as _normalise, redact_args as _redact_args, redact_text as _redact_text, sanitise_for_prompt as _sanitise_for_prompt, looks_like_secret as _looks_like_secret
+from security_utils import normalise_output as _normalise, redact_args as _redact_args, redact_text as _redact_text, sanitise_for_prompt as _sanitise_for_prompt, looks_like_secret as _looks_like_secret, strip_json_fence as _strip_json_fence
 from scanner import call_llm as _call_llm, detect_llm_provider as _detect_llm_provider
 
 _log = logging.getLogger(__name__)
@@ -322,9 +322,7 @@ async def _llm_scan_for_injection(
             loop.run_in_executor(None, lambda: _call_llm(provider, model_id, api_key, prompt)),
             timeout=_LLM_INJECTION_TIMEOUT_S,
         )
-        raw = raw.strip()
-        if raw.startswith("```"):
-            raw = "\n".join(ln for ln in raw.splitlines() if not ln.strip().startswith("```"))
+        raw = _strip_json_fence(raw.strip())
         result = json.loads(raw)
         if result.get("is_injection") and result.get("confidence", 0) >= 0.50:
             categories = ", ".join(result.get("categories", []))

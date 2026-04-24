@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 _log = logging.getLogger(__name__)
 
-from security_utils import sanitise_for_prompt as _sanitise_for_prompt
+from security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
 
 
 def _sanitise_annotations(annotations: Dict[str, Any]) -> Dict[str, Any]:
@@ -518,8 +518,7 @@ def _classify_with_llm(
     )
     raw = call_llm(provider, model_id, api_key, prompt)
 
-    raw = raw.strip()
-    if raw.startswith("```"): raw = "\n".join(l for l in raw.splitlines() if not l.strip().startswith("```"))
+    raw = _strip_json_fence(raw.strip())
 
     try: parsed = json.loads(raw)
     except json.JSONDecodeError:
