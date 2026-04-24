@@ -16,7 +16,7 @@ from . import database as db
 from . import client_manager as cm
 from .classifier import classify_tool
 from .scanner import ALL_PROVIDERS, call_llm, detect_llm_provider as _detect_llm_provider, run_cisco_scan, run_snyk_scan, run_security_scan, auto_detect_providers as _auto_detect_providers, merge_findings as _merge_findings
-from .mcpsafety_scanner import run_mcpsafety_scan, run_mcpsafety_scan_multi
+from .mcpsafety_scanner import run_mcpsafety_scan, run_mcpsafety_scan_multi, run_deterministic_scan
 from .arg_scanner import SSRF_RE, scan_args_for_threats
 from .aux_integrations import kali_recon, burp_proxy_evidence
 from .security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
@@ -914,14 +914,10 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
     if provider is None or provider == "all":
         providers_to_run = _auto_detect_providers()
         if not providers_to_run:
-            return json.dumps({
-                "error": "No scanners available.",
-                "hint": (
-                    "cisco-ai-mcp-scanner ships with this package — ensure it is installed. "
-                    "Set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY for MCPSafety+, "
-                    "or SNYK_TOKEN + snyk-agent-scan for Snyk."
-                ),
-            })
+            findings = run_deterministic_scan(server_id=server_id, tools=tools)
+            scan_id = db.store_security_scan(server_id, findings)
+            findings["scan_id"] = scan_id
+            return json.dumps(findings, indent=2)
     else:
         providers_to_run = [provider]
 

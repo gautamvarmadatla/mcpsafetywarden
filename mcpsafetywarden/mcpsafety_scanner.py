@@ -37,6 +37,7 @@ import json
 import logging
 import os
 import time
+import re
 import urllib.parse as _urlparse
 from typing import Any, Dict, List, Optional
 
@@ -48,7 +49,7 @@ from .security_utils import redact_args as _redact_probe_args
 from .security_utils import redact_text as _redact_in_text
 from .security_utils import redact_findings as _redact_findings
 from .security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
-from .arg_scanner import SSRF_RE, scan_args_for_threats, _safe_json_dict, _safe_json_list, _inspect_probe_args
+from .arg_scanner import SSRF_RE, scan_args_for_threats, _safe_json_dict, _safe_json_list, _inspect_probe_args, _PROMPT_INJECTION_RE
 from .aux_integrations import (
     kali_recon, burp_proxy_evidence, _burp_hacker,
     _find_aux_server, _call_aux_tool, _aux_tool_exists, _extract_host_port,
@@ -1840,4 +1841,132 @@ async def run_mcpsafety_scan_multi(
         "server_results": per_server,
         "provider": f"mcpsafety+{llm_provider}",
         "model": model_id or "default",
+    }
+
+
+_SUSPICIOUS_TOOL_NAME_RE = re.compile(
+    r"(exec|shell|eval|spawn|popen|system|run_cmd|run_command|execute|invoke_shell"
+    r"|exfil|exfiltrate|upload_data|send_data|post_data"
+    r"|override|bypass|jailbreak|disable_safety|remove_restriction"
+    r"|read_all|dump_all|list_all_files|list_secrets|read_secrets"
+    r"|get_credentials|steal|harvest)",
+    re.IGNORECASE,
+)
+
+_SUSPICIOUS_DESC_RE = re.compile(
+    r"(ignore\s+(all\s+)?previous\s+instructions?"
+    r"|disregard\s+(all\s+)?previous"
+    r"|you\s+are\s+now\s+(a|an)\b"
+    r"|act\s+as\s+(a|an)\b.{0,40}(without\s+restriction|unrestricted)"
+    r"|exfiltrat|send.{0,30}(to\s+)?(remote|external|attacker)"
+    r"|override\s+(safety|restriction|instruction)"
+    r"|always\s+(include|append|prepend|add).{0,60}(every|all)\s+(response|output|result)"
+    r"|do\s+not\s+(tell|inform|mention).{0,40}(user|human)"
+    r")",
+    re.IGNORECASE,
+)
+
+_RISKY_PARAM_RE = re.compile(
+    r"\b(command|cmd|exec|shell|eval|script|code|payload"
+    r"|url|uri|endpoint|host|target|destination|redirect"
+    r"|path|filepath|filename|directory|dir"
+    r"|query|sql|expression|template)\b",
+    re.IGNORECASE,
+)
+
+_RISK_ORDER_DET = {"HIGH": 3, "MEDIUM": 2, "LOW": 1, "NONE": 0}
+
+
+def run_deterministic_scan(
+    server_id: str,
+    tools: List[Dict],
+) -> Dict[str, Any]:
+    """
+    Deterministic metadata scan — no LLM required.
+
+    Checks tool names, descriptions, and parameter names against known-bad patterns:
+    - Prompt injection phrases in descriptions
+    - Suspicious tool names (exec, exfil, shell, override, etc.)
+    - High-risk parameter names (cmd, url, path, sql, template, etc.)
+    - Tool shadowing (duplicate tool names)
+    - Missing descriptions (opacity risk)
+    """
+    tool_findings: List[Dict] = []
+    server_risks: List[str] = []
+    seen_names: Dict[str, int] = {}
+    worst = "NONE"
+
+    for tool in tools:
+        name: str = tool.get("name") or ""
+        desc: str = tool.get("description") or ""
+        schema: Dict = tool.get("input_schema") or tool.get("schema") or {}
+        params: List[str] = list((schema.get("properties") or {}).keys())
+
+        issues: List[str] = []
+        risk_level = "NONE"
+
+        if _PROMPT_INJECTION_RE.search(desc):
+            issues.append("Prompt injection phrase detected in description")
+            risk_level = "HIGH"
+
+        if _SUSPICIOUS_DESC_RE.search(desc):
+            issues.append("Suspicious instruction pattern in description")
+            risk_level = "HIGH" if risk_level != "HIGH" else risk_level
+
+        if _SUSPICIOUS_TOOL_NAME_RE.search(name):
+            issues.append(f"Tool name '{name}' matches high-risk pattern")
+            if _RISK_ORDER_DET.get(risk_level, 0) < _RISK_ORDER_DET["MEDIUM"]:
+                risk_level = "MEDIUM"
+
+        risky_params = [p for p in params if _RISKY_PARAM_RE.search(p)]
+        if risky_params:
+            issues.append(f"High-risk parameter name(s): {', '.join(risky_params)}")
+            if _RISK_ORDER_DET.get(risk_level, 0) < _RISK_ORDER_DET["LOW"]:
+                risk_level = "LOW"
+
+        if not desc.strip():
+            issues.append("Tool has no description — behavior is opaque")
+            if _RISK_ORDER_DET.get(risk_level, 0) < _RISK_ORDER_DET["LOW"]:
+                risk_level = "LOW"
+
+        seen_names[name] = seen_names.get(name, 0) + 1
+
+        if issues:
+            tool_findings.append({
+                "name": name,
+                "risk_level": risk_level,
+                "finding": "; ".join(issues),
+                "categories": ["deterministic"],
+            })
+            if _RISK_ORDER_DET.get(risk_level, 0) > _RISK_ORDER_DET.get(worst, 0):
+                worst = risk_level
+
+    shadows = [n for n, c in seen_names.items() if c > 1]
+    if shadows:
+        server_risks.append(f"Duplicate tool names detected (tool shadowing): {', '.join(shadows)}")
+        if _RISK_ORDER_DET.get(worst, 0) < _RISK_ORDER_DET["MEDIUM"]:
+            worst = "MEDIUM"
+
+    if worst == "NONE" and tools:
+        summary = f"Deterministic scan of {len(tools)} tool(s) — no suspicious patterns found."
+    elif not tools:
+        summary = "No tools registered; nothing to scan."
+    else:
+        high = sum(1 for f in tool_findings if f["risk_level"] == "HIGH")
+        med = sum(1 for f in tool_findings if f["risk_level"] == "MEDIUM")
+        low = sum(1 for f in tool_findings if f["risk_level"] == "LOW")
+        summary = (
+            f"Deterministic scan of {len(tools)} tool(s): "
+            f"{high} HIGH, {med} MEDIUM, {low} LOW findings. "
+            "No active probing performed — run a full scan with an LLM provider for deeper analysis."
+        )
+
+    return {
+        "overall_risk_level": worst,
+        "summary": summary,
+        "tool_findings": tool_findings,
+        "server_level_risks": server_risks,
+        "provider": "deterministic",
+        "model": "pattern-match",
+        "server_id": server_id,
     }

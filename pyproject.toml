@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcpsafetywarden"
-version = "0.1.2"
+version = "0.1.3"
 description = "MCP proxy server with behavioral profiling, security scanning, risk gating, and safe execution"
 readme = "README.md"
 requires-python = ">=3.10"
