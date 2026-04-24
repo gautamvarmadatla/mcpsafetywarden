@@ -5,6 +5,11 @@
 
 MCP safety warden is a proxy server that wraps any MCP server and adds behavioral profiling, security scanning, risk gating, and safe execution to its tools.
 
+[![PyPI](https://img.shields.io/pypi/v/mcpsafetywarden)](https://pypi.org/project/mcpsafetywarden/)
+[![MCP Registry](https://img.shields.io/badge/MCP%20Registry-listed-blue)](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.gautamvarmadatla%2Fmcpsafetywarden/versions/0.1.2)
+
+> **Listed on the [official MCP server registry](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.gautamvarmadatla%2Fmcpsafetywarden/versions/0.1.2)** - discoverable by any MCP-compatible client.
+
 ## Overview
 
 Most MCP servers expose tools with no information about what those tools actually do at runtime: whether they write data, call external services, delete things, or produce outputs that contain adversarial content.
@@ -105,21 +110,27 @@ Set at minimum `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` before
 ## Installation
 
 ```bash
-git clone <YOUR_REPO_URL>
-cd mcpsafetywarden
-pip install .
+pip install mcpsafetywarden
 ```
 
 With all optional LLM providers and scanners:
 
 ```bash
-pip install ".[all]"
+pip install "mcpsafetywarden[all]"
 ```
 
 Or pick specific extras:
 
 ```bash
-pip install ".[anthropic,snyk]"
+pip install "mcpsafetywarden[anthropic,snyk]"
+```
+
+To install from source:
+
+```bash
+git clone https://github.com/gautamvarmadatla/mcpsafetywarden
+cd mcpsafetywarden
+pip install .
 ```
 
 Verify the install:
@@ -331,11 +342,17 @@ mcpsafetywarden/
 │   ├── profiler.py             # Builds behavior profiles from run history
 │   ├── scanner.py              # LLM, Cisco AI Defense, Snyk scan orchestration
 │   ├── mcpsafety_scanner.py    # Five-stage pentest pipeline (Recon, Planner, Hacker, Auditor, Supervisor)
+│   ├── arg_scanner.py          # Regex patterns and argument threat detection
+│   ├── aux_integrations.py     # Kali and Burp Suite MCP integrations
 │   └── security_utils.py       # Text normalisation, redaction, credential detection
 ├── examples/
 │   └── quickstart.ipynb
 ├── tests/
-│   └── test_suite.py
+│   ├── conftest.py
+│   ├── test_registration.py
+│   ├── test_tool_ops.py
+│   ├── test_scanning.py
+│   └── test_misc.py
 ├── docs/
 │   ├── TOOLS.md
 │   ├── CLI.md
@@ -380,13 +397,16 @@ Every module uses `logging.getLogger(__name__)`. The server does not call `loggi
 
 ## Testing
 
-A test suite is available at `tests/test_suite.py`. Run it with:
-
 ```bash
-python tests/test_suite.py
+pytest tests/ -v
 ```
 
-Set `ANTHROPIC_API_KEY` (or another provider key) before running if you want LLM-assisted classification and scanning tests to execute. To validate behavior manually:
+Set `ANTHROPIC_API_KEY` (or another provider key) before running to include LLM-assisted tests. Without a key, LLM tests are skipped automatically.
+
+```bash
+pytest tests/ -v -k "no_llm"   # only no-LLM tests
+pytest tests/ -v -k "with_llm" # only LLM tests
+``` To validate behavior manually:
 
 **Verify tool classification:**
 
