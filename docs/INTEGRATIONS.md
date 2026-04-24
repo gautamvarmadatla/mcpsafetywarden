@@ -124,4 +124,4 @@ Or pass it directly on the scan command:
 mcpsafetywarden scan my-server --provider snyk --api-key snyk_uat.<your_token> --yes
 ```
 
-Unlike Kali and Burp, Snyk is **not** auto-activated on every scan - it only runs when explicitly chosen as the provider via `--provider snyk` or `provider="snyk"`.
+Snyk is included automatically when `--provider` is omitted or set to `all`, provided `snyk-agent-scan` is installed and `SNYK_TOKEN` is set.

@@ -90,19 +90,25 @@ mcpsafetywarden inspect my-server --provider anthropic --model claude-opus-4-7 -
 **`scan <server_id>`**
 Run a security scan against a single server. Prompts for authorization before probing.
 
-- `anthropic`, `openai`, `gemini`, `ollama` - mcpsafety+ 5-stage pipeline (Recon -> Planner -> Hacker -> Auditor -> Supervisor)
-- `cisco` - Cisco AI Defense: AST taint analysis, YARA rules, optional cloud ML engine
-- `snyk` - Snyk: prompt injection, tool shadowing, toxic data flows, hardcoded secrets
+`--provider` is optional. When omitted (or set to `all`), all available scanners run in parallel and findings are merged:
+
+| Provider | What runs | Keys needed |
+|---|---|---|
+| _(omitted)_ or `all` | Auto-detect: everything available | none required |
+| `cisco` | YARA + Readiness (always); LLM/Behavioral + cloud engine if keys set | none required |
+| `snyk` | 20 metadata checks: prompt injection, tool shadowing, hardcoded secrets | `SNYK_TOKEN` |
+| `anthropic` / `openai` / `gemini` / `ollama` | MCPSafety+ 5-stage pipeline | LLM API key |
 
 For Ollama set `OLLAMA_MODEL` before running. Web research (DuckDuckGo/HackerNews/Arxiv CVE lookup in the Auditor stage) is skipped by default to avoid leaking findings externally; pass `--web-research` to enable it.
 
-If a **Kali MCP** server is registered, nmap and traceroute results are shown after the findings table and included in `--json` output under `network_scan`. If a **Burp Suite MCP** server is registered, the number of HTTP-layer findings Burp contributed is shown as a summary line; use `--json` for the full evidence.
+If a **Kali MCP** server is registered, nmap and traceroute results are shown after the findings table. If a **Burp Suite MCP** server is registered, HTTP-layer findings are included automatically.
 
 ```bash
+mcpsafetywarden scan my-server                               # auto-detect, no keys needed
+mcpsafetywarden scan my-server --provider all                # same, explicit
 mcpsafetywarden scan my-server --provider anthropic
-mcpsafetywarden scan my-server --provider anthropic --model claude-opus-4-7 --api-key sk-ant-...
-mcpsafetywarden scan my-server --provider ollama              # local model, no API key
 mcpsafetywarden scan my-server --provider cisco
+mcpsafetywarden scan my-server --provider snyk --api-key snyk_uat...
 mcpsafetywarden scan my-server --provider anthropic --web-research --destructive --timeout 600 --yes
 ```
 

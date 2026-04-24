@@ -275,7 +275,7 @@ def cmd_inspect(
 @app.command("scan")
 def cmd_scan(
     server_id: str = typer.Argument(...),
-    provider: str = typer.Option(..., "--provider", "-p", help="anthropic | openai | gemini | ollama | cisco | snyk"),
+    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="anthropic | openai | gemini | ollama | cisco | snyk | all  (default: auto-detect)"),
     model: Optional[str] = typer.Option(None, "--model"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
     destructive: bool = typer.Option(False, "--destructive", help="Enable path traversal / command injection probes"),

@@ -15,7 +15,7 @@ from starlette.types import ASGIApp
 from . import database as db
 from . import client_manager as cm
 from .classifier import classify_tool
-from .scanner import ALL_PROVIDERS, call_llm, detect_llm_provider as _detect_llm_provider, run_cisco_scan, run_snyk_scan, run_security_scan
+from .scanner import ALL_PROVIDERS, call_llm, detect_llm_provider as _detect_llm_provider, run_cisco_scan, run_snyk_scan, run_security_scan, auto_detect_providers as _auto_detect_providers, merge_findings as _merge_findings
 from .mcpsafety_scanner import (
     run_mcpsafety_scan, run_mcpsafety_scan_multi, SSRF_RE, scan_args_for_threats,
     kali_recon, burp_proxy_evidence,
@@ -852,7 +852,7 @@ async def run_replay_test(
 @mcp.tool()
 async def security_scan_server(
     server_id: str,
-    provider: str,
+    provider: Optional[str] = None,
     model_id: Optional[str] = None,
     api_key: Optional[str] = None,
     confirm_authorized: bool = False,
@@ -864,31 +864,30 @@ async def security_scan_server(
     Run a live security audit on a registered server's tools.
 
 provider options:
-        "anthropic"  - 5-stage pentest pipeline: Recon -> Planner -> Hacker (live probing) ->
-        "openai"       Auditor (CVE/Arxiv research) -> Supervisor (final report + coverage gaps).
-        "gemini"       Shorthand for mcpsafety+<provider>. Requires live server connection.
-        "ollama"       api_key = LLM provider API key (falls back to env var).
-                       Ollama: set OLLAMA_MODEL + optionally OLLAMA_BASE_URL (default localhost:11434).
-      "cisco"        - AST + taint analysis + YARA rules offline; optional Cisco cloud ML engine.
-                       api_key = Cisco AI Defense key (optional, enables cloud ML engine)
-                       Set MCP_SCANNER_LLM_API_KEY for Cisco's internal LLM analysis
-      "snyk"         - prompt injection, tool shadowing, toxic data flows, hardcoded secrets.
-                       api_key = Snyk token (optional but needed for E001 prompt-injection detection)
-                       Falls back to SNYK_TOKEN env var
+        null / omitted  - auto-detect: Cisco YARA+Readiness always; MCPSafety+ if LLM key set;
+                          Snyk if installed + SNYK_TOKEN set. All available run in parallel.
+        "all"           - same as auto-detect but explicit.
+        "anthropic"     - MCPSafety+ 5-stage pentest pipeline (shorthand for mcpsafety+anthropic).
+        "openai"          Shorthand for mcpsafety+<provider>. api_key = LLM provider API key.
+        "gemini"
+        "ollama"          Set OLLAMA_MODEL + optionally OLLAMA_BASE_URL.
+        "cisco"         - YARA + Readiness (always offline); LLM/Behavioral if MCP_SCANNER_LLM_API_KEY
+                          set; cloud engine if MCP_SCANNER_API_KEY set. api_key = Cisco cloud key.
+        "snyk"          - 20 metadata checks: prompt injection, tool shadowing, hardcoded secrets.
+                          api_key = Snyk token (falls back to SNYK_TOKEN env var).
 
-mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama"):
-        confirm_authorized:      MUST be True - confirms you own and are authorized to test this server
-      allow_destructive_probes: enable path traversal, command injection, credential file probes
-                                 (default False - safe edge-case inputs only)
-      skip_web_research:         skip DuckDuckGo/HackerNews/Arxiv CVE research (prevents leaking findings)
-      scan_timeout_s:            hard timeout for the entire scan in seconds (default 300, max 3600)
+mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", auto):
+        confirm_authorized:       MUST be True - confirms you own and are authorized to test this server
+        allow_destructive_probes: enable path traversal / command injection probes (default False)
+        skip_web_research:        skip CVE/Arxiv research to avoid leaking findings (default True)
+        scan_timeout_s:           hard timeout per scan in seconds (default 300, max 3600)
 
     Results are stored and automatically included in future preflight_tool_call responses.
     """
     if provider in _LLM_SHORTHANDS:
         provider = f"mcpsafety+{provider}"
 
-    if provider not in ALL_PROVIDERS:
+    if provider is not None and provider not in ALL_PROVIDERS:
         return json.dumps({
             "error": f"Unknown provider '{provider}'.",
             "valid_providers": sorted(_LLM_SHORTHANDS) + ALL_PROVIDERS,
@@ -904,45 +903,54 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama"):
 
     tools = db.list_tools(server_id)
     if not tools:
-            return json.dumps({
+        return json.dumps({
             "error": f"No tools found for '{server_id}'.",
             "hint": "Run inspect_server first.",
         })
 
     scan_timeout_s = max(30, min(scan_timeout_s, 3600))
 
-    _log.info(
-        "security_scan_server server_id=%s provider=%s timeout=%ds",
-        server_id, provider, scan_timeout_s,
-    )
+    if provider is None or provider == "all":
+        providers_to_run = _auto_detect_providers()
+        if not providers_to_run:
+            return json.dumps({
+                "error": "No scanners available.",
+                "hint": (
+                    "cisco-ai-mcp-scanner ships with this package — ensure it is installed. "
+                    "Set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY for MCPSafety+, "
+                    "or SNYK_TOKEN + snyk-agent-scan for Snyk."
+                ),
+            })
+    else:
+        providers_to_run = [provider]
 
-    try:
-        if provider == "cisco":
-                findings = await run_cisco_scan(
-                server_id=server_id,
-                server_config=server,
-                cisco_api_key=api_key,
-            )
-        elif provider == "snyk":
-                findings = await run_snyk_scan(
-                server_id=server_id,
-                server_config=server,
-                snyk_token=api_key,
-            )
-        else:
-            llm_provider = provider.split("+", 1)[1]
-            findings = await run_mcpsafety_scan(
-                server_id=server_id,
-                tools=tools,
-                server_config=server,
-                llm_provider=llm_provider,
-                model_id=model_id,
-                api_key=api_key,
+    _log.info("security_scan_server server_id=%s providers=%s timeout=%ds", server_id, providers_to_run, scan_timeout_s)
+
+    async def _run_one(prov: str) -> Dict[str, Any]:
+        try:
+            if prov == "cisco":
+                return await run_cisco_scan(server_id=server_id, server_config=server, cisco_api_key=api_key)
+            if prov == "snyk":
+                return await run_snyk_scan(server_id=server_id, server_config=server, snyk_token=api_key)
+            llm_prov = prov.split("+", 1)[1]
+            return await run_mcpsafety_scan(
+                server_id=server_id, tools=tools, server_config=server,
+                llm_provider=llm_prov, model_id=model_id, api_key=api_key,
                 confirm_authorized=confirm_authorized,
                 allow_destructive_probes=allow_destructive_probes,
                 skip_web_research=skip_web_research,
                 scan_timeout_s=scan_timeout_s,
             )
+        except Exception as exc:
+            _log.error("security_scan_server provider=%s failed: %s", prov, exc, exc_info=True)
+            return {"error": str(exc), "provider": prov}
+
+    try:
+        if len(providers_to_run) == 1:
+            findings = await _run_one(providers_to_run[0])
+        else:
+            results = await asyncio.gather(*[_run_one(p) for p in providers_to_run])
+            findings = _merge_findings(server_id, list(results))
 
         scan_id = db.store_security_scan(server_id, findings)
         findings["scan_id"] = scan_id
@@ -953,7 +961,7 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama"):
     except (ValueError, RuntimeError) as exc:
         return json.dumps({"error": str(exc)})
     except Exception as exc:
-        _log.error("security_scan_server failed for %s provider=%s: %s", server_id, provider, exc, exc_info=True)
+        _log.error("security_scan_server failed for %s: %s", server_id, exc, exc_info=True)
         return json.dumps({"error": "Internal error. Check server logs."})
 
 

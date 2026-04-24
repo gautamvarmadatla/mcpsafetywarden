@@ -193,7 +193,7 @@ LLM_PROVIDERS = {
 }
 
 ALL_PROVIDERS = [
-    "cisco", "snyk",
+    "cisco", "snyk", "all",
     "mcpsafety+anthropic", "mcpsafety+openai", "mcpsafety+gemini", "mcpsafety+ollama",
 ]
 
@@ -206,6 +206,106 @@ def detect_llm_provider() -> Optional[str]:
     if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
         return "gemini"
     return None
+
+
+def _cisco_available() -> bool:
+    try:
+        import mcpscanner  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _snyk_available() -> bool:
+    if not os.environ.get("SNYK_TOKEN"):
+        return False
+    try:
+        import agent_scan  # noqa: F401
+        return True
+    except ImportError:
+        return bool(shutil.which("snyk-agent-scan") or shutil.which("uvx"))
+
+
+def auto_detect_providers() -> List[str]:
+    providers = []
+    if _cisco_available():
+        providers.append("cisco")
+    llm = detect_llm_provider()
+    if llm:
+        providers.append(f"mcpsafety+{llm}")
+    if _snyk_available():
+        providers.append("snyk")
+    return providers
+
+
+def _risk_order(level: str) -> int:
+    return {"HIGH": 3, "MEDIUM": 2, "LOW": 1, "NONE": 0}.get((level or "").upper(), 0)
+
+
+def merge_findings(server_id: str, results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    tool_map: Dict[str, Dict[str, Any]] = {}
+    server_level_risks: List[str] = []
+    worst = "NONE"
+    providers_run: List[str] = []
+
+    for r in results:
+        if not r or "error" in r:
+            continue
+        prov = r.get("provider", "unknown")
+        if prov not in providers_run:
+            providers_run.append(prov)
+        if _risk_order(r.get("overall_risk_level", "NONE")) > _risk_order(worst):
+            worst = r["overall_risk_level"]
+        for slr in r.get("server_level_risks", []):
+            tagged = f"[{prov}] {slr}"
+            if tagged not in server_level_risks:
+                server_level_risks.append(tagged)
+        for tf in r.get("tool_findings", []):
+            name = tf.get("name", "unknown")
+            tagged_finding = f"[{prov}] {tf.get('finding', '')}" if tf.get("finding") else ""
+            if name not in tool_map:
+                tool_map[name] = {
+                    "name": name,
+                    "risk_level": tf.get("risk_level", "NONE"),
+                    "risk_tags": list(tf.get("risk_tags", [])),
+                    "finding": tagged_finding,
+                    "exploitation_scenario": tf.get("exploitation_scenario", ""),
+                    "remediation": tf.get("remediation", ""),
+                    "sources": [prov],
+                }
+            else:
+                entry = tool_map[name]
+                if _risk_order(tf.get("risk_level", "NONE")) > _risk_order(entry["risk_level"]):
+                    entry["risk_level"] = tf["risk_level"]
+                    if tf.get("exploitation_scenario"):
+                        entry["exploitation_scenario"] = tf["exploitation_scenario"]
+                    if tf.get("remediation"):
+                        entry["remediation"] = tf["remediation"]
+                for tag in tf.get("risk_tags", []):
+                    if tag not in entry["risk_tags"]:
+                        entry["risk_tags"].append(tag)
+                if tagged_finding and tagged_finding not in entry["finding"]:
+                    entry["finding"] += (" | " if entry["finding"] else "") + tagged_finding
+                if prov not in entry["sources"]:
+                    entry["sources"].append(prov)
+
+    all_findings = list(tool_map.values())
+    high   = sum(1 for t in all_findings if t["risk_level"] == "HIGH")
+    medium = sum(1 for t in all_findings if t["risk_level"] == "MEDIUM")
+
+    return {
+        "server_id": server_id,
+        "overall_risk_level": worst,
+        "summary": (
+            f"Combined scan ({', '.join(providers_run)}): "
+            f"{high} HIGH, {medium} MEDIUM across {len(all_findings)} tool(s). "
+            f"Overall: {worst}."
+        ),
+        "tool_findings": all_findings,
+        "server_level_risks": server_level_risks,
+        "providers": providers_run,
+        "provider": "combined",
+    }
 
 
 def call_llm(provider: str, model_id: Optional[str], api_key: Optional[str], prompt: str) -> str:
