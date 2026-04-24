@@ -6,8 +6,6 @@ This project solves a different problem: what happens at execution time. It inte
 
 The distinction matters because authorization and safety are not the same thing. A fully authorized agent can still pass a prompt injection payload as an argument. A trusted server can still return output that hijacks the calling agent. Governance layers do not catch this. Runtime interception does.
 
----
-
 ## How the Top 5 Gateways Were Selected
 
 Ranked by adoption: GitHub stars, funding, developer base, and enterprise market presence.
@@ -20,7 +18,6 @@ Ranked by adoption: GitHub stars, funding, developer base, and enterprise market
 | 4 | **Lunar.dev MCPX** | Gartner Representative Vendor (AI Gateways 2024-2025; MCP Gateways 2025) |
 | 5 | **TrueFoundry** | Enterprise-grade; $499/month governance tier |
 
----
 
 ## Feature Comparison
 
@@ -44,7 +41,6 @@ Ranked by adoption: GitHub stars, funding, developer base, and enterprise market
 | **Kubernetes-native deployment** | No | No | Yes | No | No | No |
 | **Pricing** | Free / open source | $2,000-$5,000+/mo for governance | Free (open source) | Free to $499/mo | Free (OSS) / Enterprise custom | $499/mo+ |
 
----
 
 ## Where This Project is Uniquely Differentiated
 
@@ -68,7 +64,6 @@ Every proxied call updates per-tool statistics: p50/p95 latency, failure rate, o
 **Cisco AI Defense + Snyk**
 Integrates with two external security platforms that no other gateway in this list supports.
 
----
 
 ## Where Others Are Ahead
 
@@ -84,7 +79,7 @@ Obot is Kubernetes-native. This project runs as a single process with in-process
 **Managed cloud hosting**
 Portkey, Composio, and TrueFoundry offer managed SaaS hosting. This project is self-hosted only.
 
----
+
 
 ## Summary
 
