@@ -7,3 +7,4 @@ behavior_profiles.db
 *.egg-info/
 dist/
 build/
+.claude/
