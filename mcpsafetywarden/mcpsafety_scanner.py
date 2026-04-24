@@ -2278,11 +2278,15 @@ async def kali_recon(target_config: Dict[str, Any], fast: bool = False) -> Dict[
     for tool_name, t_out in scan_tools:
         if _aux_tool_exists(sid, tool_name):
             _log.info("Kali Recon: %s %s", tool_name, host)
-            results[tool_name] = await _call_aux_tool(kali, tool_name, {"target": host}, timeout=t_out)
+            out = await _call_aux_tool(kali, tool_name, {"target": host}, timeout=t_out)
+            if out and not out.startswith("[AUX"):
+                results[tool_name] = out
 
     if _aux_tool_exists(sid, "traceroute"):
         _log.info("Kali Recon: traceroute %s", host)
-        results["traceroute"] = await _call_aux_tool(kali, "traceroute", {"target": host}, timeout=30.0)
+        out = await _call_aux_tool(kali, "traceroute", {"target": host}, timeout=30.0)
+        if out and not out.startswith("[AUX"):
+            results["traceroute"] = out
 
     _log.info("Kali recon done for %s (%d scans)", host, len(results) - 1)
     return results
@@ -2366,14 +2370,24 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
             await asyncio.sleep(5)
             if _aux_tool_exists(sid, "GetCollaboratorInteractions"):
                 interactions = await _call_aux_tool(burp, "GetCollaboratorInteractions", {}, timeout=15.0)
-                if interactions and not interactions.startswith("[AUX") and interactions.strip() not in ("{}", "[]", ""):
-                    findings.append({
-                        "tool": "GetCollaboratorInteractions",
-                        "finding": "Out-of-band callback received - possible blind SSRF or injection",
-                        "severity": "HIGH",
-                        "evidence": interactions[:500],
-                        "source": "burp_collaborator",
-                    })
+                if interactions and not interactions.startswith("[AUX"):
+                    try:
+                        _parsed = json.loads(interactions)
+                        _has_callbacks = (
+                            bool(_parsed) if isinstance(_parsed, list)
+                            else any(_parsed.get(k) for k in ("results", "interactions", "data"))
+                            if isinstance(_parsed, dict) else False
+                        )
+                    except (json.JSONDecodeError, ValueError):
+                        _has_callbacks = interactions.strip() not in ("{}", "[]", "")
+                    if _has_callbacks:
+                        findings.append({
+                            "tool": "GetCollaboratorInteractions",
+                            "finding": "Out-of-band callback received - possible blind SSRF or injection",
+                            "severity": "HIGH",
+                            "evidence": interactions[:500],
+                            "source": "burp_collaborator",
+                        })
 
     # Automated scanner issues (Pro only - skipped silently on Community edition)
     if _aux_tool_exists(sid, "GetScannerIssues"):
@@ -2415,7 +2429,7 @@ async def burp_proxy_evidence(target_config: Dict[str, Any]) -> str:
     _log.info("Burp Auditor: pulling proxy history for %s", host)
     raw = await _call_aux_tool(
         burp, "GetProxyHttpHistoryRegex",
-        {"regex": re.escape(host), "count": 50, "offset": 0},
+        {"regex": host, "count": 50, "offset": 0},
         timeout=20.0,
     )
     if not raw or raw.startswith("[AUX"):
