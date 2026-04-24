@@ -1,3 +1,4 @@
+<!-- mcp-name: io.github.gautamvarmadatla/mcpsafetywarden -->
 <p align="center">
   <img src="assets/logo.png" alt="MCP Safety Warden" width="1080"/>
 </p>
