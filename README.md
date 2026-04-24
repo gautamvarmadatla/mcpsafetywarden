@@ -2,13 +2,9 @@
   <img src="logo.png" alt="MCP Safety Warden" width="600"/>
 </p>
 
-# mcpsafetywarden
-
 A proxy server that wraps any MCP server and adds behavioral profiling, security scanning, risk gating, and safe execution to its tools.
 
 Instead of calling a wrapped server's tools directly, you route calls through this wrapper. It classifies each tool, builds a behavior profile from observed runs, checks for injection attacks, and can block or gate risky tools before they execute.
-
----
 
 ## Overview
 
@@ -26,8 +22,6 @@ This wrapper solves that by sitting between an MCP client and one or more wrappe
 - Stores all run telemetry in a local SQLite database.
 
 Use it when you need to audit what third-party or internal MCP tools actually do before trusting them in an agent workflow.
-
----
 
 ## Features
 
@@ -63,8 +57,6 @@ Use it when you need to audit what third-party or internal MCP tools actually do
 **Transport**
 - stdio (default), SSE, and streamable_http.
 - Bearer token auth middleware for HTTP transports.
-
----
 
 ## Architecture
 
