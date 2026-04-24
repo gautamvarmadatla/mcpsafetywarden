@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="MCP Safety Warden" width="600"/>
+</p>
+
 # mcpsafetywarden
 
 A proxy server that wraps any MCP server and adds behavioral profiling, security scanning, risk gating, and safe execution to its tools.
