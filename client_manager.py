@@ -507,23 +507,35 @@ async def inspect_server_tools(
     server = db.get_server(server_id)
     if not server: raise ValueError(f"Server '{server_id}' is not registered")
 
-    # Close the MCP connection before LLM calls: prevents holding an idle connection
-    # open for the full duration of N sequential LLM API calls.
     raw_tools = await asyncio.wait_for(_list_tools_raw(server), timeout=_INSPECT_TIMEOUT_S)
+
+    tool_ids = []
+    for t in raw_tools:
+        tool_ids.append(db.upsert_tool(server_id, t["name"], t["description"], t["schema"], t["annotations"]))
+
+    loop = asyncio.get_running_loop()
+
+    async def _classify_one(t: Dict[str, Any]) -> Any:
+        return await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: classify_tool(
+                    t["name"], t["description"], t["schema"], t["annotations"],
+                    llm_provider=llm_provider, llm_model=llm_model, llm_api_key=llm_api_key,
+                ),
+            ),
+            timeout=30,
+        )
+
+    priors = await asyncio.gather(*(_classify_one(t) for t in raw_tools), return_exceptions=True)
 
     discovered   = []
     sec_findings = []
 
-    for t in raw_tools:
-        name, description, schema, annotations = t["name"], t["description"], t["schema"], t["annotations"]
-
-        tool_id = db.upsert_tool(server_id, name, description, schema, annotations)
-        prior   = classify_tool(
-            name, description, schema, annotations,
-            llm_provider=llm_provider,
-            llm_model=llm_model,
-            llm_api_key=llm_api_key,
-        )
+    for t, tool_id, prior in zip(raw_tools, tool_ids, priors):
+        if isinstance(prior, BaseException):
+            _log.warning("classify_tool failed for %s::%s: %s", server_id, t["name"], prior)
+            prior = {"effect_class": "unknown", "confidence": {}}
 
         sec_finding = prior.pop("_security_finding", None)
         if sec_finding: sec_findings.append(sec_finding)
@@ -532,8 +544,8 @@ async def inspect_server_tools(
 
         discovered.append({
             "tool_id":     tool_id,
-            "name":        name,
-            "description": description[:120],
+            "name":        t["name"],
+            "description": t["description"][:120],
             "effect_class":prior["effect_class"],
             "confidence":  prior["confidence"].get("effect_class", 0.0),
         })
