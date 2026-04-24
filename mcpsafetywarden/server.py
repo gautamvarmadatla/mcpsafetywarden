@@ -702,12 +702,11 @@ def suggest_safer_alternative(
             "_security_flag": s.get("risk_level") if s else None,
         })
 
-    effective_provider = llm_provider or _detect_llm_provider()
-    if effective_provider:
+    if effective_llm:
         llm_alts = _llm_suggest_alternatives(
             tool_name, tool.get("description", ""), current_effect, current_destr,
             current_sec_risk, current_sec_tags, candidates,
-            effective_provider, llm_model, llm_api_key,
+            effective_llm, llm_model, llm_api_key,
         )
         if llm_alts:
             return json.dumps({
@@ -1080,10 +1079,10 @@ async def _call_and_format(
                 "Re-call with args_scan_override=True to override (use with caution)."
             )
             return json.dumps({
+                **{k: v for k, v in threat.items() if k != "reason"},
                 "blocked": True,
                 "reason": "arg_scan_blocked",
                 "tool": tool_name,
-                **{k: v for k, v in threat.items() if k != "reason"},
                 "llm_reason": threat.get("reason", ""),
                 "message": msg,
             }, indent=2)

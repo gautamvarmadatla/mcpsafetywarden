@@ -22,10 +22,17 @@ _CTRL_CHARS_RE  = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 def strip_json_fence(text: str) -> str:
-    """Remove markdown code fences (``` ... ```) that LLMs sometimes add around JSON output."""
-    if text.startswith("```"):
-        return "\n".join(ln for ln in text.splitlines() if not ln.strip().startswith("```"))
-    return text
+    stripped = text.strip()
+    if "```" not in stripped:
+        return text
+    lines = stripped.splitlines()
+    in_fence, result = False, []
+    for ln in lines:
+        if ln.strip().startswith("```"):
+            in_fence = not in_fence
+        elif in_fence:
+            result.append(ln)
+    return "\n".join(result) if result else "\n".join(ln for ln in lines if not ln.strip().startswith("```"))
 
 
 def sanitise_for_prompt(text: str, max_len: int = 300) -> str:
