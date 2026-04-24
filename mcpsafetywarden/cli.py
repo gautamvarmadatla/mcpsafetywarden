@@ -59,11 +59,18 @@ def _die(result):
         raise typer.Exit(1)
 
 
+def _strip_quotes(s: str) -> str:
+    s = s.replace('\\"', '"')
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        return s[1:-1]
+    return s
+
+
 def _parse_args(args_str: Optional[str]) -> dict:
     if not args_str:
         return {}
     try:
-        parsed = json.loads(args_str)
+        parsed = json.loads(_strip_quotes(args_str))
         if not isinstance(parsed, dict):
             err.print("[red]--args must be a JSON object[/red]")
             raise typer.Exit(1)
@@ -77,7 +84,7 @@ def _parse_json_array(s: Optional[str], name: str) -> Optional[list]:
     if not s:
         return None
     try:
-        parsed = json.loads(s)
+        parsed = json.loads(_strip_quotes(s))
         if not isinstance(parsed, list):
             err.print(f"[red]{name} must be a JSON array[/red]")
             raise typer.Exit(1)
@@ -91,7 +98,7 @@ def _parse_json_opt(s: Optional[str], name: str) -> Optional[dict]:
     if not s:
         return None
     try:
-        parsed = json.loads(s)
+        parsed = json.loads(_strip_quotes(s))
     except json.JSONDecodeError as e:
         err.print(f"[red]Invalid JSON in {name}: {e}[/red]")
         raise typer.Exit(1)

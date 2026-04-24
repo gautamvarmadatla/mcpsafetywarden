@@ -4,6 +4,15 @@
 
 All commands support `--json` for machine-readable output. Commands with confirmation prompts support `--yes` / `-y` to skip them.
 
+**Windows PowerShell note:** PowerShell strips double quotes from JSON arguments. Use backslash-escaped quotes inside single quotes:
+```powershell
+# bash / cmd
+mcpsafetywarden call my-server read_file --args '{"path": "/tmp/data.txt"}'
+
+# PowerShell
+mcpsafetywarden call my-server read_file --args '{\"path\": \"/tmp/data.txt\"}'
+```
+
 ### Typical workflow
 
 ```bash
