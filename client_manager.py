@@ -17,7 +17,7 @@ from mcp.client.stdio import stdio_client
 
 import database as db
 from classifier import classify_tool
-from profiler import get_or_build_profile, update_tool_profile
+from profiler import get_or_build_profile, update_tool_profile, maybe_update_tool_profile
 from security_utils import normalise_output as _normalise, redact_args as _redact_args, redact_text as _redact_text, sanitise_for_prompt as _sanitise_for_prompt, looks_like_secret as _looks_like_secret
 from scanner import call_llm as _call_llm, detect_llm_provider as _detect_llm_provider
 
@@ -669,7 +669,8 @@ async def call_tool_with_telemetry(
         )
         stored_prior = db.get_profile(tool_id)
         if stored_prior:
-            update_tool_profile(tool_id, stored_prior)
+            run_count = stored_prior.get("run_count", 0)
+            maybe_update_tool_profile(tool_id, stored_prior, run_count)
     except Exception as db_exc:
         logging.getLogger(__name__).warning("telemetry write failed for tool %s: %s", tool_id, db_exc)
 

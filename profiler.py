@@ -66,10 +66,20 @@ def compute_profile_from_runs(tool_id: str, prior: Dict[str, Any]) -> Dict[str, 
     return profile
 
 
+_UPDATE_EVERY_N_RUNS = 10  # recompute percentiles after this many new calls
+
+
 def update_tool_profile(tool_id: str, prior: Dict[str, Any]) -> Dict[str, Any]:
     profile = compute_profile_from_runs(tool_id, prior)
     db.upsert_profile(tool_id, profile)
     return profile
+
+
+def maybe_update_tool_profile(tool_id: str, prior: Dict[str, Any], run_count: int) -> Optional[Dict[str, Any]]:
+    """Update profile only every N runs to avoid reading 500 rows on every call."""
+    if run_count % _UPDATE_EVERY_N_RUNS != 0:
+        return None
+    return update_tool_profile(tool_id, prior)
 
 
 def get_or_build_profile(
