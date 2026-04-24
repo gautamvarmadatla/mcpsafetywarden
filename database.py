@@ -3,6 +3,7 @@ import os
 import sqlite3
 import json
 import hashlib
+import threading
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
@@ -61,8 +62,17 @@ def _jloads(s: str, default: Any) -> Any:
 
 DB_PATH = Path(__file__).parent / "behavior_profiles.db"
 
+_init_lock = threading.Lock()
+_initialized = False
+
 
 def get_connection() -> sqlite3.Connection:
+    global _initialized
+    if not _initialized:
+        with _init_lock:
+            if not _initialized:
+                init_db()
+                _initialized = True
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 5000")

@@ -107,8 +107,6 @@ _MAX_ARG_LEN       = 1024
 _MAX_ENV_VARS      = 50
 _MAX_HEADER_PAIRS  = 20
 
-db.init_db()
-
 mcp = FastMCP(
     "mcpsafetywarden",
     instructions=(
