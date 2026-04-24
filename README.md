@@ -331,6 +331,8 @@ mcpsafetywarden/
 │   ├── scanner.py              # LLM, Cisco AI Defense, Snyk scan orchestration
 │   ├── mcpsafety_scanner.py    # Five-stage pentest pipeline (Recon, Planner, Hacker, Auditor, Supervisor)
 │   └── security_utils.py       # Text normalisation, redaction, credential detection
+├── examples/
+│   └── quickstart.ipynb
 ├── tests/
 │   └── test_suite.py
 ├── docs/
