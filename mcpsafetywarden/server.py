@@ -367,9 +367,10 @@ def list_server_tools(server_id: str) -> str:
             "hint": "Run inspect_server first.",
         })
 
+    profiles = db.get_profiles_batch([t["tool_id"] for t in tools])
     rows = []
     for t in tools:
-        p = db.get_profile(t["tool_id"])
+        p = profiles.get(t["tool_id"])
         rows.append({
             "name": t["tool_name"],
             "description": (t["description"] or "")[:100],

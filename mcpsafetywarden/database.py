@@ -438,6 +438,27 @@ def upsert_profile(tool_id: str, profile: Dict[str, Any]) -> None:
     finally: conn.close()
 
 
+def get_profiles_batch(tool_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    if not tool_ids:
+        return {}
+    conn = get_connection()
+    try:
+        placeholders = ",".join("?" * len(tool_ids))
+        rows = conn.execute(
+            f"SELECT * FROM behavior_profiles WHERE tool_id IN ({placeholders})",
+            tool_ids,
+        ).fetchall()
+        result: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            d = dict(row)
+            d["confidence"] = _jloads(d.pop("confidence_json", "{}"), {})
+            d["evidence"] = _jloads(d.pop("evidence_json", "[]"), [])
+            d["open_world"] = bool(d["open_world"])
+            result[d["tool_id"]] = d
+        return result
+    finally: conn.close()
+
+
 def get_profile(tool_id: str) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     try:
