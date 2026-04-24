@@ -419,7 +419,7 @@ async def _open_streams(server: Dict[str, Any]) -> AsyncGenerator[Tuple[Any, Any
     headers: Dict[str, str] = server.get("headers") or {}
 
     if transport == "stdio":
-        env_override = server.get("env") or {}
+        env_override = {str(k): str(v) for k, v in (server.get("env") or {}).items()}
         if env_override:
             base_env = {k: v for k, v in _os.environ.items()
                         if k in ("PATH", "HOME", "TEMP", "TMP", "SYSTEMROOT", "COMSPEC")}
