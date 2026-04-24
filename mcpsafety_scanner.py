@@ -1031,39 +1031,42 @@ async def scan_args_for_threats(
     if not flagged:
         return None
 
-    arg_path, value_snippet, categories = flagged[0]
-
     all_flagged = [
         {"arg": p, "value": v[:200], "categories": c}
         for p, v, c in flagged
     ]
 
     if llm_provider:
-        verdict = await _llm_verify_arg_threat(
-            value_snippet, arg_path, tool_name, tool_description,
-            categories, llm_provider, llm_model, llm_api_key,
-        )
-        is_attack: bool = bool(verdict.get("is_attack", True))
-        confidence: float = float(verdict.get("confidence", 0.5))
-        reason: str = str(verdict.get("reason", ""))
-
-        if not is_attack:
-            _log.info(
-                "LLM cleared false positive in '%s' arg '%s' (confidence %.2f): %s",
-                tool_name, arg_path, confidence, reason,
+        # Verify every flagged arg; only clear if ALL are false positives.
+        for arg_path, value_snippet, categories in flagged:
+            verdict = await _llm_verify_arg_threat(
+                value_snippet, arg_path, tool_name, tool_description,
+                categories, llm_provider, llm_model, llm_api_key,
             )
-            return None
+            is_attack: bool = bool(verdict.get("is_attack", True))
+            confidence: float = float(verdict.get("confidence", 0.5))
+            reason: str = str(verdict.get("reason", ""))
 
-        return {
-            "flagged_arg": arg_path,
-            "flagged_value": value_snippet[:200],
-            "categories": categories,
-            "all_flagged_args": all_flagged,
-            "llm_verified": True,
-            "llm_confidence": round(confidence, 3),
-            "reason": reason or "LLM-confirmed threat",
-        }
+            if not is_attack:
+                _log.info(
+                    "LLM cleared false positive in '%s' arg '%s' (confidence %.2f): %s",
+                    tool_name, arg_path, confidence, reason,
+                )
+                continue
 
+            return {
+                "flagged_arg": arg_path,
+                "flagged_value": value_snippet[:200],
+                "categories": categories,
+                "all_flagged_args": all_flagged,
+                "llm_verified": True,
+                "llm_confidence": round(confidence, 3),
+                "reason": reason or "LLM-confirmed threat",
+            }
+
+        return None
+
+    arg_path, value_snippet, categories = flagged[0]
     return {
         "flagged_arg": arg_path,
         "flagged_value": value_snippet[:200],
