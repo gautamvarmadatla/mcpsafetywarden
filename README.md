@@ -2,7 +2,7 @@
   <img src="logo.png" alt="MCP Safety Warden" width="1080"/>
 </p>
 
-A proxy server that wraps any MCP server and adds behavioral profiling, security scanning, risk gating, and safe execution to its tools.
+MCP safety warden is a proxy server that wraps any MCP server and adds behavioral profiling, security scanning, risk gating, and safe execution to its tools.
 
 Instead of calling a wrapped server's tools directly, you route calls through this wrapper. It classifies each tool, builds a behavior profile from observed runs, checks for injection attacks, and can block or gate risky tools before they execute.
 
