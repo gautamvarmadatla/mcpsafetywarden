@@ -1226,12 +1226,16 @@ async def safe_tool_call(
                     "_security_flag": s.get("risk_level") if s else None,
                 })
             sec = assessment.get("security") or {}
-            alternatives = _llm_suggest_alternatives(
-                tool_name, tool.get("description", ""),
-                assessment["assessment"]["likely_effect"],
-                assessment["assessment"]["likely_destructiveness"],
-                sec.get("risk_level"), sec.get("risk_tags", []),
-                candidates, effective_provider, llm_model, llm_api_key,
+            loop = asyncio.get_running_loop()
+            alternatives = await loop.run_in_executor(
+                None,
+                lambda: _llm_suggest_alternatives(
+                    tool_name, tool.get("description", ""),
+                    assessment["assessment"]["likely_effect"],
+                    assessment["assessment"]["likely_destructiveness"],
+                    sec.get("risk_level"), sec.get("risk_tags", []),
+                    candidates, effective_provider, llm_model, llm_api_key,
+                ),
             )
         except Exception as exc:
             _log.debug("alternatives suggestion failed for '%s::%s': %s", server_id, tool_name, exc)
