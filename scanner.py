@@ -576,8 +576,16 @@ snyk_token:
         # Use a restricted temp directory so the config file (which may contain
         # credentials) is never world-readable, and is cleaned up even on crash.
         tmpdir = tempfile.mkdtemp(prefix="mcp_wrapper_snyk_")
+        _is_windows = os.name == "nt"
+        if _is_windows:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "run_snyk_scan: os.chmod is a no-op on Windows. "
+                "The temp config file containing server credentials is readable by any local user "
+                "until the scan completes. Ensure no untrusted users share this host."
+            )
         try:
-            os.chmod(tmpdir, stat.S_IRWXU)  # 0o700 - owner only
+            os.chmod(tmpdir, stat.S_IRWXU)  # 0o700 - owner only (no-op on Windows)
         except OSError:
             pass
 
@@ -585,7 +593,7 @@ snyk_token:
         with open(config_path, "w") as f:
             json.dump(config, f)
         try:
-            os.chmod(config_path, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
+            os.chmod(config_path, stat.S_IRUSR | stat.S_IWUSR)  # 0o600 (no-op on Windows)
         except OSError:
             pass
 
