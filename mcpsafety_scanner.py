@@ -480,7 +480,7 @@ _COMMAND_INJECTION_RE = re.compile(
     re.IGNORECASE,
 )
 
-_SSRF_RE = re.compile(
+SSRF_RE = re.compile(
     r"(169\.254\.169\.254"             # AWS EC2 metadata
     r"|fd00:ec2::254"                  # AWS IPv6 metadata
     r"|metadata\.google\.internal"    # GCP metadata
@@ -691,7 +691,7 @@ def _scan_single_str(value: str, allow_destructive: bool) -> List[str]:
     norm = _normalise_probe_str(value)
 
     # Always block - regardless of allow_destructive
-    if _SSRF_RE.search(norm): issues.append("ssrf_target")
+    if SSRF_RE.search(norm): issues.append("ssrf_target")
     if _NULL_BYTE_RE.search(value) or _NULL_BYTE_RE.search(norm): issues.append("null_byte")
     if len(value.encode("utf-8", errors="ignore")) > _MAX_ARG_VALUE_LEN: issues.append("oversized_value")
     if _CRLF_RE.search(norm): issues.append("crlf_injection")
@@ -758,7 +758,7 @@ def _detect_base64_payloads(value: str) -> List[str]:
             continue
         norm = _normalise_probe_str(decoded)
         found: List[str] = []
-        if _SSRF_RE.search(norm): found.append("ssrf_target")
+        if SSRF_RE.search(norm): found.append("ssrf_target")
         if _COMMAND_INJECTION_RE.search(norm): found.append("command_injection")
         if _PATH_TRAVERSAL_RE.search(norm): found.append("path_traversal")
         if _SQL_INJECTION_RE.search(norm): found.append("sql_injection")
@@ -774,7 +774,7 @@ def _scan_production_value(value: str) -> List[str]:
     issues: List[str] = []
     norm = _normalise_probe_str(value)
 
-    if _SSRF_RE.search(norm): issues.append("ssrf_target")
+    if SSRF_RE.search(norm): issues.append("ssrf_target")
     if _NULL_BYTE_RE.search(value) or _NULL_BYTE_RE.search(norm): issues.append("null_byte")
     if len(value.encode("utf-8", errors="ignore")) > _MAX_ARG_VALUE_LEN: issues.append("oversized_value")
     if _CRLF_RE.search(norm): issues.append("crlf_injection")
@@ -2225,7 +2225,7 @@ def _extract_host_port(server_config: Dict[str, Any]) -> Tuple[Optional[str], Op
         return None, None
 
 
-async def _kali_recon(target_config: Dict[str, Any], fast: bool = False) -> Dict[str, Any]:
+async def kali_recon(target_config: Dict[str, Any], fast: bool = False) -> Dict[str, Any]:
     """
     Run Kali nmap quick_scan + vulnerability_scan + traceroute against the target host.
     Returns a dict keyed by tool name, or {} if Kali MCP is not registered or target is stdio.
@@ -2366,7 +2366,7 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
     return findings
 
 
-async def _burp_proxy_evidence(target_config: Dict[str, Any]) -> str:
+async def burp_proxy_evidence(target_config: Dict[str, Any]) -> str:
     """
     Pull Burp proxy HTTP history for the target host as auditor/replay evidence.
     Returns raw text (capped at 4 KB), or '' if Burp not registered or target is not HTTP.
@@ -2566,7 +2566,7 @@ async def run_mcpsafety_scan(
 
     async def _pipeline() -> Dict[str, Any]:
         # Optional Kali nmap before Recon - real port/service data for the Planner
-        network_scan = await _kali_recon(server_config)
+        network_scan = await kali_recon(server_config)
         if network_scan:
             _log.info("Kali network scan attached to recon (target=%s)", network_scan.get("nmap_target", "?"))
 
@@ -2601,7 +2601,7 @@ async def run_mcpsafety_scan(
             hacker_findings = hacker_findings + _redact_findings(burp_findings)
 
         # Optional Burp proxy history as evidence for the Auditor
-        burp_evidence = await _burp_proxy_evidence(server_config)
+        burp_evidence = await burp_proxy_evidence(server_config)
 
         _log.info("mcpsafety Stage 2: Auditor (server=%s findings=%d)", server_id, len(hacker_findings))
         auditor_findings = await _run_auditor(

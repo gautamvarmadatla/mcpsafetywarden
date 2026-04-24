@@ -17,8 +17,8 @@ import client_manager as cm
 from classifier import classify_tool
 from scanner import ALL_PROVIDERS, call_llm, detect_llm_provider as _detect_llm_provider, run_cisco_scan, run_snyk_scan, run_security_scan
 from mcpsafety_scanner import (
-    run_mcpsafety_scan, run_mcpsafety_scan_multi, _SSRF_RE, scan_args_for_threats,
-    _kali_recon, _burp_proxy_evidence,
+    run_mcpsafety_scan, run_mcpsafety_scan_multi, SSRF_RE, scan_args_for_threats,
+    kali_recon, burp_proxy_evidence,
 )
 from security_utils import sanitise_for_prompt as _sanitise_for_prompt
 
@@ -261,7 +261,7 @@ Examples:
     if headers and len(headers) > _MAX_HEADER_PAIRS:
         return json.dumps({"error": f"headers dict exceeds maximum of {_MAX_HEADER_PAIRS} entries."})
 
-    if url and _SSRF_RE.search(url):
+    if url and SSRF_RE.search(url):
         return json.dumps({"error": "URL targets a private or restricted address and cannot be registered."})
 
     if transport == "stdio" and command:
@@ -791,7 +791,7 @@ async def run_replay_test(
         result = await cm.run_replay_test(server_id, tool_name, args or {})
         server = db.get_server(server_id)
         if server:
-            burp_traffic = await _burp_proxy_evidence(server)
+            burp_traffic = await burp_proxy_evidence(server)
             if burp_traffic:
                 result["burp_proxy_traffic"] = burp_traffic
         return json.dumps(result, indent=2)
@@ -1371,7 +1371,7 @@ async def ping_server(server_id: str) -> str:
 
     server = db.get_server(server_id)
     if server:
-        network_scan = await _kali_recon(server, fast=True)
+        network_scan = await kali_recon(server, fast=True)
         if network_scan:
             result["network_scan"] = network_scan
 
