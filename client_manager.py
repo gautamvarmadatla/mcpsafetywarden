@@ -653,7 +653,7 @@ async def call_tool_with_telemetry(
 
     run_id = None
     try:
-        notes_parts = [error_msg] if error_msg else []
+        notes_parts = [error_msg[:500]] if error_msg else []
         if injection_warning:
             notes_parts.append(f"injection_warning: {injection_warning[:200]}")
         run_id = db.record_run(
