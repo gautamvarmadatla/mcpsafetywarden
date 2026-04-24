@@ -2165,7 +2165,7 @@ _PLAN_EMPTY: Dict[str, Any] = {
 def _find_aux_server(*name_keywords: str) -> Optional[Dict[str, Any]]:
     """Find a registered server whose server_id contains any keyword (case-insensitive)."""
     try:
-        for srv in db.list_servers():
+        for srv in db.list_servers(include_credentials=True):
             sid = srv.get("server_id", "").lower()
             if any(kw.lower() in sid for kw in name_keywords):
                 return srv

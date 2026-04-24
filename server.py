@@ -966,7 +966,7 @@ async def scan_all_servers(
     if rl:
         return json.dumps({"error": rl})
 
-    all_server_rows = db.list_servers()
+    all_server_rows = db.list_servers(include_credentials=True)
     if server_ids:
         sid_set = set(server_ids)
         all_server_rows = [s for s in all_server_rows if s["server_id"] in sid_set]

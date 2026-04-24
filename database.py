@@ -220,7 +220,7 @@ def get_server(server_id: str) -> Optional[Dict[str, Any]]:
     finally: conn.close()
 
 
-def list_servers() -> List[Dict[str, Any]]:
+def list_servers(include_credentials: bool = False) -> List[Dict[str, Any]]:
     conn = get_connection()
     try:
         rows = conn.execute(
@@ -236,8 +236,12 @@ def list_servers() -> List[Dict[str, Any]]:
         for row in rows:
             d = dict(row)
             d["args"] = _jloads(d.pop("args_json", "[]"), [])
-            d["env"] = _jloads(_decrypt_field(d.pop("env_json", "{}")), {})
-            d["headers"] = _jloads(_decrypt_field(d.pop("headers_json", "{}")), {})
+            if include_credentials:
+                d["env"] = _jloads(_decrypt_field(d.pop("env_json", "{}")), {})
+                d["headers"] = _jloads(_decrypt_field(d.pop("headers_json", "{}")), {})
+            else:
+                d.pop("env_json", None)
+                d.pop("headers_json", None)
             result.append(d)
         return result
     finally: conn.close()
