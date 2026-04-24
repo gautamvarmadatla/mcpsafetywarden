@@ -31,8 +31,6 @@ _SHELL_INTERPS = frozenset({
 })
 _SHELL_EVAL_FLAGS = frozenset({"-c", "/c", "/k", "-e", "-enc", "-encodedcommand", "-command"})
 
-_SERVER_AUTH_TOKEN: str = _os.environ.get("MCP_AUTH_TOKEN", "")
-
 _LLM_SHORTHANDS: frozenset = frozenset({"anthropic", "openai", "gemini", "ollama"})
 
 
@@ -55,9 +53,10 @@ def create_http_app(transport: str = "streamable_http") -> ASGIApp:
 
     transport: "streamable_http" (default) or "sse"
     """
+    token = _os.environ.get("MCP_AUTH_TOKEN", "")
     base = mcp.streamable_http_app() if transport == "streamable_http" else mcp.sse_app()
-    if _SERVER_AUTH_TOKEN:
-        return BearerAuthMiddleware(base, _SERVER_AUTH_TOKEN)
+    if token:
+        return BearerAuthMiddleware(base, token)
     _log.warning(
         "MCP_AUTH_TOKEN is not set - HTTP transport is open to any client. "
         "Set this variable or place an auth proxy in front."
