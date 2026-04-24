@@ -12,8 +12,13 @@ def _percentiles(values: List[float], *pcts: float) -> List[Optional[float]]:
     n = len(s)
     result = []
     for p in pcts:
-        idx = min(max(math.ceil(n * p) - 1, 0), n - 1)
-        result.append(s[idx])
+        # Linear interpolation avoids the ceiling bias that systematically
+        # underestimates p50 at small sample sizes (e.g. 2 runs -> always lower value).
+        idx_f = p * (n - 1)
+        lo = int(idx_f)
+        hi = min(lo + 1, n - 1)
+        frac = idx_f - lo
+        result.append(s[lo] + frac * (s[hi] - s[lo]))
     return result
 
 
