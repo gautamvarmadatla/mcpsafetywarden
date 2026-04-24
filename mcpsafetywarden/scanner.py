@@ -466,8 +466,12 @@ def _normalize_snyk_results(
     """Convert snyk-agent-scan --json output -> our common format."""
     if not isinstance(raw, dict):
         raw = {}
-    # Output is keyed by absolute config path; fall back to first key
-    path_data = (raw[config_path] if config_path in raw else None) or (list(raw.values())[0] if raw else {})
+    if config_path not in raw:
+        _log.warning(
+            "snyk-agent-scan output key %r not found (available: %s) - results may be misattributed",
+            config_path, list(raw.keys())[:3],
+        )
+    path_data = raw.get(config_path) or {}
 
     top_error = path_data.get("error")
     servers   = path_data.get("servers", [])
