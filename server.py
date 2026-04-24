@@ -450,9 +450,13 @@ async def preflight_tool_call(
     effective_llm = llm_provider or _detect_llm_provider()
     profile = db.get_profile(tool["tool_id"])
     if profile is None:
-        profile = classify_tool(
-            tool_name, tool.get("description", ""), tool.get("schema", {}), tool.get("annotations", {}),
-            effective_llm, llm_model, llm_api_key,
+        loop = asyncio.get_running_loop()
+        profile = await loop.run_in_executor(
+            None,
+            lambda: classify_tool(
+                tool_name, tool.get("description", ""), tool.get("schema", {}), tool.get("annotations", {}),
+                effective_llm, llm_model, llm_api_key,
+            ),
         )
         db.upsert_profile(tool["tool_id"], profile)
     return json.dumps(_preflight_assessment(profile, tool_name, server_id), indent=2)  # type: ignore[arg-type]
@@ -755,12 +759,15 @@ async def run_replay_test(
     tool = db.get_tool(server_id, tool_name)
     if not tool: return json.dumps({"error": f"Tool '{tool_name}' not found on server '{server_id}'."})
 
-    profile = db.get_profile(tool["tool_id"]) or classify_tool(
-        tool_name,
-        tool.get("description", ""),
-        tool.get("schema", {}),
-        tool.get("annotations", {}),
-    )
+    profile = db.get_profile(tool["tool_id"])
+    if profile is None:
+        loop = asyncio.get_running_loop()
+        profile = await loop.run_in_executor(
+            None,
+            lambda: classify_tool(
+                tool_name, tool.get("description", ""), tool.get("schema", {}), tool.get("annotations", {}),
+            ),
+        )
     assessment  = _preflight_assessment(profile, tool_name, server_id)
     effect      = profile.get("effect_class", "unknown")
     destructive = profile.get("destructiveness", "unknown")
@@ -1114,9 +1121,13 @@ async def safe_tool_call(
             return json.dumps({"error": f"Alternative tool '{use_alternative}' not found on server '{server_id}'."})
         alt_profile = db.get_profile(alt_tool["tool_id"])
         if alt_profile is None:
-            alt_profile = classify_tool(
-                use_alternative, alt_tool.get("description", ""), alt_tool.get("schema", {}), alt_tool.get("annotations", {}),
-                llm_provider or _detect_llm_provider(), llm_model, llm_api_key,
+            loop = asyncio.get_running_loop()
+            alt_profile = await loop.run_in_executor(
+                None,
+                lambda: classify_tool(
+                    use_alternative, alt_tool.get("description", ""), alt_tool.get("schema", {}), alt_tool.get("annotations", {}),
+                    llm_provider or _detect_llm_provider(), llm_model, llm_api_key,
+                ),
             )
             db.upsert_profile(alt_tool["tool_id"], alt_profile)
         alt_assessment = _preflight_assessment(alt_profile, use_alternative, server_id)
@@ -1181,9 +1192,13 @@ async def safe_tool_call(
 
     profile = db.get_profile(tool["tool_id"])
     if profile is None:
-        profile = classify_tool(
-            tool_name, tool.get("description", ""), tool.get("schema", {}), tool.get("annotations", {}),
-            llm_provider or _detect_llm_provider(), llm_model, llm_api_key,
+        loop = asyncio.get_running_loop()
+        profile = await loop.run_in_executor(
+            None,
+            lambda: classify_tool(
+                tool_name, tool.get("description", ""), tool.get("schema", {}), tool.get("annotations", {}),
+                llm_provider or _detect_llm_provider(), llm_model, llm_api_key,
+            ),
         )
         db.upsert_profile(tool["tool_id"], profile)
     assessment = _preflight_assessment(profile, tool_name, server_id)
