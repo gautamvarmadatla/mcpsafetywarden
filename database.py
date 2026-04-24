@@ -60,7 +60,17 @@ def _jloads(s: str, default: Any) -> Any:
         _log.warning("_jloads: failed to parse stored JSON (%s) - returning default. Data may be corrupted or from a key rotation.", exc)
         return default
 
-DB_PATH = Path(__file__).parent / "behavior_profiles.db"
+_db_env = os.environ.get("MCP_DB_PATH")
+if _db_env:
+    DB_PATH = Path(_db_env)
+else:
+    try:
+        from platformdirs import user_data_dir as _user_data_dir
+        _data_dir = Path(_user_data_dir("mcpsafetywarden", "mcpsafetywarden"))
+        _data_dir.mkdir(parents=True, exist_ok=True)
+        DB_PATH = _data_dir / "behavior_profiles.db"
+    except ImportError:
+        DB_PATH = Path(__file__).parent / "behavior_profiles.db"
 
 _init_lock = threading.Lock()
 _initialized = False
