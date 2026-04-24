@@ -174,6 +174,11 @@ def init_db() -> None:
                 ON security_scans(server_id, scanned_at);
         """)
         conn.commit()
+        try:
+            conn.execute("ALTER TABLE servers ADD COLUMN last_updated_at TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
     finally:
         conn.close()
     try:
@@ -202,12 +207,13 @@ def upsert_server(
         conn.execute(
             """
             INSERT INTO servers
-                (server_id, transport, command, args_json, url, env_json, headers_json, registered_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (server_id, transport, command, args_json, url, env_json, headers_json, registered_at, last_updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(server_id) DO UPDATE SET
                 transport=excluded.transport, command=excluded.command,
                 args_json=excluded.args_json, url=excluded.url,
-                env_json=excluded.env_json, headers_json=excluded.headers_json
+                env_json=excluded.env_json, headers_json=excluded.headers_json,
+                last_updated_at=excluded.last_updated_at
             """,
             (
                 server_id, transport, command,
@@ -215,6 +221,7 @@ def upsert_server(
                 url,
                 _encrypt_field(json.dumps(env or {})),
                 _encrypt_field(json.dumps(headers or {})),
+                datetime.now(timezone.utc).isoformat(),
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
