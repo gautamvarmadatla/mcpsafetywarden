@@ -197,6 +197,23 @@ def _preflight_assessment(profile: Dict, tool_name: str, server_id: str) -> dict
     }
 
 
+async def _is_ssrf_hostname(url: str) -> bool:
+    import socket
+    from urllib.parse import urlparse
+    try:
+        hostname = urlparse(url).hostname
+        if not hostname:
+            return False
+        loop = asyncio.get_event_loop()
+        infos = await loop.run_in_executor(None, lambda: socket.getaddrinfo(hostname, None))
+        for info in infos:
+            if SSRF_RE.search(info[4][0]):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 @mcp.tool()
 async def register_server(
     server_id: str,
@@ -264,6 +281,8 @@ Examples:
         return json.dumps({"error": f"headers dict exceeds maximum of {_MAX_HEADER_PAIRS} entries."})
 
     if url and SSRF_RE.search(url):
+        return json.dumps({"error": "URL targets a private or restricted address and cannot be registered."})
+    if url and await _is_ssrf_hostname(url):
         return json.dumps({"error": "URL targets a private or restricted address and cannot be registered."})
 
     if transport == "stdio" and command:

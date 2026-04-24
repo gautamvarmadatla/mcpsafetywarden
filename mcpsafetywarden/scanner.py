@@ -342,8 +342,7 @@ def _normalize_cisco_results(server_id: str, results: list) -> Dict[str, Any]:
 
 def _select_cisco_analyzers(cisco_api_key: Optional[str]) -> list:
     """Choose which Cisco engines to run based on available credentials."""
-    try: from mcpscanner.core.models import AnalyzerEnum
-    except ImportError: return []
+    from mcpscanner.core.models import AnalyzerEnum
 
     # YARA + Readiness always work offline with no API keys
     analyzers = [AnalyzerEnum.YARA, AnalyzerEnum.READINESS]
@@ -578,18 +577,24 @@ snyk_token:
     config_path = None
     try:
         tmpdir = tempfile.mkdtemp(prefix="mcp_wrapper_snyk_")
-        _is_windows = os.name == "nt"
-        if _is_windows:
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "run_snyk_scan: os.chmod is a no-op on Windows. "
-                "The temp config file containing server credentials is readable by any local user "
-                "until the scan completes. Ensure no untrusted users share this host."
-            )
-        try:
-            os.chmod(tmpdir, stat.S_IRWXU)
-        except OSError:
-            pass
+        if os.name == "nt":
+            try:
+                import getpass, subprocess as _sp
+                _sp.run(
+                    ["icacls", tmpdir, "/inheritance:r", "/grant:r",
+                     f"{getpass.getuser()}:(OI)(CI)F"],
+                    check=False, capture_output=True,
+                )
+            except Exception:
+                import logging as _log_snyk
+                _log_snyk.getLogger(__name__).warning(
+                    "run_snyk_scan: could not restrict temp dir permissions on Windows"
+                )
+        else:
+            try:
+                os.chmod(tmpdir, stat.S_IRWXU)
+            except OSError:
+                pass
 
         config_path = os.path.join(tmpdir, "config.json")
         with open(config_path, "w") as f:
