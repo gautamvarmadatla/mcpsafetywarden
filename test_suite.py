@@ -74,9 +74,7 @@ def test(name: str, args: list[str], *, input_text: str = "",
     return passed, out
 
 
-# ─────────────────────────────────────────────────────────────────
 # 1. LIST
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 1: list")
 print("#"*70)
@@ -87,9 +85,7 @@ test("list tools on server",      ["list", SERVER], check_key=TOOL_1)
 test("list tools --json",         ["list", SERVER, "--json"], check_key="tools")
 test("list nonexistent server",   ["list", "no_such_server"], check_key="error")
 
-# ─────────────────────────────────────────────────────────────────
 # 2. PING
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 2: ping")
 print("#"*70)
@@ -98,9 +94,7 @@ test("ping reachable server",     ["ping", SERVER],           check_key="reachab
 test("ping --json",               ["ping", SERVER, "--json"], check_key="reachable")
 test("ping nonexistent server",   ["ping", "no_such"],        expect_fail=True)
 
-# ─────────────────────────────────────────────────────────────────
 # 3. INSPECT (rule-based then LLM)
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 3: inspect")
 print("#"*70)
@@ -122,9 +116,7 @@ test("inspect nonexistent server",
      ["inspect", "no_such"],
      expect_fail=True)
 
-# ─────────────────────────────────────────────────────────────────
 # 4. PREFLIGHT
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 4: preflight")
 print("#"*70)
@@ -157,9 +149,7 @@ test("preflight nonexistent server",
      ["preflight", "no_such", TOOL_1],
      expect_fail=True)
 
-# ─────────────────────────────────────────────────────────────────
 # 5. PROFILE
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 5: profile")
 print("#"*70)
@@ -178,9 +168,7 @@ test("profile nonexistent tool",
      ["profile", SERVER, "no_such"],
      expect_fail=True)
 
-# ─────────────────────────────────────────────────────────────────
 # 6. RETRY-POLICY (no latency data yet → suggested_timeout_ms=None)
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 6: retry-policy")
 print("#"*70)
@@ -206,9 +194,7 @@ test("retry-policy nonexistent tool",
      ["retry-policy", SERVER, "no_such"],
      expect_fail=True)
 
-# ─────────────────────────────────────────────────────────────────
 # 7. ALTERNATIVES
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 7: alternatives")
 print("#"*70)
@@ -230,9 +216,7 @@ test("alternatives nonexistent tool",
      ["alternatives", SERVER, "no_such"],
      expect_fail=True)
 
-# ─────────────────────────────────────────────────────────────────
 # 8. CALL  (happy paths, then edge cases)
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 8: call")
 print("#"*70)
@@ -305,9 +289,7 @@ test("call ask_question with LLM provider",
       "--approved", "--provider", "anthropic"],
      check_key="ms", timeout=180)
 
-# ─────────────────────────────────────────────────────────────────
 # 9. POLICY
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 9: policy")
 print("#"*70)
@@ -343,9 +325,7 @@ test("policy nonexistent tool",
      ["policy", SERVER, "no_such"],
      expect_fail=True)
 
-# ─────────────────────────────────────────────────────────────────
 # 10. REPLAY
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 10: replay")
 print("#"*70)
@@ -362,9 +342,7 @@ test("replay nonexistent tool",
      ["replay", SERVER, "no_such", "--yes"],
      expect_fail=True, timeout=30)
 
-# ─────────────────────────────────────────────────────────────────
 # 11. HISTORY (should now have runs from calls above)
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 11: history")
 print("#"*70)
@@ -385,9 +363,7 @@ test("history nonexistent tool",
      ["history", SERVER, "no_such"],
      expect_fail=True)
 
-# ─────────────────────────────────────────────────────────────────
 # 12. RETRY-POLICY after real runs (now has latency data)
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 12: retry-policy after real latency data")
 print("#"*70)
@@ -396,9 +372,7 @@ test("retry-policy after runs (should have timeout_ms)",
      ["retry-policy", SERVER, TOOL_1, "--json"],
      check_key="suggested_timeout_ms")
 
-# ─────────────────────────────────────────────────────────────────
 # 13. GET-SCAN (stored scan - may be empty or from prior session)
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 13: get-scan")
 print("#"*70)
@@ -413,9 +387,7 @@ test("get-scan nonexistent server",
      ["get-scan", "no_such"],
      expect_fail=True)
 
-# ─────────────────────────────────────────────────────────────────
 # 14. SECURITY SCAN (active scan - authorized, we own the server)
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 14: scan (active security scan)")
 print("#"*70)
@@ -433,9 +405,7 @@ test("get-scan after live scan (should now have data)",
      ["get-scan", SERVER, "--json"],
      check_key="overall_risk_level")
 
-# ─────────────────────────────────────────────────────────────────
 # 15. ONBOARD (register+inspect+scan in one shot)
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 15: onboard")
 print("#"*70)
@@ -470,9 +440,7 @@ test("onboard bad URL",
       "--yes"],
      timeout=60)   # may fail gracefully or succeed with 0 tools
 
-# ─────────────────────────────────────────────────────────────────
 # 16. SCAN-ALL
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 16: scan-all")
 print("#"*70)
@@ -487,9 +455,7 @@ test("scan-all single server subset",
       "--yes"],
      check_key="risk", timeout=400)
 
-# ─────────────────────────────────────────────────────────────────
 # 17. REGISTER edge cases
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "#"*70)
 print("# GROUP 17: register edge cases")
 print("#"*70)
@@ -521,9 +487,7 @@ test("register bad transport type",
       "--url", SERVER_URL],
      timeout=30)  # error or unknown transport handled
 
-# ─────────────────────────────────────────────────────────────────
 # SUMMARY
-# ─────────────────────────────────────────────────────────────────
 print("\n" + "="*70)
 print("SUMMARY")
 print("="*70)
