@@ -194,7 +194,7 @@ Docker-based, Apache 2.0, no auth. Adds real network reconnaissance to the Recon
 | Pipeline stage / tool | Kali tools called | What it adds |
 |---|---|---|
 | Recon (before Planner) | `quick_scan(target)`, `vulnerability_scan(target)`, `traceroute(target)` | Open ports, running services, OS fingerprint, network path - Planner uses this to craft targeted hypotheses |
-| `ping_server` | `quick_scan(target)`, `traceroute(target)` | Network reachability detail beyond the MCP protocol ping |
+| `ping_server` | `quick_scan(target)`, `traceroute(target)` | Network reachability detail beyond the MCP protocol ping (sse/streamable_http only — no network target for stdio) |
 
 **Setup:**
 
@@ -503,7 +503,7 @@ mcpsafetywarden history my-server delete_file --limit 50
 ```
 
 **`ping <server_id>`**
-Check if a server is reachable. If a **Kali MCP** server is registered, also runs `quick_scan` and `traceroute` against the target host and displays the output in labeled panels.
+Check if a server is reachable. If a **Kali MCP** server is registered and the pinged server uses the `sse` or `streamable_http` transport, also runs `quick_scan` and `traceroute` against the target host and displays the output in labeled panels. Stdio servers have no network address to scan so Kali recon is skipped.
 
 ```bash
 mcpsafetywarden ping my-server
