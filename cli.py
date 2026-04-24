@@ -377,7 +377,7 @@ def cmd_call(
             title="Security: argument scan",
         ))
         if result.get("llm_verified"):
-            err.print(f"[red]LLM confirmed threat:[/red] {result.get('reason', '')}")
+            err.print(f"[red]LLM confirmed threat:[/red] {result.get('llm_reason', '')}")
             raise typer.Exit(1)
         if Confirm.ask("[yellow]LLM not available - proceed anyway?[/yellow] (only if you trust these args)"):
             result = _load(_run(_safe_tool_call(

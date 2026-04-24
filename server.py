@@ -1061,7 +1061,8 @@ async def _call_and_format(
                 "blocked": True,
                 "reason": "arg_scan_blocked",
                 "tool": tool_name,
-                **threat,
+                **{k: v for k, v in threat.items() if k != "reason"},
+                "llm_reason": threat.get("reason", ""),
                 "message": msg,
             }, indent=2)
 
