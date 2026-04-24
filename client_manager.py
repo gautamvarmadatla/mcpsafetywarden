@@ -29,6 +29,7 @@ _INSPECT_TIMEOUT_S     = 30
 _MAX_B64_DECODES       = 50   # cap base64 decode iterations to prevent CPU exhaustion on dense payloads
 _CALL_TIMES_MAX_ENTRIES = 10_000  # evict oldest when dict exceeds this
 _call_times: Dict[str, collections.deque] = {}
+_tool_call_counters: Dict[str, int] = {}
 
 TOOL_CALL_TIMEOUT_S = 60
 MAX_OUTPUT_BYTES    = 10 * 1024 * 1024  # 10 MB
@@ -667,8 +668,8 @@ async def call_tool_with_telemetry(
         )
         stored_prior = db.get_profile(tool_id)
         if stored_prior:
-            run_count = stored_prior.get("run_count", 0)
-            maybe_update_tool_profile(tool_id, stored_prior, run_count)
+            _tool_call_counters[tool_id] = _tool_call_counters.get(tool_id, 0) + 1
+            maybe_update_tool_profile(tool_id, stored_prior, _tool_call_counters[tool_id])
     except Exception as db_exc:
         logging.getLogger(__name__).warning("telemetry write failed for tool %s: %s", tool_id, db_exc)
 

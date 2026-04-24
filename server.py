@@ -769,6 +769,7 @@ async def run_replay_test(
                 tool_name, tool.get("description", ""), tool.get("schema", {}), tool.get("annotations", {}),
             ),
         )
+        db.upsert_profile(tool["tool_id"], profile)
     assessment  = _preflight_assessment(profile, tool_name, server_id)
     effect      = profile.get("effect_class", "unknown")
     destructive = profile.get("destructiveness", "unknown")
