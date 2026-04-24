@@ -399,8 +399,10 @@ Engines used (based on available credentials):
         results = await scanner.scan_stdio_server_tools(params, analyzers=analyzers)
 
     elif transport in ("sse", "streamable_http"):
-            results = await scanner.scan_remote_server_tools(
+        headers = server_config.get("headers") or {}
+        results = await scanner.scan_remote_server_tools(
             server_config["url"],
+            headers=headers or None,
             analyzers=analyzers,
         )
     else: raise ValueError(f"Unsupported transport '{transport}' for Cisco scanner.")
