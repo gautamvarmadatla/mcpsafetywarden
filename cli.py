@@ -445,17 +445,21 @@ def cmd_call(
         args_scan_override=args_scan_override, llm_provider=provider,
     )))
 
-    if result.get("blocked") and result.get("reason") == "alternative_also_requires_approval":
-        console.print(f"[yellow]⚠[/yellow]  '{chosen['tool']}' also requires approval.")
-        if Confirm.ask("Proceed anyway?"):
-            result = _load(_run(_safe_tool_call(
-                server_id=server_id, tool_name=tool_name,
-                args=parsed_args, use_alternative=chosen["tool"],
-                approved=True, args_scan_override=args_scan_override, llm_provider=provider,
-            )))
+    if result.get("blocked"):
+        if result.get("reason") == "alternative_also_requires_approval":
+            console.print(f"'{chosen['tool']}' also requires approval.")
+            if Confirm.ask("Proceed anyway?"):
+                result = _load(_run(_safe_tool_call(
+                    server_id=server_id, tool_name=tool_name,
+                    args=parsed_args, use_alternative=chosen["tool"],
+                    approved=True, args_scan_override=args_scan_override, llm_provider=provider,
+                )))
+            else:
+                console.print("[yellow]Aborted.[/yellow]")
+                raise typer.Exit(0)
         else:
-            console.print("[yellow]Aborted.[/yellow]")
-            raise typer.Exit(0)
+            err.print(f"[red]Blocked:[/red] {result.get('message') or result.get('reason', 'unknown reason')}")
+            raise typer.Exit(1)
 
     _print_call_result(result, json_output)
 
