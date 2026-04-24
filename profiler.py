@@ -90,15 +90,26 @@ def get_or_build_profile(
 
     if fresh_prior is None and stored is not None: return stored
 
-    prior = fresh_prior or stored or {
-        "effect_class": "unknown",
-        "retry_safety": "unknown",
-        "destructiveness": "unknown",
-        "open_world": False,
-        "output_risk": "unknown",
-        "confidence": {"effect_class": 0.25},
-        "evidence": [],
-        "run_count": 0,
-    }
+    if fresh_prior is not None and stored is not None:
+        # Merge: fresh_prior supplies classification fields; stored supplies
+        # accumulated telemetry (run_count, failure_rate, latency, evidence).
+        # This prevents re-inspect from discarding observed evidence.
+        prior = dict(stored)
+        for k, v in fresh_prior.items():
+            if k not in ("run_count", "failure_rate", "latency_p50_ms",
+                         "latency_p95_ms", "output_size_p95_bytes",
+                         "schema_stability", "evidence", "confidence"):
+                prior[k] = v
+    else:
+        prior = fresh_prior or stored or {
+            "effect_class": "unknown",
+            "retry_safety": "unknown",
+            "destructiveness": "unknown",
+            "open_world": False,
+            "output_risk": "unknown",
+            "confidence": {"effect_class": 0.25},
+            "evidence": [],
+            "run_count": 0,
+        }
 
     return update_tool_profile(tool_id, prior)
