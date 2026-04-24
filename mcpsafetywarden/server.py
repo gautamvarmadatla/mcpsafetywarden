@@ -67,6 +67,9 @@ def create_http_app(transport: str = "streamable_http") -> ASGIApp:
     return base
 
 
+_PREFLIGHT_SCAN_TIMEOUT_S = 60
+_preflight_scan_locks: Dict[str, asyncio.Lock] = {}
+
 _MGMT_RATE_LIMIT_MAX      = 10
 _MGMT_RATE_LIMIT_WINDOW_S = 60
 _GLOBAL_RATE_LIMIT_MAX    = 100
@@ -418,8 +421,6 @@ async def preflight_tool_call(
 
     effective_scan_provider = auto_scan_provider or _detect_llm_provider()
     if effective_scan_provider and not db.get_latest_security_scan(server_id):
-        # mcpsafety+ actively probes the live server and requires explicit authorization
-        # (confirm_authorized=True). This auto-scan path must not bypass that requirement.
         if effective_scan_provider.startswith("mcpsafety+"):
             _log.warning(
                 "Auto-scan skipped for mcpsafety+ provider on server '%s'. "
@@ -427,27 +428,40 @@ async def preflight_tool_call(
                 server_id,
             )
         else:
-            try:
-                server = db.get_server(server_id)
-                tools  = db.list_tools(server_id)
-                if effective_scan_provider == "cisco":
-                    findings = await run_cisco_scan(server_id=server_id, server_config=server, cisco_api_key=auto_scan_api_key)
-                elif effective_scan_provider == "snyk":
-                    findings = await run_snyk_scan(server_id=server_id, server_config=server, snyk_token=auto_scan_api_key)
-                else:
-                    loop = asyncio.get_running_loop()
-                    findings = await loop.run_in_executor(
-                        None,
-                        lambda: run_security_scan(
-                            server_id=server_id, tools=tools,
-                            provider=effective_scan_provider,
-                            model_id=auto_scan_model,
-                            api_key=auto_scan_api_key,
-                        ),
-                    )
-                db.store_security_scan(server_id, findings)
-            except Exception as exc:
-                _log.warning("preflight auto-scan skipped for '%s': %s", server_id, exc)
+            if server_id not in _preflight_scan_locks:
+                _preflight_scan_locks[server_id] = asyncio.Lock()
+            async with _preflight_scan_locks[server_id]:
+                if not db.get_latest_security_scan(server_id):
+                    try:
+                        server = db.get_server(server_id)
+                        tools  = db.list_tools(server_id)
+                        if effective_scan_provider == "cisco":
+                            findings = await asyncio.wait_for(
+                                run_cisco_scan(server_id=server_id, server_config=server, cisco_api_key=auto_scan_api_key),
+                                timeout=_PREFLIGHT_SCAN_TIMEOUT_S,
+                            )
+                        elif effective_scan_provider == "snyk":
+                            findings = await asyncio.wait_for(
+                                run_snyk_scan(server_id=server_id, server_config=server, snyk_token=auto_scan_api_key),
+                                timeout=_PREFLIGHT_SCAN_TIMEOUT_S,
+                            )
+                        else:
+                            loop = asyncio.get_running_loop()
+                            findings = await asyncio.wait_for(
+                                loop.run_in_executor(
+                                    None,
+                                    lambda: run_security_scan(
+                                        server_id=server_id, tools=tools,
+                                        provider=effective_scan_provider,
+                                        model_id=auto_scan_model,
+                                        api_key=auto_scan_api_key,
+                                    ),
+                                ),
+                                timeout=_PREFLIGHT_SCAN_TIMEOUT_S,
+                            )
+                        db.store_security_scan(server_id, findings)
+                    except Exception as exc:
+                        _log.warning("preflight auto-scan skipped for '%s': %s", server_id, exc)
 
     effective_llm = llm_provider or _detect_llm_provider()
     profile = db.get_profile(tool["tool_id"])
@@ -1414,7 +1428,11 @@ def main():
     else:
         import uvicorn
         host = _os.environ.get("MCP_HOST", "127.0.0.1")
-        port = int(_os.environ.get("MCP_PORT", "8000"))
+        try:
+            port = int(_os.environ.get("MCP_PORT", "8000"))
+        except ValueError:
+            _log.error("Invalid MCP_PORT=%r, defaulting to 8000", _os.environ.get("MCP_PORT"))
+            port = 8000
         t = "streamable_http" if transport in ("http", "streamable_http") else "sse"
         uvicorn.run(create_http_app(t), host=host, port=port)
 
