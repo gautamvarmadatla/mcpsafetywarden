@@ -1037,7 +1037,6 @@ async def scan_args_for_threats(
     ]
 
     if llm_provider:
-        # Verify every flagged arg; only clear if ALL are false positives.
         for arg_path, value_snippet, categories in flagged:
             verdict = await _llm_verify_arg_threat(
                 value_snippet, arg_path, tool_name, tool_description,
@@ -1690,7 +1689,7 @@ def _tools_to_openai(tools: List[Dict]) -> List[Dict]:
     ]
 
 
-_HACKER_MAX_HISTORY_PAIRS = 6  # keep last N assistant+tool_results pairs to cap context size
+_HACKER_MAX_HISTORY_PAIRS = 6
 
 
 async def _hacker_anthropic(
@@ -1756,7 +1755,6 @@ async def _hacker_anthropic(
 
         if tool_results:
             messages.append({"role": "user", "content": tool_results})
-            # Trim to seed + last N pairs to avoid context window exhaustion.
             max_tail = _HACKER_MAX_HISTORY_PAIRS * 2
             if len(messages) > 1 + max_tail:
                 messages = [seed] + messages[-(max_tail):]
@@ -1826,7 +1824,6 @@ async def _hacker_openai_compat(
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
             calls_this_turn += 1
 
-        # Trim to seed + last N pairs to avoid context window exhaustion.
         max_tail = _HACKER_MAX_HISTORY_PAIRS * 2
         if len(messages) > len(oai_seed) + max_tail:
             messages = list(oai_seed) + messages[-(max_tail):]

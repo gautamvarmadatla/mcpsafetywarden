@@ -569,8 +569,6 @@ snyk_token:
     tmpdir = None
     config_path = None
     try:
-        # Use a restricted temp directory so the config file (which may contain
-        # credentials) is never world-readable, and is cleaned up even on crash.
         tmpdir = tempfile.mkdtemp(prefix="mcp_wrapper_snyk_")
         _is_windows = os.name == "nt"
         if _is_windows:
@@ -581,7 +579,7 @@ snyk_token:
                 "until the scan completes. Ensure no untrusted users share this host."
             )
         try:
-            os.chmod(tmpdir, stat.S_IRWXU)  # 0o700 - owner only (no-op on Windows)
+            os.chmod(tmpdir, stat.S_IRWXU)
         except OSError:
             pass
 
@@ -589,17 +587,15 @@ snyk_token:
         with open(config_path, "w") as f:
             json.dump(config, f)
         try:
-            os.chmod(config_path, stat.S_IRUSR | stat.S_IWUSR)  # 0o600 (no-op on Windows)
+            os.chmod(config_path, stat.S_IRUSR | stat.S_IWUSR)
         except OSError:
             pass
 
-        # Minimal env: only pass what snyk-agent-scan needs, not the full process env.
         env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "TEMP", "TMP", "SYSTEMROOT", "COMSPEC")}
         token = snyk_token or os.environ.get("SNYK_TOKEN")
         if token:
             env["SNYK_TOKEN"] = token
 
-        # Try installed binary first, then uvx zero-install fallback
         candidates = [
             ["snyk-agent-scan", config_path, "--json"],
             ["uvx", "snyk-agent-scan@latest", config_path, "--json"],

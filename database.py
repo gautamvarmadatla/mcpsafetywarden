@@ -10,12 +10,6 @@ from typing import Optional, Dict, Any, List
 
 _log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Optional at-rest encryption for env_json / headers_json.
-# Generate a key:
-#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-# Then set: MCP_DB_ENCRYPTION_KEY=<generated_key>
-# ---------------------------------------------------------------------------
 _fernet = None
 try:
     _key = os.environ.get("MCP_DB_ENCRYPTION_KEY")
@@ -28,7 +22,7 @@ except Exception as _fernet_err:
         _fernet_err,
     )
 
-_MAX_SCHEMA_BYTES = 65_536  # 64 KB - oversized schemas are discarded to prevent DB bloat
+_MAX_SCHEMA_BYTES = 65_536
 
 
 def _encrypt_field(plaintext: str) -> str:
@@ -182,7 +176,6 @@ def init_db() -> None:
         conn.commit()
     finally:
         conn.close()
-    # Restrict DB file to owner-only (no-op on Windows; meaningful on POSIX).
     try:
         DB_PATH.chmod(0o600)
     except OSError as e:

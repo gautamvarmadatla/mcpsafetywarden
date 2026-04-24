@@ -39,13 +39,10 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app: ASGIApp, token: str) -> None:
         super().__init__(app)
-        # Store as bytes so hmac.compare_digest always operates on equal-type operands.
         self._token_bytes = token.encode()
 
     async def dispatch(self, request, call_next):
         auth = request.headers.get("Authorization", "")
-        # Pad candidate to token length before compare_digest so timing does not
-        # reveal whether lengths differ (compare_digest short-circuits on length mismatch).
         candidate = auth[7:].encode() if auth.startswith("Bearer ") else b""
         expected = self._token_bytes
         padded = candidate.ljust(len(expected), b"\x00")[:len(expected)]
@@ -72,8 +69,8 @@ def create_http_app(transport: str = "streamable_http") -> ASGIApp:
 
 _MGMT_RATE_LIMIT_MAX      = 10
 _MGMT_RATE_LIMIT_WINDOW_S = 60
-_GLOBAL_RATE_LIMIT_MAX    = 100   # across all server IDs combined
-_MGMT_DICT_MAX_ENTRIES    = 5_000 # evict oldest key once dict exceeds this size
+_GLOBAL_RATE_LIMIT_MAX    = 100
+_MGMT_DICT_MAX_ENTRIES    = 5_000
 _mgmt_call_times: Dict[str, collections.deque] = {}
 _global_call_times: collections.deque = collections.deque(maxlen=_GLOBAL_RATE_LIMIT_MAX)
 
@@ -90,7 +87,6 @@ def _check_mgmt_rate_limit(key: str) -> Optional[str]:
             f"Retry after {int(_MGMT_RATE_LIMIT_WINDOW_S - (now - _global_call_times[0]))}s."
         )
 
-    # Per-key limit — evict oldest entry if the dict has grown too large
     if len(_mgmt_call_times) >= _MGMT_DICT_MAX_ENTRIES and key not in _mgmt_call_times:
         _mgmt_call_times.pop(next(iter(_mgmt_call_times)), None)
     times = _mgmt_call_times.setdefault(key, collections.deque(maxlen=_MGMT_RATE_LIMIT_MAX))

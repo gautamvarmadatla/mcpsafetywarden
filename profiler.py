@@ -12,8 +12,6 @@ def _percentiles(values: List[float], *pcts: float) -> List[Optional[float]]:
     n = len(s)
     result = []
     for p in pcts:
-        # Linear interpolation avoids the ceiling bias that systematically
-        # underestimates p50 at small sample sizes (e.g. 2 runs -> always lower value).
         idx_f = p * (n - 1)
         lo = int(idx_f)
         hi = min(lo + 1, n - 1)
@@ -49,7 +47,6 @@ def compute_profile_from_runs(tool_id: str, prior: Dict[str, Any]) -> Dict[str, 
         most_common, freq = Counter(hashes).most_common(1)[0]
         profile["schema_stability"] = round(freq / len(hashes), 3)
 
-    # Boost confidence once we have real observations
     if total >= 5:
         boost = min(0.15, total / 150)
         profile["confidence"] = {
@@ -66,7 +63,7 @@ def compute_profile_from_runs(tool_id: str, prior: Dict[str, Any]) -> Dict[str, 
     return profile
 
 
-_UPDATE_EVERY_N_RUNS = 10  # recompute percentiles after this many new calls
+_UPDATE_EVERY_N_RUNS = 10
 
 
 def update_tool_profile(tool_id: str, prior: Dict[str, Any]) -> Dict[str, Any]:
@@ -76,7 +73,6 @@ def update_tool_profile(tool_id: str, prior: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def maybe_update_tool_profile(tool_id: str, prior: Dict[str, Any], run_count: int) -> Optional[Dict[str, Any]]:
-    """Update profile only every N runs to avoid reading 500 rows on every call."""
     if run_count % _UPDATE_EVERY_N_RUNS != 0:
         return None
     return update_tool_profile(tool_id, prior)
@@ -91,9 +87,6 @@ def get_or_build_profile(
     if fresh_prior is None and stored is not None: return stored
 
     if fresh_prior is not None and stored is not None:
-        # Merge: fresh_prior supplies classification fields; stored supplies
-        # accumulated telemetry (run_count, failure_rate, latency, evidence).
-        # This prevents re-inspect from discarding observed evidence.
         prior = dict(stored)
         for k, v in fresh_prior.items():
             if k not in ("run_count", "failure_rate", "latency_p50_ms",
