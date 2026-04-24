@@ -339,11 +339,11 @@ mcpsafetywarden/
 │   ├── TOOLS.md
 │   ├── CLI.md
 │   ├── INTEGRATIONS.md
-│   └── COMPARISON.md
+│   ├── COMPARISON.md
+│   └── ROADMAP.md
 ├── assets/
 │   └── logo.png
 ├── CONTRIBUTING.md
-├── ROADMAP.md
 └── pyproject.toml
 ```
 
@@ -574,4 +574,4 @@ Apache License 2.0. See [LICENSE](LICENSE) for details.
 
 ## Roadmap
 
-See [ROADMAP.md](ROADMAP.md) for planned features and improvements.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for planned features and improvements.
