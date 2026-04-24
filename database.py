@@ -501,6 +501,13 @@ def get_latest_security_scan(server_id: str) -> Optional[Dict[str, Any]]:
     finally: conn.close()
 
 
+def get_tool_security_findings_map(server_id: str) -> Dict[str, Dict[str, Any]]:
+    scan = get_latest_security_scan(server_id)
+    if not scan:
+        return {}
+    return {f["name"]: f for f in scan.get("tool_findings", []) if f.get("name")}
+
+
 def get_tool_security_finding(server_id: str, tool_name: str) -> Optional[Dict[str, Any]]:
     scan = get_latest_security_scan(server_id)
     if not scan: return None

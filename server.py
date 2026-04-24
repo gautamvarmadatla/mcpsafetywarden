@@ -671,12 +671,13 @@ def suggest_safer_alternative(
         })
 
     all_tools = db.list_tools(server_id)
+    findings_map = db.get_tool_security_findings_map(server_id)
     candidates = []
     for t in all_tools:
         if t["tool_name"] == tool_name:
             continue
         p = db.get_profile(t["tool_id"])
-        s = db.get_tool_security_finding(server_id, t["tool_name"])
+        s = findings_map.get(t["tool_name"])
         candidates.append({
             **t,
             "_effect_class": (p or {}).get("effect_class", "unknown"),
@@ -1228,11 +1229,12 @@ async def safe_tool_call(
     if effective_provider:
         try:
             all_tools = db.list_tools(server_id)
+            findings_map = db.get_tool_security_findings_map(server_id)
             candidates = []
             for t in all_tools:
                 if t["tool_name"] == tool_name: continue
                 p = db.get_profile(t["tool_id"])
-                s = db.get_tool_security_finding(server_id, t["tool_name"])
+                s = findings_map.get(t["tool_name"])
                 candidates.append({
                     **t,
                     "_effect_class": (p or {}).get("effect_class", "unknown"),
