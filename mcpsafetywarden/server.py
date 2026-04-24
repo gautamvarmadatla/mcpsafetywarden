@@ -374,13 +374,16 @@ def list_server_tools(server_id: str) -> str:
     rows = []
     for t in tools:
         p = profiles.get(t["tool_id"])
+        effect = p["effect_class"] if p else "unknown"
+        destr  = p["destructiveness"] if p else "unknown"
         rows.append({
-            "name": t["tool_name"],
+            "tool_name": t["tool_name"],
             "description": (t["description"] or "")[:100],
-            "effect_class": p["effect_class"]   if p else "unknown",
-            "retry_safety": p["retry_safety"]   if p else "unknown",
-            "destructiveness":p["destructiveness"] if p else "unknown",
-            "run_count": p["run_count"]       if p else 0,
+            "effect_class": effect,
+            "retry_safety": p["retry_safety"] if p else "unknown",
+            "destructiveness": destr,
+            "risk_level": _risk_level(effect, destr),
+            "run_count": p["run_count"] if p else 0,
             "confidence": p["confidence"].get("effect_class", 0) if p else 0,
         })
 
@@ -1379,6 +1382,8 @@ def set_tool_policy(
     tool = db.get_tool(server_id, tool_name)
     if not tool:
         return json.dumps({"error": f"Tool '{tool_name}' not found on server '{server_id}'."})
+    if policy == "clear":
+        policy = None
     if policy is not None and policy not in ("allow", "block"):
         return json.dumps({"error": "policy must be 'allow', 'block', or null to clear."})
     db.set_tool_policy(server_id, tool_name, policy)
