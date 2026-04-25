@@ -75,6 +75,7 @@ _GLOBAL_RATE_LIMIT_MAX    = 100
 _MGMT_DICT_MAX_ENTRIES    = 5_000
 _mgmt_call_times: Dict[str, collections.deque] = {}
 _global_call_times: collections.deque = collections.deque(maxlen=_GLOBAL_RATE_LIMIT_MAX)
+_bg_scan_status: Dict[str, str] = {}
 
 
 def _check_mgmt_rate_limit(key: str) -> Optional[str]:
@@ -851,6 +852,53 @@ async def run_replay_test(
 
 
 @mcp.tool()
+async def _execute_scan_core(
+    server_id: str,
+    server: Dict,
+    tools: List[Dict],
+    providers_to_run: List[str],
+    model_id: Optional[str],
+    api_key: Optional[str],
+    confirm_authorized: bool,
+    allow_destructive_probes: bool,
+    skip_web_research: bool,
+    scan_timeout_s: int,
+) -> Dict[str, Any]:
+    async def _run_one(prov: str) -> Dict[str, Any]:
+        try:
+            if prov == "cisco":
+                return await run_cisco_scan(server_id=server_id, server_config=server, cisco_api_key=api_key)
+            if prov == "snyk":
+                return await run_snyk_scan(server_id=server_id, server_config=server, snyk_token=api_key)
+            llm_prov = prov.split("+", 1)[1]
+            return await run_mcpsafety_scan(
+                server_id=server_id, tools=tools, server_config=server,
+                llm_provider=llm_prov, model_id=model_id, api_key=api_key,
+                confirm_authorized=confirm_authorized,
+                allow_destructive_probes=allow_destructive_probes,
+                skip_web_research=skip_web_research,
+                scan_timeout_s=scan_timeout_s,
+            )
+        except Exception as exc:
+            _log.error("security_scan_server provider=%s failed: %s", prov, exc, exc_info=True)
+            return {"error": str(exc), "provider": prov}
+
+    if len(providers_to_run) == 1:
+        findings = await _run_one(providers_to_run[0])
+    else:
+        results = await asyncio.gather(*[_run_one(p) for p in providers_to_run])
+        findings = _merge_findings(server_id, list(results))
+
+    scan_id = db.store_security_scan(server_id, findings)
+    findings["scan_id"] = scan_id
+    if "providers" not in findings:
+        findings["providers"] = [findings.pop("provider", providers_to_run[0])]
+    else:
+        findings.pop("provider", None)
+    findings.pop("model", None)
+    return findings
+
+
 async def security_scan_server(
     server_id: str,
     provider: Optional[str] = None,
@@ -860,9 +908,14 @@ async def security_scan_server(
     allow_destructive_probes: bool = False,
     skip_web_research: bool = True,
     scan_timeout_s: int = 300,
+    background: bool = True,
 ) -> str:
     """
     Run a live security audit on a registered server's tools.
+
+    Runs in the background by default (background=True) - returns immediately and stores
+    results for get_security_scan to retrieve. Set background=False only for CLI or direct
+    Python calls where blocking until completion is desired.
 
     IMPORTANT: Always omit provider (leave it null) unless the user explicitly names one.
     Omitting provider triggers auto-detect: uses any available LLM key from the environment
@@ -886,6 +939,8 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
         allow_destructive_probes: enable path traversal / command injection probes (default False)
         skip_web_research:        skip CVE/Arxiv research to avoid leaking findings (default True)
         scan_timeout_s:           hard timeout per scan in seconds (default 300, max 3600)
+        background:               True = return immediately, poll get_security_scan for results.
+                                  False = block until complete (default, safe for CLI/Python).
 
     Results are stored and automatically included in future preflight_tool_call responses.
     """
@@ -931,41 +986,56 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
             "hint": "Set confirm_authorized=True to confirm you own or are authorized to test this server.",
         })
 
-    _log.info("security_scan_server server_id=%s providers=%s timeout=%ds", server_id, providers_to_run, scan_timeout_s)
+    _log.info("security_scan_server server_id=%s providers=%s timeout=%ds background=%s",
+              server_id, providers_to_run, scan_timeout_s, background)
 
-    async def _run_one(prov: str) -> Dict[str, Any]:
-        try:
-            if prov == "cisco":
-                return await run_cisco_scan(server_id=server_id, server_config=server, cisco_api_key=api_key)
-            if prov == "snyk":
-                return await run_snyk_scan(server_id=server_id, server_config=server, snyk_token=api_key)
-            llm_prov = prov.split("+", 1)[1]
-            return await run_mcpsafety_scan(
-                server_id=server_id, tools=tools, server_config=server,
-                llm_provider=llm_prov, model_id=model_id, api_key=api_key,
-                confirm_authorized=confirm_authorized,
-                allow_destructive_probes=allow_destructive_probes,
-                skip_web_research=skip_web_research,
-                scan_timeout_s=scan_timeout_s,
-            )
-        except Exception as exc:
-            _log.error("security_scan_server provider=%s failed: %s", prov, exc, exc_info=True)
-            return {"error": str(exc), "provider": prov}
+    if background:
+        if _bg_scan_status.get(server_id) == "running":
+            return json.dumps({
+                "status": "running",
+                "message": f"Scan already in progress for '{server_id}'. Call get_security_scan('{server_id}') to check results.",
+            })
+
+        async def _bg_task():
+            _bg_scan_status[server_id] = "running"
+            try:
+                await _execute_scan_core(
+                    server_id=server_id, server=server, tools=tools,
+                    providers_to_run=providers_to_run, model_id=model_id, api_key=api_key,
+                    confirm_authorized=confirm_authorized,
+                    allow_destructive_probes=allow_destructive_probes,
+                    skip_web_research=skip_web_research,
+                    scan_timeout_s=scan_timeout_s,
+                )
+                _bg_scan_status[server_id] = "completed"
+            except Exception as exc:
+                _log.error("background scan failed for %s: %s", server_id, exc, exc_info=True)
+                _bg_scan_status[server_id] = f"failed: {exc}"
+                db.store_security_scan(server_id, {
+                    "overall_risk_level": "UNKNOWN",
+                    "summary": f"Background scan failed: {exc}",
+                    "provider": providers_to_run[0] if providers_to_run else "unknown",
+                    "tool_findings": [],
+                    "server_level_risks": [],
+                })
+
+        _bg_scan_status[server_id] = "running"
+        asyncio.create_task(_bg_task())
+        return json.dumps({
+            "status": "running",
+            "server_id": server_id,
+            "message": f"Scan started in background. Call get_security_scan('{server_id}') in ~2-3 minutes to retrieve results.",
+        })
 
     try:
-        if len(providers_to_run) == 1:
-            findings = await _run_one(providers_to_run[0])
-        else:
-            results = await asyncio.gather(*[_run_one(p) for p in providers_to_run])
-            findings = _merge_findings(server_id, list(results))
-
-        scan_id = db.store_security_scan(server_id, findings)
-        findings["scan_id"] = scan_id
-        if "providers" not in findings:
-            findings["providers"] = [findings.pop("provider", providers_to_run[0])]
-        else:
-            findings.pop("provider", None)
-        findings.pop("model", None)
+        findings = await _execute_scan_core(
+            server_id=server_id, server=server, tools=tools,
+            providers_to_run=providers_to_run, model_id=model_id, api_key=api_key,
+            confirm_authorized=confirm_authorized,
+            allow_destructive_probes=allow_destructive_probes,
+            skip_web_research=skip_web_research,
+            scan_timeout_s=scan_timeout_s,
+        )
         return json.dumps(findings, indent=2)
 
     except (ValueError, RuntimeError) as exc:
@@ -977,14 +1047,24 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
 
 @mcp.tool()
 def get_security_scan(server_id: str) -> str:
-    """Retrieve the latest security scan report for a registered server."""
+    """Retrieve the latest security scan report for a registered server. If a background scan is running, returns status='running' - call again in ~30 seconds to poll for results."""
+    status = _bg_scan_status.get(server_id)
+    if status == "running":
+        return json.dumps({
+            "status": "running",
+            "server_id": server_id,
+            "message": "Scan in progress. Call get_security_scan again in ~30 seconds.",
+        })
     scan = db.get_latest_security_scan(server_id)
     if not scan:
-            return json.dumps({
+        return json.dumps({
             "error": f"No security scan found for '{server_id}'.",
             "hint": "Run security_scan_server first.",
         })
-    return json.dumps(scan, indent=2)
+    result = dict(scan)
+    if status and status.startswith("failed"):
+        result["scan_status"] = status
+    return json.dumps(result, indent=2)
 
 
 @mcp.tool()

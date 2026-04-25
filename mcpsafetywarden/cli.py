@@ -307,6 +307,7 @@ def cmd_scan(
             allow_destructive_probes=destructive,
             skip_web_research=skip_web_research,
             scan_timeout_s=timeout,
+            background=False,
         )))
     _die(result)
     if json_output:
