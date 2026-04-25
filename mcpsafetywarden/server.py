@@ -864,9 +864,13 @@ async def security_scan_server(
     """
     Run a live security audit on a registered server's tools.
 
+    IMPORTANT: Always omit provider (leave it null) unless the user explicitly names one.
+    Omitting provider triggers auto-detect: uses any available LLM key from the environment
+    (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY) plus any installed scanners automatically.
+    Never ask the user which provider to use - just omit it and let auto-detect handle it.
+
 provider options:
-        null / omitted  - auto-detect: Cisco YARA+Readiness always; MCPSafety+ if LLM key set;
-                          Snyk if installed + SNYK_TOKEN set. All available run in parallel.
+        null / omitted  - AUTO-DETECT (recommended default): uses all available scanners/LLM keys.
         "all"           - same as auto-detect but explicit.
         "anthropic"     - MCPSafety+ 5-stage pentest pipeline (shorthand for mcpsafety+anthropic).
         "openai"          Shorthand for mcpsafety+<provider>. api_key = LLM provider API key.
@@ -1098,7 +1102,7 @@ async def _call_and_format(
     tool_description: str = "",
 ) -> str:
     if args_scan_override:
-        _log.warning("args_scan_override=True used for %s::%s — arg scan bypassed", server_id, tool_name)
+        _log.warning("args_scan_override=True used for %s::%s - arg scan bypassed", server_id, tool_name)
 
     if args and not args_scan_override:
         threat = await scan_args_for_threats(

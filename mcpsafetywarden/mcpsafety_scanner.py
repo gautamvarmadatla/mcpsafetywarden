@@ -1882,7 +1882,7 @@ def run_deterministic_scan(
     tools: List[Dict],
 ) -> Dict[str, Any]:
     """
-    Deterministic metadata scan — no LLM required.
+    Deterministic metadata scan - no LLM required.
 
     Checks tool names, descriptions, and parameter names against known-bad patterns:
     - Prompt injection phrases in descriptions
@@ -1925,7 +1925,7 @@ def run_deterministic_scan(
                 risk_level = "LOW"
 
         if not desc.strip():
-            issues.append("Tool has no description — behavior is opaque")
+            issues.append("Tool has no description - behavior is opaque")
             if _RISK_ORDER_DET.get(risk_level, 0) < _RISK_ORDER_DET["LOW"]:
                 risk_level = "LOW"
 
@@ -1948,7 +1948,7 @@ def run_deterministic_scan(
             worst = "MEDIUM"
 
     if worst == "NONE" and tools:
-        summary = f"Deterministic scan of {len(tools)} tool(s) — no suspicious patterns found."
+        summary = f"Deterministic scan of {len(tools)} tool(s) - no suspicious patterns found."
     elif not tools:
         summary = "No tools registered; nothing to scan."
     else:
@@ -1958,7 +1958,7 @@ def run_deterministic_scan(
         summary = (
             f"Deterministic scan of {len(tools)} tool(s): "
             f"{high} HIGH, {med} MEDIUM, {low} LOW findings. "
-            "No active probing performed — run a full scan with an LLM provider for deeper analysis."
+            "No active probing performed - run a full scan with an LLM provider for deeper analysis."
         )
 
     return {
