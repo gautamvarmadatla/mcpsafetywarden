@@ -11,6 +11,26 @@ MCP safety warden is a proxy server that wraps any MCP server and adds behaviora
 
 > **Listed on the [official MCP server registry](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.gautamvarmadatla%2Fmcpsafetywarden)** - discoverable by any MCP-compatible client.
 
+## Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Auxiliary Security Tool Integrations](#auxiliary-security-tool-integrations)
+- [CLI Reference](#cli-reference)
+- [MCP Integration](#mcp-integration)
+- [Project Structure](#project-structure)
+- [Development](#development)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [Troubleshooting](#troubleshooting)
+- [Security](#security)
+- [Contributing](#contributing)
+- [License](#license)
+- [Roadmap](#roadmap)
+
 ## Overview
 
 Most MCP servers expose tools with no information about what those tools actually do at runtime: whether they write data, call external services, delete things, or produce outputs that contain adversarial content.
