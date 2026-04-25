@@ -6,9 +6,10 @@
 MCP safety warden is a proxy server that wraps any MCP server and adds behavioral profiling, security scanning, risk gating, and safe execution to its tools.
 
 [![PyPI](https://img.shields.io/pypi/v/mcpsafetywarden)](https://pypi.org/project/mcpsafetywarden/)
-[![MCP Registry](https://img.shields.io/badge/MCP%20Registry-listed-blue)](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.gautamvarmadatla%2Fmcpsafetywarden/versions/0.1.2)
+[![MCP Registry](https://img.shields.io/badge/MCP%20Registry-listed-blue)](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.gautamvarmadatla%2Fmcpsafetywarden)
+[![CI](https://github.com/gautamvarmadatla/mcpsafetywarden/actions/workflows/ci.yml/badge.svg)](https://github.com/gautamvarmadatla/mcpsafetywarden/actions/workflows/ci.yml)
 
-> **Listed on the [official MCP server registry](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.gautamvarmadatla%2Fmcpsafetywarden/versions/0.1.2)** - discoverable by any MCP-compatible client.
+> **Listed on the [official MCP server registry](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.gautamvarmadatla%2Fmcpsafetywarden)** - discoverable by any MCP-compatible client.
 
 ## Overview
 
