@@ -910,7 +910,6 @@ async def run_replay_test(
         return json.dumps({"error": "Internal error. Check server logs."})
 
 
-@mcp.tool()
 async def _execute_scan_core(
     server_id: str,
     server: Dict,
@@ -962,6 +961,7 @@ async def _execute_scan_core(
     return findings
 
 
+@mcp.tool()
 async def security_scan_server(
     server_id: str,
     provider: Optional[str] = None,
@@ -995,7 +995,7 @@ provider options:
         "ollama"          Set OLLAMA_MODEL + optionally OLLAMA_BASE_URL.
         "cisco"         - YARA + Readiness (always offline); LLM/Behavioral if MCP_SCANNER_LLM_API_KEY
                           set; cloud engine if MCP_SCANNER_API_KEY set. api_key = Cisco cloud key.
-        "snyk"          - 20 metadata checks: prompt injection, tool shadowing, hardcoded secrets.
+        "snyk"          - 19 metadata checks: prompt injection, tool shadowing, hardcoded secrets.
                           api_key = Snyk token (falls back to SNYK_TOKEN env var).
 
 mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", auto):

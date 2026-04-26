@@ -56,8 +56,8 @@ Use as a proxy to add safety gating to any MCP server, or point it at a server y
 **What it detects**
 
 - **Prompt injection**: tool outputs trying to hijack the agent: role hijacking, jailbreaks, fake system prompts, instruction overrides. Detects 11 obfuscation techniques including Unicode lookalikes, zero-width characters, and base64-encoded payloads.
-- **Malicious tool metadata**: descriptions containing injection strings, hardcoded secrets, suspicious download URLs, tool impersonation (shadowing), direct financial execution, system service modification, and untrusted external dependencies. Backed by 20 Snyk checks.
-- **Argument injection**: 22 attack categories checked on every tool call before the call is forwarded: SSRF to cloud metadata endpoints (AWS, GCP, Azure, Alibaba), path traversal, credential file access (.aws, .ssh, .kube, .env), command injection, SQL/NoSQL/LDAP/XPath injection, XXE, template injection (SSTI), CRLF, null byte, deserialization payloads (Java, Python pickle, PHP, .NET), Windows UNC/ADS attacks, and base64-obfuscated variants of all of the above.
+- **Malicious tool metadata**: descriptions containing injection strings, hardcoded secrets, suspicious download URLs, tool impersonation (shadowing), direct financial execution, system service modification, and untrusted external dependencies. Backed by 19 Snyk checks.
+- **Argument injection**: 20+ attack categories checked on every tool call before the call is forwarded: SSRF to cloud metadata endpoints (AWS, GCP, Azure, Alibaba), path traversal, credential file access (.aws, .ssh, .kube, .env), command injection, SQL/NoSQL/LDAP/XPath injection, XXE, template injection (SSTI), CRLF, null byte, deserialization payloads (Java, Python pickle, PHP, .NET), Windows UNC/ADS attacks, and base64-obfuscated variants of all of the above.
 - **Source code risks**: fetches the server's GitHub source and runs 6 analysis layers: entropy scanning for hardcoded secrets, AST taint flow tracking (parameter to dangerous sink), description-vs-implementation mismatch, Bandit and Semgrep SAST, and LLM cross-function reasoning. Supports Python and TypeScript/JavaScript.
 - **Rug-pull and drift**: stores a SHA-256 hash of the server's source on first scan and alerts if it changes. Catches description swaps, schema changes, and tool removal live on every call via a per-call drift guard.
 - **Behavior anomalies**: classifies every tool by effect class, destructiveness, and 7 risk tags: credential exposure, arbitrary execution, data exfiltration, filesystem access, lateral movement, privilege escalation, and prompt injection surface.
@@ -200,7 +200,7 @@ See [docs/TOOLS.md](docs/TOOLS.md) for the full tool reference.
 
 ## CLI Reference
 
-16 subcommands covering all 17 MCP tools. Every command supports `--json` for machine-readable output and `--yes` / `-y` to skip confirmation prompts.
+17 subcommands covering all 17 MCP tools. Every command supports `--json` for machine-readable output and `--yes` / `-y` to skip confirmation prompts.
 
 See [docs/CLI.md](docs/CLI.md) for the full reference with flags and examples.
 
