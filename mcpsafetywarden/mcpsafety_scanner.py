@@ -1792,6 +1792,11 @@ async def run_mcpsafety_scan(
             report["source_recon"] = source_recon
         if not tools:
             report["source_only"] = True
+            report["probe_note"] = (
+                "No live tool probing was performed. Findings are based entirely on "
+                "static source code analysis. Register and scan the live server for "
+                "runtime confirmation."
+            )
         return report
 
     try: report = await asyncio.wait_for(_pipeline(), timeout=scan_timeout_s)
