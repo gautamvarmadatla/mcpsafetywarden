@@ -39,6 +39,12 @@ Use as a proxy to add safety gating to any MCP server, or point it at a server y
 
 **Safe execution**: Argument scanning (20+ attack categories, LLM second-pass). Two-layer output injection scanning. Risk gating with alternatives and per-tool policies. Drift detection on every call and standalone check.
 
+<p align="center">
+  <img src="assets/safe_execution_pipeline.jpg" alt="Safe execution pipeline" width="900"/>
+  <br/>
+  <em>Fig 3. Safe execution pipeline: the five checks every proxied tool call passes through</em>
+</p>
+
 **CLI**: 16 subcommands, interactive risk menu, `--json` flag on every command, `--yes` for CI.
 
 **What it detects**
