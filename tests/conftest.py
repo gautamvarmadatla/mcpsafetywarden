@@ -42,7 +42,7 @@ def event_loop():
 
 @pytest_asyncio.fixture(scope="session")
 async def registered_server():
-    from mcpsafetywarden.server import register_server, list_servers
+    from mcpsafetywarden.server import register_server, inspect_server, list_servers, list_server_tools
     existing = j(list_servers())
     ids = [s["server_id"] for s in (existing if isinstance(existing, list) else existing.get("servers", []))]
     if SERVER not in ids:
@@ -53,4 +53,10 @@ async def registered_server():
             auto_inspect=True,
         ))
         assert "error" not in result, f"register_server failed: {result}"
+        if "inspect_error" in result or not result.get("tools"):
+            await inspect_server(SERVER)
+    else:
+        tools_result = j(list_server_tools(SERVER))
+        if "tools" not in tools_result or not tools_result["tools"]:
+            await inspect_server(SERVER)
     return SERVER
