@@ -986,7 +986,7 @@ async def security_scan_server(
     confirm_authorized: bool = False,
     allow_destructive_probes: bool = False,
     skip_web_research: bool = True,
-    scan_timeout_s: int = 300,
+    scan_timeout_s: int = 900,
     background: bool = True,
     github_url: Optional[str] = None,
 ) -> str:
@@ -1182,7 +1182,7 @@ async def scan_all_servers(
     confirm_authorized: bool = False,
     allow_destructive_probes: bool = False,
     skip_web_research: bool = True,
-    scan_timeout_s: int = 300,
+    scan_timeout_s: int = 900,
     server_ids: Optional[List[str]] = None,
 ) -> str:
     """

@@ -241,6 +241,9 @@ def cmd_register(
     headers: Optional[str] = typer.Option(None, "--headers", help="JSON object"),
     no_inspect: bool = typer.Option(False, "--no-inspect", help="Skip auto-inspect"),
     provider: Optional[str] = typer.Option(None, "--provider", help="LLM for classification"),
+    model: Optional[str] = typer.Option(None, "--model"),
+    api_key: Optional[str] = typer.Option(None, "--api-key"),
+    github_url: Optional[str] = typer.Option(None, "--github-url", help="GitHub repo URL for source code analysis"),
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Register a server (with optional immediate inspect)."""
@@ -253,6 +256,9 @@ def cmd_register(
         headers=_parse_json_opt(headers, "--headers"),
         auto_inspect=not no_inspect,
         classify_provider=provider,
+        classify_model=model,
+        classify_api_key=api_key,
+        github_url=github_url,
     )))
     _die(result)
     if json_output:
@@ -338,24 +344,28 @@ def cmd_drift(
 
 @app.command("scan")
 def cmd_scan(
-    server_id: str = typer.Argument(...),
+    server_id: Optional[str] = typer.Argument(None),
     provider: Optional[str] = typer.Option(None, "--provider", "-p", help="anthropic | openai | gemini | ollama | cisco | snyk | all  (default: auto-detect)"),
     model: Optional[str] = typer.Option(None, "--model"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
     destructive: bool = typer.Option(False, "--destructive", help="Enable path traversal / command injection probes"),
     skip_web_research: bool = typer.Option(True, "--skip-web-research/--web-research", help="Skip DuckDuckGo/HackerNews/Arxiv CVE research (default: skip to avoid leaking findings)"),
-    timeout: int = typer.Option(300, "--timeout", help="Scan timeout in seconds"),
+    timeout: int = typer.Option(900, "--timeout", help="Scan timeout in seconds"),
     github_url: Optional[str] = typer.Option(None, "--github-url", help="GitHub repo URL for source code analysis (auto-detected if omitted)"),
+    background: bool = typer.Option(False, "--background", help="Return immediately; retrieve results later with get-scan"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip authorization prompt"),
     json_output: bool = typer.Option(False, "--json"),
 ):
-    """Run a live security scan on a registered server."""
-    confirmed = yes or Confirm.ask(
-        f"Active security probing will be sent to [cyan]{server_id}[/cyan]. "
-        "Confirm you own and are authorized to test it?"
-    )
-    if not confirmed:
-        raise typer.Exit(0)
+    """Run a security scan on a registered server, or a source-only scan via --github-url."""
+    if not server_id and not github_url:
+        raise typer.BadParameter("Provide SERVER_ID or --github-url (or both).")
+    if server_id:
+        confirmed = yes or Confirm.ask(
+            f"Active security probing will be sent to [cyan]{server_id}[/cyan]. "
+            "Confirm you own and are authorized to test it?"
+        )
+        if not confirmed:
+            raise typer.Exit(0)
 
     with console.status("Scanning..."):
         result = _load(_run(_security_scan_server(
@@ -365,12 +375,17 @@ def cmd_scan(
             allow_destructive_probes=destructive,
             skip_web_research=skip_web_research,
             scan_timeout_s=timeout,
-            background=False,
+            background=background,
             github_url=github_url,
         )))
     _die(result)
     if json_output:
         console.print_json(json.dumps(result))
+        return
+
+    if result.get("status") == "running":
+        console.print(f"[cyan]⟳[/cyan]  {result.get('message', 'Scan started in background.')}")
+        console.print(f"[dim]Retrieve results:[/dim]  mcpsafetywarden get-scan {server_id or ''}")
         return
 
     risk = (result.get("overall_risk_level") or "unknown").lower()
@@ -413,6 +428,8 @@ def cmd_call(
     approved: bool = typer.Option(False, "--approved", help="Bypass risk gate (for scripting)"),
     args_scan_override: bool = typer.Option(False, "--args-scan-override", help="Skip arg safety scan (use only when you have verified the args are safe)"),
     provider: Optional[str] = typer.Option(None, "--provider", help="LLM for alternatives"),
+    model: Optional[str] = typer.Option(None, "--model"),
+    api_key: Optional[str] = typer.Option(None, "--api-key"),
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Execute a tool safely with interactive risk gating."""
@@ -423,6 +440,8 @@ def cmd_call(
         args=parsed_args, approved=approved,
         args_scan_override=args_scan_override,
         llm_provider=provider,
+        llm_model=model,
+        llm_api_key=api_key,
     ))
     result = _load(result)
 
@@ -450,7 +469,8 @@ def cmd_call(
             result = _load(_run(_safe_tool_call(
                 server_id=server_id, tool_name=tool_name,
                 args=parsed_args, approved=approved,
-                args_scan_override=True, llm_provider=provider,
+                args_scan_override=True,
+                llm_provider=provider, llm_model=model, llm_api_key=api_key,
             )))
             _print_call_result(result, json_output)
         else:
@@ -482,7 +502,7 @@ def cmd_call(
         more = _load(_run(_safe_tool_call(
             server_id=server_id, tool_name=tool_name,
             args=parsed_args, show_more_options=True,
-            llm_provider=provider,
+            llm_provider=provider, llm_model=model, llm_api_key=api_key,
         )))
         for opt in more.get("options", []):
             console.print(f"  [cyan]{opt['choice']}.[/cyan]  {opt['action']}")
@@ -495,7 +515,8 @@ def cmd_call(
         result = _load(_run(_safe_tool_call(
             server_id=server_id, tool_name=tool_name,
             args=parsed_args, approved=True,
-            args_scan_override=args_scan_override, llm_provider=provider,
+            args_scan_override=args_scan_override,
+            llm_provider=provider, llm_model=model, llm_api_key=api_key,
         )))
         _print_call_result(result, json_output)
         return
@@ -509,7 +530,8 @@ def cmd_call(
     result = _load(_run(_safe_tool_call(
         server_id=server_id, tool_name=tool_name,
         args=parsed_args, use_alternative=chosen["tool"],
-        args_scan_override=args_scan_override, llm_provider=provider,
+        args_scan_override=args_scan_override,
+        llm_provider=provider, llm_model=model, llm_api_key=api_key,
     )))
 
     if result.get("blocked"):
@@ -519,7 +541,8 @@ def cmd_call(
                 result = _load(_run(_safe_tool_call(
                     server_id=server_id, tool_name=tool_name,
                     args=parsed_args, use_alternative=chosen["tool"],
-                    approved=True, args_scan_override=args_scan_override, llm_provider=provider,
+                    approved=True, args_scan_override=args_scan_override,
+                    llm_provider=provider, llm_model=model, llm_api_key=api_key,
                 )))
             else:
                 console.print("[yellow]Aborted.[/yellow]")
@@ -568,12 +591,16 @@ def cmd_preflight(
     provider: Optional[str] = typer.Option(None, "--provider", "-p", help="LLM provider for classification fallback"),
     model: Optional[str] = typer.Option(None, "--model"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
+    scan_provider: Optional[str] = typer.Option(None, "--scan-provider", help="Provider for auto-scan when no scan exists yet"),
+    scan_model: Optional[str] = typer.Option(None, "--scan-model"),
+    scan_api_key: Optional[str] = typer.Option(None, "--scan-api-key"),
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Risk assessment for a tool without executing it."""
     result = _load(_run(_preflight_tool_call(
         server_id=server_id, tool_name=tool_name,
         llm_provider=provider, llm_model=model, llm_api_key=api_key,
+        auto_scan_provider=scan_provider, auto_scan_model=scan_model, auto_scan_api_key=scan_api_key,
     )))
     _die(result)
     if json_output:
@@ -647,11 +674,14 @@ def cmd_alternatives(
     server_id: str = typer.Argument(...),
     tool_name: str = typer.Argument(...),
     provider: Optional[str] = typer.Option(None, "--provider"),
+    model: Optional[str] = typer.Option(None, "--model"),
+    api_key: Optional[str] = typer.Option(None, "--api-key"),
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Find lower-risk alternatives for a tool on the same server."""
     result = _load(_suggest_safer_alternative(
-        server_id=server_id, tool_name=tool_name, llm_provider=provider,
+        server_id=server_id, tool_name=tool_name,
+        llm_provider=provider, llm_model=model, llm_api_key=api_key,
     ))
     _die(result)
     if json_output:
@@ -846,7 +876,7 @@ def cmd_scan_all(
     server_ids: Optional[str] = typer.Option(None, "--servers", help="Comma-separated server IDs to scan; omit for all"),
     destructive: bool = typer.Option(False, "--destructive", help="Enable path traversal / command injection probes"),
     skip_web_research: bool = typer.Option(True, "--skip-web-research/--web-research", help="Skip DuckDuckGo/HackerNews/Arxiv CVE research (default: skip to avoid leaking findings)"),
-    timeout: int = typer.Option(300, "--timeout", help="Timeout per server in seconds"),
+    timeout: int = typer.Option(900, "--timeout", help="Timeout per server in seconds"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip authorization prompt"),
     json_output: bool = typer.Option(False, "--json"),
 ):

@@ -1607,7 +1607,7 @@ async def run_mcpsafety_scan(
     confirm_authorized: bool = False,
     allow_destructive_probes: bool = False,
     skip_web_research: bool = True,
-    scan_timeout_s: int = 300,
+    scan_timeout_s: int = 900,
     max_calls_per_turn: int = 5,
     github_url: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -1803,7 +1803,7 @@ async def run_mcpsafety_scan_multi(
     confirm_authorized: bool = False,
     allow_destructive_probes: bool = False,
     skip_web_research: bool = True,
-    scan_timeout_s: int = 300,
+    scan_timeout_s: int = 900,
     max_calls_per_turn: int = 5,
 ) -> Dict[str, Any]:
     """

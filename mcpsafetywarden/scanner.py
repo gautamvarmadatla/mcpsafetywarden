@@ -126,7 +126,7 @@ def _call_anthropic(model_id: str, api_key: Optional[str], prompt: str) -> str:
         else anthropic.Anthropic(timeout=_LLM_HTTP_TIMEOUT)
     response = client.messages.create(
         model=model_id or "claude-opus-4-7",
-        max_tokens=4096,
+        max_tokens=16384,
         messages=[{"role": "user", "content": prompt}],
     )
     return response.content[0].text
