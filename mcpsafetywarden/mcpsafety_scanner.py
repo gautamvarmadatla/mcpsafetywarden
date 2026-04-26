@@ -1409,15 +1409,32 @@ async def _run_supervisor(
     provider: str,
     model_id: Optional[str],
     api_key: Optional[str],
+    source_recon_findings: Optional[List[Dict]] = None,
 ) -> Dict[str, Any]:
     from .scanner import call_llm
 
     safe_hacker   = _sanitise_finding_texts(hacker_findings)
     safe_auditor  = _sanitise_finding_texts(auditor_findings)
+
+    source_recon_section = ""
+    if source_recon_findings:
+        source_only_note = (
+            "\n\nNOTE: This is a source-code-only scan. No live tool calls were made. "
+            "Source code analysis findings below are confirmed by static evidence "
+            "(file path, line number, pattern match or AST analysis) and must be "
+            "treated as confirmed findings with evidence_basis='static_analysis'. "
+            "Do NOT require live probing evidence to include them in tool_findings.\n"
+        )
+        source_recon_section = (
+            f"{source_only_note}"
+            f"Source code analysis findings:\n{json.dumps(source_recon_findings, indent=2)}\n\n"
+        )
+
     prompt = (
         f"{_SUPERVISOR_SYSTEM}\n\n"
         f"Hacker agent findings:\n{json.dumps(safe_hacker, indent=2)}\n\n"
         f"Auditor agent research:\n{json.dumps(safe_auditor, indent=2)}\n\n"
+        f"{source_recon_section}"
         "Produce the final security report JSON."
     )
     loop   = asyncio.get_running_loop()
@@ -1714,8 +1731,10 @@ async def run_mcpsafety_scan(
         )
 
         _log.info("mcpsafety Stage 3: Supervisor (server=%s)", server_id)
+        sr_findings = source_recon.get("findings") if source_recon else None
         report = await _run_supervisor(
             server_id, hacker_findings, auditor_findings, llm_provider, model_id, api_key,
+            source_recon_findings=sr_findings if sr_findings else None,
         )
         report["tool_findings"] = _redact_findings(report.get("tool_findings", []))
 
