@@ -105,7 +105,7 @@ Run a security scan against a single server. Prompts for authorization before pr
 |---|---|---|
 | _(omitted)_ or `all` | Auto-detect: everything available | none required |
 | `cisco` | YARA + Readiness (always); LLM/Behavioral + cloud engine if keys set | none required |
-| `snyk` | 20 metadata checks: prompt injection, tool shadowing, hardcoded secrets | `SNYK_TOKEN` |
+| `snyk` | 19 metadata checks: prompt injection, tool shadowing, hardcoded secrets | `SNYK_TOKEN` |
 | `anthropic` / `openai` / `gemini` / `ollama` | MCPSafety+ 5-stage pipeline | LLM API key |
 
 For Ollama set `OLLAMA_MODEL` before running. Web research (DuckDuckGo/HackerNews/Arxiv CVE lookup in the Auditor stage) is skipped by default to avoid leaking findings externally; pass `--web-research` to enable it.

@@ -22,6 +22,7 @@ Complete reference for all 18 MCP tools exposed by mcpsafetywarden.
 | [`security_scan_server`](#security_scan_server) | Scanning | Live security audit of a server |
 | [`scan_all_servers`](#scan_all_servers) | Scanning | mcpsafety+ pipeline across all servers |
 | [`get_security_scan`](#get_security_scan) | Scanning | Latest stored scan report |
+| [`check_server_drift`](#check_server_drift) | Diagnostics | Detect schema and tool-list drift against stored baseline |
 | [`ping_server`](#ping_server) | Diagnostics | Reachability check with latency |
 
 ## Setup
@@ -425,13 +426,14 @@ Run a live security audit on a registered server's tools. Results are stored and
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `server_id` | string | Yes | |
-| `provider` | string | Yes | See provider table below |
+| `provider` | string | No | See provider table below; omit or set to `"all"` to run all available providers |
+| `background` | bool | No | Run scan in background and return immediately (default `true`) |
 | `model_id` | string | No | Model override (mcpsafety+ providers only) |
 | `api_key` | string | No | API key override |
 | `confirm_authorized` | bool | mcpsafety+ | Must be `true`; confirms you own and are authorized to test this server |
 | `allow_destructive_probes` | bool | No | Enable path traversal, command injection, credential file probes (default `false`; safe edge-case inputs only) |
 | `skip_web_research` | bool | No | Skip DuckDuckGo/HackerNews/Arxiv CVE research (default `true`) |
-| `scan_timeout_s` | int | No | Hard timeout for the entire scan in seconds (default 300, clamped to 10-3600) |
+| `scan_timeout_s` | int | No | Hard timeout for the entire scan in seconds (default 300, clamped to 30-3600) |
 
 **Providers**
 
@@ -497,6 +499,28 @@ Retrieve the latest security scan report for a registered server.
 **Returns** The latest stored scan report as JSON, or an error with a hint to run `security_scan_server` first.
 
 ## Diagnostics
+
+### `check_server_drift`
+
+Connects to the live server, re-enumerates all tools, and compares against the stored baseline from the last `inspect_server` call.
+
+**Parameters**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `server_id` | string | Yes | |
+| `update_baseline` | bool | No | Update stored baseline after reporting drift (default `true`). Set to `false` to audit without modifying the baseline. |
+
+**Change severities**
+
+| Severity | Trigger |
+|---|---|
+| `CRITICAL` | Tool removed (callers will break) |
+| `HIGH` | Parameter removed or type changed |
+| `MEDIUM` | Description changed (prompt-injection risk) or new required parameter |
+| `LOW` | New optional parameter or new tool added |
+
+**Returns** JSON with `drift_detected` (bool), `overall_severity`, and `findings` array.
 
 ### `ping_server`
 
