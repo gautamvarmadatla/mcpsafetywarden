@@ -256,6 +256,16 @@ def upsert_server(
     finally: conn.close()
 
 
+def delete_server(server_id: str) -> None:
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM servers WHERE server_id=?", (server_id,))
+        conn.execute("DELETE FROM tools WHERE server_id=?", (server_id,))
+        conn.execute("DELETE FROM security_scans WHERE server_id=?", (server_id,))
+        conn.commit()
+    finally: conn.close()
+
+
 def get_server(server_id: str) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     try:

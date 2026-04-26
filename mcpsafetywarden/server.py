@@ -1573,14 +1573,15 @@ async def onboard_server(
         return json.dumps(result, indent=2)
 
     if "inspect_error" in reg_result and not github_url:
-        result["security_scan"] = {
-            "skipped": "Inspection failed and no github_url provided - scan aborted to avoid false-clean results.",
+        db.delete_server(server_id)
+        return json.dumps({
+            "server_id": server_id,
+            "error": "Onboarding aborted - server could not be inspected and no github_url was provided.",
             "hint": (
                 "Fix the local setup so the server can be inspected, or pass github_url "
                 "to run a source-only scan against the GitHub repository."
             ),
-        }
-        return json.dumps(result, indent=2)
+        })
 
     effective_provider = scan_provider or _detect_llm_provider()
     if not effective_provider:
