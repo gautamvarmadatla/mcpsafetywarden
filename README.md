@@ -134,6 +134,7 @@ All configuration is via environment variables.
 | `MCP_SCANNER_API_KEY` | (unset) | Cisco AI Defense cloud ML engine key |
 | `MCP_SCANNER_LLM_API_KEY` | (unset) | LLM key for Cisco internal AST analysis |
 | `MCP_DB_PATH` | (unset) | Override the SQLite database file path |
+| `GITHUB_TOKEN` | (unset) | GitHub personal access token for source-code scanning (raises rate limit from 60 to 5,000 req/hour) |
 
 **Security note:** Never commit API keys or the encryption key. The wrapper strips its own secrets from child process environments before spawning stdio servers.
 

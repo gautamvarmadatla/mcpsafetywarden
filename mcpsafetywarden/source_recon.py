@@ -277,16 +277,25 @@ def _file_priority(path: str, size: int) -> tuple:
 
 async def _fetch_source_files(owner: str, repo: str) -> Dict[str, str]:
     result: Dict[str, str] = {}
+    gh_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    api_headers: Dict[str, str] = {"Accept": "application/vnd.github+json"}
+    if gh_token:
+        api_headers["Authorization"] = f"Bearer {gh_token}"
     async with httpx.AsyncClient(timeout=_GITHUB_FETCH_TIMEOUT) as client:
         try:
             tree_resp = await client.get(
                 f"https://api.github.com/repos/{owner}/{repo}/git/trees/HEAD",
                 params={"recursive": "1"},
-                headers={"Accept": "application/vnd.github.v3+json"},
+                headers=api_headers,
             )
             if tree_resp.status_code != 200:
                 return result
             tree_data = tree_resp.json()
+            if tree_data.get("truncated"):
+                _log.warning(
+                    "GitHub tree response truncated for %s/%s - large repo, some files may be missed",
+                    owner, repo,
+                )
         except Exception as exc:
             _log.debug("GitHub tree fetch failed for %s/%s: %s", owner, repo, exc)
             return result
@@ -306,11 +315,13 @@ async def _fetch_source_files(owner: str, repo: str) -> Dict[str, str]:
 
         candidates.sort(key=lambda item: _file_priority(item["path"], item.get("size", 0)))
 
+        raw_headers = {"Authorization": f"Bearer {gh_token}"} if gh_token else {}
         for item in candidates[:_MAX_FILES]:
             path = item["path"]
             try:
                 raw_resp = await client.get(
                     f"https://raw.githubusercontent.com/{owner}/{repo}/HEAD/{path}",
+                    headers=raw_headers,
                 )
                 if raw_resp.status_code == 200:
                     content = raw_resp.text
