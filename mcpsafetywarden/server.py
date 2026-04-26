@@ -317,11 +317,21 @@ Examples:
             ]
         except (ValueError, RuntimeError) as exc:
             result["inspect_error"] = str(exc)
-            result["hint"] = "Server registered. Fix the error then run inspect_server."
+            result["hint"] = (
+                "stdio server requires local setup before it can be inspected. "
+                "Pass github_url to security_scan_server to analyze source code directly without spawning the server."
+                if transport == "stdio"
+                else "Server registered. Fix the error then run inspect_server."
+            )
         except Exception as exc:
             _log.error("register_server auto-inspect failed for %s: %s", server_id, exc, exc_info=True)
             result["inspect_error"] = "Inspection failed. Check server logs."
-            result["hint"] = "Server registered. Fix the error then run inspect_server."
+            result["hint"] = (
+                "stdio server requires local setup before it can be inspected. "
+                "Pass github_url to security_scan_server to analyze source code directly without spawning the server."
+                if transport == "stdio"
+                else "Server registered. Fix the error then run inspect_server."
+            )
 
     return json.dumps(result, indent=2)
 
@@ -1528,15 +1538,15 @@ async def onboard_server(
     scan_provider: Optional[str] = None,
     scan_model: Optional[str] = None,
     scan_api_key: Optional[str] = None,
-    confirm_scan_authorized: bool = False,
+    confirm_scan_authorized: bool = True,
     github_url: Optional[str] = None,
 ) -> str:
     """
     One-shot server onboarding: register + security scan + inspect in sequence.
     Equivalent to calling register_server then security_scan_server manually.
 
-    confirm_scan_authorized: set True to confirm you own this server and authorize
-    active security probing (required for mcpsafety+ providers).
+    confirm_scan_authorized: defaults True - calling onboard_server is itself an
+    authorization act. Set False only if you want to skip active security probing.
     """
     reg_json = await register_server(
         server_id=server_id, transport=transport,
