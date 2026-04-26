@@ -26,15 +26,28 @@ MCP safety warden is a proxy server that wraps any MCP server and adds behaviora
 
 ## Overview
 
-Instead of calling a wrapped server's tools directly, you route calls through this wrapper. It classifies each tool, builds a behavior profile from observed runs, checks for injection attacks, and blocks or gates risky tools before they execute.
+Use as a proxy to add safety gating to any MCP server, or point it at a server you don't own and run a full security audit without making a single tool call.
 
-**Behavioral profiling** - Effect class, retry safety, destructiveness. LLM-assisted (Anthropic, OpenAI, Gemini, Ollama) with rule-based fallback. Observed stats (latency p50/p95, failure rate, output size) updated after every proxied call.
+**Behavioral profiling**: Effect class, retry safety, destructiveness. LLM-assisted (Anthropic, OpenAI, Gemini, Ollama) with rule-based fallback. Observed stats (latency p50/p95, failure rate, output size) updated after every proxied call.
 
-**Security scanning** - mcpsafety+ five-stage pipeline (Recon, Planner, Hacker, Auditor, Supervisor). Cisco AI Defense (AST/YARA). Snyk (metadata analysis). Kali and Burp Suite integrations enrich the pipeline with real network data and HTTP-layer probes. Source code scanning from GitHub with entropy, AST, taint flow, and rug-pull detection.
+**Security scanning**: mcpsafety+ five-stage pipeline (Recon, Planner, Hacker, Auditor, Supervisor). Cisco AI Defense (AST/YARA). Snyk (metadata analysis). Kali and Burp Suite integrations enrich the pipeline with real network data and HTTP-layer probes. Source code scanning from GitHub with entropy, AST, taint flow, and rug-pull detection.
 
-**Safe execution** - Argument scanning (20+ attack categories, LLM second-pass). Two-layer output injection scanning. Risk gating with alternatives and per-tool policies. Drift detection on every call and standalone check.
+**Safe execution**: Argument scanning (20+ attack categories, LLM second-pass). Two-layer output injection scanning. Risk gating with alternatives and per-tool policies. Drift detection on every call and standalone check.
 
-**CLI** - 16 subcommands, interactive risk menu, `--json` flag on every command, `--yes` for CI.
+**CLI**: 16 subcommands, interactive risk menu, `--json` flag on every command, `--yes` for CI.
+
+**What it detects**
+
+- **Prompt injection**: tool outputs trying to hijack the agent: role hijacking, jailbreaks, fake system prompts, instruction overrides. Detects 11 obfuscation techniques including Unicode lookalikes, zero-width characters, and base64-encoded payloads.
+- **Malicious tool metadata**: descriptions containing injection strings, hardcoded secrets, suspicious download URLs, tool impersonation (shadowing), direct financial execution, system service modification, and untrusted external dependencies. Backed by 20 Snyk checks.
+- **Argument injection**: 22 attack categories checked on every tool call before the call is forwarded: SSRF to cloud metadata endpoints (AWS, GCP, Azure, Alibaba), path traversal, credential file access (.aws, .ssh, .kube, .env), command injection, SQL/NoSQL/LDAP/XPath injection, XXE, template injection (SSTI), CRLF, null byte, deserialization payloads (Java, Python pickle, PHP, .NET), Windows UNC/ADS attacks, and base64-obfuscated variants of all of the above.
+- **Source code risks**: fetches the server's GitHub source and runs 6 analysis layers: entropy scanning for hardcoded secrets, AST taint flow tracking (parameter to dangerous sink), description-vs-implementation mismatch, Bandit and Semgrep SAST, and LLM cross-function reasoning. Supports Python and TypeScript/JavaScript.
+- **Rug-pull and drift**: stores a SHA-256 hash of the server's source on first scan and alerts if it changes. Catches description swaps, schema changes, and tool removal live on every call via a per-call drift guard.
+- **Behavior anomalies**: classifies every tool by effect class, destructiveness, and 7 risk tags: credential exposure, arbitrary execution, data exfiltration, filesystem access, lateral movement, privilege escalation, and prompt injection surface.
+- **Composition attacks**: analyzes tool sets for chaining risks: IDOR chains, read-write pairs, auth flow exploitation, write-then-execute sequences, and data accumulation + exfiltration paths across multiple tools.
+- **Network and host risks**: when Kali Linux MCP is registered: open ports, running services, OS fingerprint via nmap. When Burp Suite MCP is registered: HTTP-layer active probing and blind SSRF via out-of-band callbacks.
+- **Credential exposure in outputs**: redacts secrets from tool responses before storage. Injection-flagged responses are quarantined and never returned to the calling agent - stored under a run ID for forensic review.
+- **CVE research and Arxiv findings**: the mcpsafety+ Auditor stage cross-references discovered capabilities against known vulnerabilities and recent security research.
 
 
 ## Prerequisites
