@@ -93,7 +93,7 @@ mcpsafetywarden register slack --transport stdio \
   --env '{"SLACK_BOT_TOKEN": "xoxb-..."}'
 ```
 
-Claude sees only the wrapper's 17 tools. To use github or slack it must call `safe_tool_call(server_id="github", ...)` - registration is enforced because `safe_tool_call` rejects any unregistered `server_id`.
+Claude sees only the wrapper's 18 tools. To use github or slack it must call `safe_tool_call(server_id="github", ...)` - registration is enforced because `safe_tool_call` rejects any unregistered `server_id`.
 
 ## Production considerations
 

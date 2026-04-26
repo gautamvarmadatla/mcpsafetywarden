@@ -51,7 +51,7 @@ Use as a proxy to add safety gating to any MCP server, or point it at a server y
   <em>Fig 3. Safe execution pipeline: the five checks every proxied tool call passes through</em>
 </p>
 
-**CLI**: 16 subcommands, interactive risk menu, `--json` flag on every command, `--yes` for CI.
+**CLI**: 17 subcommands, interactive risk menu, `--json` flag on every command, `--yes` for CI.
 
 **What it detects**
 
@@ -182,6 +182,7 @@ See [docs/TOOLS.md](docs/TOOLS.md) for the full tool reference.
 | `onboard_server` | Register + inspect + security scan in one call |
 | `register_server` | Register a server; optionally auto-inspect |
 | `inspect_server` | Refresh tool list and profiles |
+| `check_server_drift` | Detect schema and tool-list drift against stored baseline |
 | `list_servers` | List all registered servers |
 | `list_server_tools` | List tools on a server with summary profiles |
 | `preflight_tool_call` | Risk assessment without execution |
@@ -200,14 +201,14 @@ See [docs/TOOLS.md](docs/TOOLS.md) for the full tool reference.
 
 ## CLI Reference
 
-17 subcommands covering all 17 MCP tools. Every command supports `--json` for machine-readable output and `--yes` / `-y` to skip confirmation prompts.
+17 subcommands covering all 18 MCP tools. Every command supports `--json` for machine-readable output and `--yes` / `-y` to skip confirmation prompts.
 
 See [docs/CLI.md](docs/CLI.md) for the full reference with flags and examples.
 
 
 ## Auxiliary Security Tool Integrations
 
-Kali Linux MCP, Burp Suite MCP, and Snyk each integrate automatically once registered. Kali enriches the Recon stage and `ping_server` with real nmap/traceroute data. Burp adds raw HTTP probing, out-of-band callbacks, and proxy evidence. Snyk analyses tool metadata for injection strings, tool shadowing, hardcoded secrets, and 19 other checks.
+Kali Linux MCP, Burp Suite MCP, and Snyk each integrate automatically once registered. Kali enriches the Recon stage and `ping_server` with real nmap/traceroute data. Burp adds raw HTTP probing, out-of-band callbacks, and proxy evidence. Snyk analyses tool metadata for injection strings, tool shadowing, hardcoded secrets, and 16 other checks.
 
 See [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) for setup instructions.
 
@@ -242,7 +243,7 @@ Set an LLM API key to include LLM-assisted tests; without one they are skipped a
 
 | Doc | Contents |
 |---|---|
-| [docs/TOOLS.md](docs/TOOLS.md) | Full reference for all 17 MCP tools |
+| [docs/TOOLS.md](docs/TOOLS.md) | Full reference for all 18 MCP tools |
 | [docs/CLI.md](docs/CLI.md) | CLI subcommands, flags, and examples |
 | [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Kali, Burp Suite, and Snyk setup |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | stdio, HTTP, container, and gateway deployment |

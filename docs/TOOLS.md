@@ -1,6 +1,6 @@
 # Tool Reference
 
-Complete reference for all 17 MCP tools exposed by mcpsafetywarden.
+Complete reference for all 18 MCP tools exposed by mcpsafetywarden.
 
 ## Quick reference
 
