@@ -80,6 +80,7 @@ Register a server for proxying without running a security scan. `auto_inspect` (
 | `classify_provider` | string | No | LLM provider for tool classification during inspect |
 | `classify_model` | string | No | Model ID for the classify provider |
 | `classify_api_key` | string | No | API key override |
+| `github_url` | string | No | GitHub URL of the server's source repository; used by source-code scanning layers during security scans |
 
 **Returns** JSON with `registered`, `transport`, and (if `auto_inspect`) `tools_discovered` and a `tools` array with `name`, `effect_class`, `confidence` for each tool.
 
@@ -209,7 +210,7 @@ Get a behavioral risk assessment for a tool before executing it.
 | `confidence` | Per-field confidence scores |
 | `evidence` | Classification signals |
 | `data_source` | `"observed"` (>=5 runs) or `"inferred"` |
-| `warning` | Low-confidence notice when fewer than 5 runs have been observed |
+| `warning` | Present when effect_class confidence is below 50%; message includes observed run count |
 
 ## Execution
 
@@ -430,7 +431,8 @@ Run a live security audit on a registered server's tools. Results are stored and
 | `background` | bool | No | Run scan in background and return immediately (default `true`) |
 | `model_id` | string | No | Model override (mcpsafety+ providers only) |
 | `api_key` | string | No | API key override |
-| `confirm_authorized` | bool | mcpsafety+ | Must be `true`; confirms you own and are authorized to test this server |
+| `confirm_authorized` | bool | Yes | Must be `true`; confirms you own and are authorized to test this server. Required for all providers including `cisco` and `snyk`. |
+| `github_url` | string | No | GitHub URL of the server's source repository; enables entropy, AST taint flow, and rug-pull detection layers |
 | `allow_destructive_probes` | bool | No | Enable path traversal, command injection, credential file probes (default `false`; safe edge-case inputs only) |
 | `skip_web_research` | bool | No | Skip DuckDuckGo/HackerNews/Arxiv CVE research (default `true`) |
 | `scan_timeout_s` | int | No | Hard timeout for the entire scan in seconds (default 300, clamped to 30-3600) |
@@ -481,7 +483,7 @@ Run the mcpsafety+ pipeline against all registered servers (or a specified subse
 | `confirm_authorized` | bool | Yes | Must be `true` |
 | `allow_destructive_probes` | bool | No | Default `false` |
 | `skip_web_research` | bool | No | Default `true` |
-| `scan_timeout_s` | int | No | Per-server timeout (default 300, max 3600) |
+| `scan_timeout_s` | int | No | Per-server timeout in seconds (default 300, clamped to 30-3600) |
 | `server_ids` | list | No | Subset of server IDs to scan; scans all registered servers if omitted |
 
 **Returns** Combined report with `overall_risk_level`, `server_results` map (keyed by `server_id`), and `skipped_servers` (servers with no registered tools).

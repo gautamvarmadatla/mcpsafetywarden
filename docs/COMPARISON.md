@@ -74,7 +74,7 @@ These solve the **authorization problem**: who is allowed to call which tools. T
 
 **What they all share:** Centralized routing, audit logging, bearer/OAuth token validation, RBAC at the server or tool level.
 
-**What none of them do end-to-end:** Active live probing of tool behavior, output quarantine with run-ID forensics, per-argument scanning at 38 pattern depth, semantic safer-alternative ranking, behavioral profiling from proxied calls.
+**What none of them do end-to-end:** Active live probing of tool behavior, output quarantine with run-ID forensics, per-argument scanning across 20+ attack categories, semantic safer-alternative ranking, behavioral profiling from proxied calls.
 
 ---
 
@@ -84,8 +84,8 @@ These sit in the request path and inspect arguments and outputs. Closer peers to
 
 | Capability | **This project** | mcp-firewall | MCPTrust | Invariant mcp-scan |
 |---|---|---|---|---|
-| **Argument scanning** | 9 categories, 38 patterns; unicode normalization; URL decode (3 passes); base64 decode | 50+ patterns (SSRF, SQLi, CMDi, path traversal, IPI, CRLF, header injection) | No (allowlist only) | Yes (proxy mode) |
-| **Output scanning** | 38 patterns; base64 decode up to 50 attempts; LLM second-pass verification | 4 outbound checks (secrets, PII, exfil, custom policies) | No | Yes (proxy mode) |
+| **Argument scanning** | 20+ categories; unicode normalization; URL decode (3 passes); base64 decode | 50+ patterns (SSRF, SQLi, CMDi, path traversal, IPI, CRLF, header injection) | No (allowlist only) | Yes (proxy mode) |
+| **Output scanning** | 40+ patterns; base64 decode up to 50 attempts; LLM second-pass verification | 4 outbound checks (secrets, PII, exfil, custom policies) | No | Yes (proxy mode) |
 | **LLM second-pass for false positive reduction** | Yes - regex hits verified by LLM (30s timeout, 0.50 confidence threshold); blocks on LLM error with explicit warning | No | No | No |
 | **Output quarantine** | Yes - flagged output stored under run ID; never returned to caller; agent receives quarantine notice | No (drops or logs) | No | No |
 | **Policy engine** | Per-tool permanent allow/block + runtime approval gate | OPA/Rego (full policy-as-code) | Lockfile-based allowlist | Guardrails YAML |
@@ -94,7 +94,7 @@ These sit in the request path and inspect arguments and outputs. Closer peers to
 | **Behavioral profiling** | Yes - p50/p95 latency, failure rate, output size, schema stability per tool | No | Partial (drift detection) | No |
 | **Safer alternatives on block** | Yes - LLM semantic ranking by risk reduction and functional coverage | No | No | No |
 | **External scanner integrations** | Cisco AI Defense, Snyk, Kali MCP, Burp Suite MCP | Community threat feed | No | No |
-| **Rug pull / drift detection** | No | No | Yes - SHA-512/256 checksums, SLSA provenance attestation; fails CI on critical changes | Partial (scan mode) |
+| **Rug pull / drift detection** | Partial - `check_server_drift` detects schema and tool-list changes with CRITICAL/HIGH/MEDIUM/LOW severity; no cryptographic attestation or CI integration | No | Yes - SHA-512/256 checksums, SLSA provenance attestation; fails CI on critical changes | Partial (scan mode) |
 | **Compliance reporting** | No | DORA/FINMA/SOC 2 built-in | No | No |
 | **Anti-spoofing** | No | No | Yes - ID translation; server never sees real host IDs | No |
 | **Self-hosted / fully local** | Yes | Yes | Yes | Yes |
@@ -149,8 +149,8 @@ Which tool class covers which attack. "Full" means the tool actively detects and
 
 | Attack vector | This project | mcp-firewall | MCPTrust | mcp-scan | Access control gateways | Static scanners |
 |---|---|---|---|---|---|---|
-| Prompt injection in tool args | Full (38 patterns + LLM second-pass) | Full (50+ patterns) | No | Partial | Partial | No |
-| Prompt injection in tool output | Full (38 patterns + LLM second-pass + quarantine) | Partial (outbound policy) | No | Partial | Partial (PII only) | No |
+| Prompt injection in tool args | Full (40+ patterns + LLM second-pass) | Full (50+ patterns) | No | Partial | Partial | No |
+| Prompt injection in tool output | Full (40+ patterns + LLM second-pass + quarantine) | Partial (outbound policy) | No | Partial | Partial (PII only) | No |
 | SSRF via args | Full (regex + SSRF category) | Full | No | No | Partial (WAF) | No |
 | SQL / NoSQL injection in args | Full (exec_injection category) | Full | No | No | No | No |
 | Command injection in args | Full (exec_injection category) | Full | No | No | Partial (WAF) | No |
@@ -158,7 +158,7 @@ Which tool class covers which attack. "Full" means the tool actively detects and
 | Base64-encoded attack payloads | Full (up to 50 decode attempts per output string) | Partial | No | No | No | No |
 | Data exfiltration via output | Full (data_exfiltration category + credential redaction) | Full (secrets + DLP) | No | Partial | Partial (PII) | No |
 | Tool poisoning (description injection) | Partial (Snyk/Cisco at scan time) | No | No | Full | No | Full |
-| Rug pull (silent definition change) | No | No | Full (checksum + SLSA attestation) | Partial | No | No |
+| Rug pull (silent definition change) | Partial (check_server_drift detects schema/tool-list changes; no cryptographic attestation) | No | Full (checksum + SLSA attestation) | Partial | No | No |
 | Indirect prompt injection from external data | Partial (output scan catches IPI strings in tool output) | Partial | No | Partial | No | No |
 | Function hijacking (adversarial tool selection) | No | No | No | No | No | No |
 | Log-to-leak (forced logging tool invocation) | Partial (output scan on logging tool response) | Partial | No | No | No | No |
@@ -223,7 +223,7 @@ Portkey, Obot, Composio, Lunar.dev, TrueFoundry, Kong, and AWS all support multi
 
 **Supply chain integrity and rug pull detection**
 
-MCPTrust has SHA-512/256 checksums, SLSA provenance attestation, lockfile-based capability allowlisting, and CI integration that fails builds on critical changes. This project has no equivalent. If a server's tool definitions change between runs, this project will re-classify the tool but will not alert or block based on the definition change.
+MCPTrust has SHA-512/256 checksums, SLSA provenance attestation, lockfile-based capability allowlisting, and CI integration that fails builds on critical changes. This project has partial coverage: `check_server_drift` detects schema and tool-list changes with CRITICAL/HIGH/MEDIUM/LOW severity levels (tool removed, parameter type changed, description changed, new tool added). It does not provide cryptographic attestation, supply-chain provenance, or CI blocking.
 
 **Compliance reporting**
 
