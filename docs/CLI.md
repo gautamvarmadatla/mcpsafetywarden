@@ -77,6 +77,17 @@ mcpsafetywarden onboard my-server --transport stdio --command python --args '["s
 mcpsafetywarden onboard my-server --transport streamable_http --url https://mcp.example.com/mcp \
   --headers '{"Authorization": "Bearer TOKEN"}' \
   --scan-provider anthropic --scan-model claude-opus-4-7 --scan-api-key sk-ant-... --yes
+mcpsafetywarden onboard my-server --transport stdio --command python --args '["server.py"]' \
+  --github-url https://github.com/owner/repo
+```
+
+**`drift <server_id>`**
+Check for tool schema or tool-list changes since last inspection. Prints a severity-colored table of changes (CRITICAL/HIGH/MEDIUM/LOW). Updates the stored baseline by default.
+
+```bash
+mcpsafetywarden drift my-server
+mcpsafetywarden drift my-server --no-update   # audit only, do not update baseline
+mcpsafetywarden drift my-server --json
 ```
 
 **`register <server_id>`**

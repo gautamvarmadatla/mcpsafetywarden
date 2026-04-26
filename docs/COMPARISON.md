@@ -152,8 +152,8 @@ Which tool class covers which attack. "Full" means the tool actively detects and
 | Prompt injection in tool args | Full (40+ patterns + LLM second-pass) | Full (50+ patterns) | No | Partial | Partial | No |
 | Prompt injection in tool output | Full (40+ patterns + LLM second-pass + quarantine) | Partial (outbound policy) | No | Partial | Partial (PII only) | No |
 | SSRF via args | Full (regex + SSRF category) | Full | No | No | Partial (WAF) | No |
-| SQL / NoSQL injection in args | Full (exec_injection category) | Full | No | No | No | No |
-| Command injection in args | Full (exec_injection category) | Full | No | No | Partial (WAF) | No |
+| SQL / NoSQL injection in args | Full (sql_injection / nosql_injection categories) | Full | No | No | No | No |
+| Command injection in args | Full (command_injection category) | Full | No | No | Partial (WAF) | No |
 | Path traversal in args | Full | Full | No | No | Partial (WAF) | No |
 | Base64-encoded attack payloads | Full (up to 50 decode attempts per output string) | Partial | No | No | No | No |
 | Data exfiltration via output | Full (data_exfiltration category + credential redaction) | Full (secrets + DLP) | No | Partial | Partial (PII) | No |
@@ -163,7 +163,7 @@ Which tool class covers which attack. "Full" means the tool actively detects and
 | Function hijacking (adversarial tool selection) | No | No | No | No | No | No |
 | Log-to-leak (forced logging tool invocation) | Partial (output scan on logging tool response) | Partial | No | No | No | No |
 | Behavioral divergence (tool lies about what it does) | Full (5-stage live probing pipeline) | No | No | No | No | No |
-| Credential theft from output | Full (13-pattern credential detection; output quarantine) | Full (secrets detection) | No | Partial | Partial | No |
+| Credential theft from output | Full (11-pattern credential detection; output quarantine) | Full (secrets detection) | No | Partial | Partial | No |
 | Cross-origin escalation | Partial (Snyk/Cisco at scan time) | No | No | Full | No | Partial |
 | OAuth confused deputy | No | No | No | No | Partial (gateway auth) | No |
 | Supply chain / rug pull | No | No | Full | Partial | No | No |

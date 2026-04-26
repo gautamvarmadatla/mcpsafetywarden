@@ -45,7 +45,8 @@ One-shot onboarding: registers the server, inspects its tools, and runs a securi
 | `scan_provider` | string | No | LLM provider for the security scan (`"anthropic"`, `"openai"`, `"gemini"`, `"ollama"`, `"cisco"`, `"snyk"`) |
 | `scan_model` | string | No | Model ID override for the scan provider |
 | `scan_api_key` | string | No | API key override (prefer env vars in production) |
-| `confirm_scan_authorized` | bool | No | Must be `true` to authorize active probing with mcpsafety+ providers (default `false`) |
+| `github_url` | string | No | GitHub URL of the server's source repository; enables source-code scanning layers during security scans |
+| `confirm_scan_authorized` | bool | No | Must be `true` to authorize active probing with all providers including `cisco` and `snyk` (default `false`) |
 
 **Returns** JSON with `server_id`, `register` result, and `security_scan` result. If no LLM provider is detected, `security_scan` is skipped with a hint.
 
@@ -181,7 +182,7 @@ Get a behavioral risk assessment for a tool before executing it.
 | `server_id` | string | Yes | |
 | `tool_name` | string | Yes | |
 | `args` | object | No | Reserved for future arg-aware analysis |
-| `auto_scan_provider` | string | No | If no security scan exists yet, run one automatically. Accepts `"anthropic"`, `"openai"`, `"gemini"`, `"cisco"`, `"snyk"`. mcpsafety+ providers are not accepted here; use `security_scan_server` with `confirm_authorized=true` instead. |
+| `auto_scan_provider` | string | No | If no security scan exists yet, run one automatically. Accepts `"anthropic"`, `"openai"`, `"gemini"`, `"cisco"`, `"snyk"`. The combined `"mcpsafety+"` string is not a valid value here - pass the specific provider name (`"anthropic"`, etc.) directly. For the full authorized 5-stage pipeline, use `security_scan_server` with `confirm_authorized=true`. |
 | `auto_scan_model` | string | No | Model override for the auto-scan |
 | `auto_scan_api_key` | string | No | API key for the auto-scan provider |
 | `llm_provider` | string | No | Provider for on-demand tool classification if no profile exists yet |
@@ -236,11 +237,13 @@ End-to-end safe tool execution with risk gating and alternative selection.
 **Call flow**
 
 ```
-1. Check permanent policy (allow/block).
-2. Run preflight assessment.
-3a. Low / medium-low risk -> scan args -> execute -> scan output -> return result.
-3b. Medium / high risk, not approved -> rank alternatives -> return blocked response with numbered menu.
-3c. Approved or use_alternative set -> scan args -> execute -> scan output -> return result.
+1. use_alternative set -> verify alternative, scan args -> execute -> scan output -> return result.
+2. show_more_options set -> return proceed/abort options menu.
+3. Check permanent policy (allow/block).
+4. Run preflight assessment.
+5a. Low / medium-low risk -> scan args -> execute -> scan output -> return result.
+5b. Medium / high risk, not approved -> rank alternatives -> return blocked response with numbered menu.
+5c. Approved -> scan args -> execute -> scan output -> return result.
 ```
 
 **Argument scanning:** every value is checked against 20+ attack categories (SSRF, SQL/NoSQL/LDAP/XPath injection, command injection, path traversal, XXE, template injection, prompt injection, deserialization payloads, base64-encoded variants). When an LLM key is available, flagged values get a second-pass LLM verification to clear false positives.
@@ -360,7 +363,7 @@ Find lower-risk alternatives to a tool on the same server.
 
 ### `run_replay_test`
 
-Test idempotency by calling a tool twice with identical args and comparing outputs. Requires `approved=true` for any tool that is not `read_only` or has a HIGH/MEDIUM security flag.
+Test idempotency by calling a tool twice with identical args and comparing outputs. Requires `approved=true` when any of the following is true: effect is not `read_only`, destructiveness is `high` or `medium`, or `approval_recommended` is set in the preflight assessment.
 
 **Parameters**
 
@@ -548,7 +551,7 @@ Check if a registered server is reachable and measure round-trip latency. For `s
 
 Two independent rate limiters protect the server.
 
-**Management operations** (all tools except `safe_tool_call`):
+**Management operations** (`register_server`, `inspect_server`, `check_server_drift`, `run_replay_test`, `security_scan_server`, `scan_all_servers`):
 - 10 calls per 60 seconds per server ID
 - 100 calls per 60 seconds globally across all server IDs
 - Defined in `server.py`: `_MGMT_RATE_LIMIT_MAX`, `_GLOBAL_RATE_LIMIT_MAX`
@@ -576,4 +579,4 @@ Common errors:
 | `Rate limit exceeded.` | Too many calls in the window | Wait and retry |
 | `URL targets a private or restricted address.` | SSRF filter blocked the URL | Use stdio transport for internal servers |
 | `Registering a shell interpreter with an eval flag is not permitted.` | Security policy | Use a dedicated MCP server script |
-| `confirm_authorized must be True` | mcpsafety+ requires explicit authorization | Pass `confirm_authorized=true` |
+| `confirm_authorized must be True` | All providers require explicit authorization | Pass `confirm_authorized=true` |
