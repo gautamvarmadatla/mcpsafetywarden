@@ -1,6 +1,6 @@
 """
 Shared pytest fixtures and config for all mcpsafetywarden test modules.
-Tests run against DeepWiki (https://mcp.deepwiki.com/mcp) — public, no auth required.
+Tests run against DeepWiki (https://mcp.deepwiki.com/mcp) - public, no auth required.
 """
 import asyncio
 import json

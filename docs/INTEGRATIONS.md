@@ -39,7 +39,7 @@ Note: `vulnerability_scan` runs nmap vuln scripts which can take 60-90 seconds p
 
 - **Extension repo**: [github.com/PortSwigger/mcp-server](https://github.com/PortSwigger/mcp-server)
 - **Burp Suite download**: [portswigger.net/burp/releases](https://portswigger.net/burp/releases) (Community or Professional)
-- **BApp Store**: search "MCP Server" inside Burp (Extensions → BApp Store) — no build needed
+- **BApp Store**: search "MCP Server" inside Burp (Extensions -> BApp Store) - no build needed
 - License: GPL-3.0, no auth, runs as an SSE server on port 9876
 
 Community edition tools run always; Pro-only tools (Collaborator, scanner) are tried and silently skipped on failure.
@@ -82,7 +82,7 @@ mcpsafetywarden onboard burp-mcp \
   --url http://127.0.0.1:9876
 ```
 
-Note: Burp requires approval for two things by default — both must be configured for fully automated scanning:
+Note: Burp requires approval for two things by default - both must be configured for fully automated scanning:
 - **HTTP probes**: Pre-approve the target host under "Auto-Approved HTTP Targets" in the MCP tab (e.g. `mcp.example.com`). Without this, `send_http1_request` probes show a dialog and will timeout.
 - **Proxy history access**: Check "Always allow HTTP history access" in the MCP tab. Without this, `get_proxy_http_history_regex` (used for audit evidence) shows a dialog and returns empty.
 

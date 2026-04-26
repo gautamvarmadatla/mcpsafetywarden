@@ -478,7 +478,12 @@ async def preflight_tool_call(
     llm_api_key: Optional[str] = None,
 ) -> str:
     """
-    Get a behavioral risk assessment for a tool BEFORE executing it.
+    Get a risk assessment for a tool WITHOUT executing it.
+
+    Use this ONLY when you need to show the user the risk level before deciding
+    whether to proceed - for example, to ask for explicit confirmation before calling
+    safe_tool_call. Do NOT call this before safe_tool_call as a routine step:
+    safe_tool_call runs preflight internally and will duplicate the work.
 
     Returns: effect class, retry safety, risk level, approval recommendation,
     latency band, output size risk, confidence, and evidence trail.
@@ -1326,14 +1331,16 @@ async def safe_tool_call(
     llm_api_key: Optional[str] = None,
 ) -> str:
     """
-    End-to-end safe tool execution with automatic risk gating and alternative selection.
+    Execute a tool with automatic safety gating. Do NOT call preflight_tool_call
+    before this - preflight runs automatically inside safe_tool_call.
 
-    First call: runs preflight. Low risk executes immediately. Medium/high risk returns
-    a numbered alternatives list ending with a "More options" entry.
+    First call: runs preflight internally. Low risk executes immediately.
+    Medium/high risk returns a numbered alternatives list instead of executing.
 
-    use_alternative: re-call with the name of a listed alternative to execute it instead.
-    show_more_options: re-call with True to see proceed-anyway and abort options.
-    approved: re-call with True to execute the original tool despite its risk level.
+    Follow-up calls:
+      approved=True          - execute despite the risk level
+      use_alternative=<name> - execute a listed lower-risk alternative instead
+      show_more_options=True - see the proceed-anyway and abort options
     """
     if use_alternative:
         alt_tool = db.get_tool(server_id, use_alternative)
