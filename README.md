@@ -75,7 +75,8 @@ Use as a proxy to add safety gating to any MCP server, or point it at a server y
 
 Without a key the wrapper operates in rule-based-only mode: lower confidence tool classification, regex-only injection scanning, no alternatives in the risk gate, no mcpsafety+ pipeline. For a fully local setup, run [Ollama](https://ollama.com), set `OLLAMA_MODEL`, and pass `--provider ollama` explicitly (Ollama is not auto-detected).
 
-**Note on stdio servers that require local setup:** `stdio` servers that need local configuration before starting (missing config files, credentials, data directories, or OS-specific dependencies) cannot be inspected by the wrapper - tool discovery will fail and 0 tools will be stored. You can still run a full source-code security scan without spawning the server by passing `--github-url` to `scan` / `onboard`, or the `github_url` parameter to `security_scan_server`. The mcpsafety+ pipeline will fetch and analyze the source directly from GitHub. `sse` and `streamable_http` servers are not affected.
+> [!NOTE]
+> **stdio servers that require local setup** (`stdio` servers that need local configuration before starting - missing config files, credentials, data directories, or OS-specific dependencies) cannot be inspected by the wrapper - tool discovery will fail and 0 tools will be stored. You can still run a full source-code security scan without spawning the server by passing `--github-url` to `scan` / `onboard`, or the `github_url` parameter to `security_scan_server`. The mcpsafety+ pipeline will fetch and analyze the source directly from GitHub. `sse` and `streamable_http` servers are not affected.
 
 
 ## Installation
