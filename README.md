@@ -27,6 +27,12 @@ MCP safety warden is a proxy server that wraps any MCP server and adds behaviora
 
 Use as a proxy to add safety gating to any MCP server, or point it at a server you don't own and run a full security audit without making a single tool call.
 
+<p align="center">
+  <img src="assets/two_operating_modes.jpg" alt="Two operating modes" width="800"/>
+  <br/>
+  <em>Fig 1. Two operating modes: proxy and audit</em>
+</p>
+
 **Behavioral profiling**: Effect class, retry safety, destructiveness. LLM-assisted (Anthropic, OpenAI, Gemini, Ollama) with rule-based fallback. Observed stats (latency p50/p95, failure rate, output size) updated after every proxied call.
 
 **Security scanning**: mcpsafety+ five-stage pipeline (Recon, Planner, Hacker, Auditor, Supervisor). Cisco AI Defense (AST/YARA). Snyk (metadata analysis). Kali and Burp Suite integrations enrich the pipeline with real network data and HTTP-layer probes. Source code scanning from GitHub with entropy, AST, taint flow, and rug-pull detection.
