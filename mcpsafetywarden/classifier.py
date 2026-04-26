@@ -319,12 +319,12 @@ def _infer_extra_risks(description: str, schema: Dict[str, Any]) -> Dict[str, An
     return risks
 
 
-def _classify_by_annotations(annotations: Dict[str, Any]) -> Tuple[Optional[str], float, bool, Optional[bool], List[str]]:
+def _classify_by_annotations(annotations: Dict[str, Any]) -> Tuple[Optional[str], float, Optional[bool], Optional[bool], List[str]]:
     """Returns (effect, conf, open_world, retry_safe_hint, evidence)."""
     evidence: List[str] = []
     effect: Optional[str]   = None
     conf: float           = 0.0
-    open_world                = False
+    open_world: Optional[bool] = None
     retry_hint: Optional[bool] = None
 
     if annotations.get("readOnlyHint") is True:
@@ -633,9 +633,8 @@ def classify_tool(
     elif final_effect in RETRY_UNSAFE_EFFECTS: retry_safety = "unsafe"
     else: retry_safety = "caution"
 
-    if ann_open_world:
-        open_world = True
-        # annotation evidence is already in ann_ev / evidence via _classify_by_annotations
+    if ann_open_world is not None:
+        open_world = ann_open_world
     elif llm_result:
         open_world = llm_result.get("open_world", False)
         evidence.append(f"llm_open_world={open_world}")
