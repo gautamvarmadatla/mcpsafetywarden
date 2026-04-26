@@ -316,22 +316,28 @@ Examples:
                 for t in tools
             ]
         except (ValueError, RuntimeError) as exc:
-            result["inspect_error"] = str(exc)
-            result["hint"] = (
-                "stdio server requires local setup before it can be inspected. "
-                "Pass github_url to security_scan_server to analyze source code directly without spawning the server."
-                if transport == "stdio"
-                else "Server registered. Fix the error then run inspect_server."
-            )
+            db.delete_server(server_id)
+            return json.dumps({
+                "error": f"Registration aborted - inspection failed: {exc}",
+                "hint": (
+                    "stdio server requires local setup before it can be inspected. "
+                    "Use onboard_server with github_url to run a source-only scan instead."
+                    if transport == "stdio"
+                    else "Fix the server and try again."
+                ),
+            })
         except Exception as exc:
             _log.error("register_server auto-inspect failed for %s: %s", server_id, exc, exc_info=True)
-            result["inspect_error"] = "Inspection failed. Check server logs."
-            result["hint"] = (
-                "stdio server requires local setup before it can be inspected. "
-                "Pass github_url to security_scan_server to analyze source code directly without spawning the server."
-                if transport == "stdio"
-                else "Server registered. Fix the error then run inspect_server."
-            )
+            db.delete_server(server_id)
+            return json.dumps({
+                "error": "Registration aborted - inspection failed.",
+                "hint": (
+                    "stdio server requires local setup before it can be inspected. "
+                    "Use onboard_server with github_url to run a source-only scan instead."
+                    if transport == "stdio"
+                    else "Fix the server and try again."
+                ),
+            })
 
     return json.dumps(result, indent=2)
 
