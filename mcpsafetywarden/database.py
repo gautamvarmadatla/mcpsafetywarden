@@ -41,7 +41,7 @@ def _decrypt_field(ciphertext: str) -> str:
     except Exception as _dec_err:
         _log.error(
             "_decrypt_field failed - key rotation or data corruption: %s. "
-            "Check MCP_DB_ENCRYPTION_KEY. Returning empty string to prevent garbled data.",
+            "Check MCP_DB_ENCRYPTION_KEY. Returning empty JSON object to prevent garbled data.",
             _dec_err,
         )
         return "{}"
