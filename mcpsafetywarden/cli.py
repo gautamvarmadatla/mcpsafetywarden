@@ -390,6 +390,8 @@ def cmd_scan(
 
     risk = (result.get("overall_risk_level") or "unknown").lower()
     console.print(f"Overall risk: {_risk_badge(risk)}")
+    if result.get("source_only"):
+        console.print("[dim]Note: source-only scan - no live tool probing was performed.[/dim]")
     if result.get("summary"):
         console.print(result["summary"])
 

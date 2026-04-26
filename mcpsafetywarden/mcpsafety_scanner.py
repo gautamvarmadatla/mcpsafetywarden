@@ -1790,6 +1790,8 @@ async def run_mcpsafety_scan(
             report["burp_findings_count"] = len(burp_findings)
         if source_recon.get("github_url"):
             report["source_recon"] = source_recon
+        if not tools:
+            report["source_only"] = True
         return report
 
     try: report = await asyncio.wait_for(_pipeline(), timeout=scan_timeout_s)
