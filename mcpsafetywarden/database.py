@@ -102,6 +102,15 @@ def init_db() -> None:
                 registered_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS source_hashes (
+                server_id        TEXT PRIMARY KEY,
+                github_url       TEXT,
+                files_hash       TEXT NOT NULL,
+                file_paths_json  TEXT DEFAULT '[]',
+                first_seen_at    TEXT NOT NULL,
+                last_checked_at  TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS tools (
                 tool_id          TEXT PRIMARY KEY,
                 server_id        TEXT NOT NULL REFERENCES servers(server_id),
@@ -179,6 +188,11 @@ def init_db() -> None:
             conn.commit()
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("ALTER TABLE servers ADD COLUMN github_url TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
     finally:
         conn.close()
     try:
@@ -201,19 +215,21 @@ def upsert_server(
     url: Optional[str] = None,
     env: Optional[Dict[str, str]] = None,
     headers: Optional[Dict[str, str]] = None,
+    github_url: Optional[str] = None,
 ) -> None:
     conn = get_connection()
     try:
         conn.execute(
             """
             INSERT INTO servers
-                (server_id, transport, command, args_json, url, env_json, headers_json, registered_at, last_updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (server_id, transport, command, args_json, url, env_json, headers_json, registered_at, last_updated_at, github_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(server_id) DO UPDATE SET
                 transport=excluded.transport, command=excluded.command,
                 args_json=excluded.args_json, url=excluded.url,
                 env_json=excluded.env_json, headers_json=excluded.headers_json,
-                last_updated_at=excluded.last_updated_at
+                last_updated_at=excluded.last_updated_at,
+                github_url=COALESCE(excluded.github_url, servers.github_url)
             """,
             (
                 server_id, transport, command,
@@ -223,6 +239,7 @@ def upsert_server(
                 _encrypt_field(json.dumps(headers or {})),
                 datetime.now(timezone.utc).isoformat(),
                 datetime.now(timezone.utc).isoformat(),
+                github_url,
             ),
         )
         conn.commit()
@@ -567,3 +584,45 @@ def get_tool_policy(server_id: str, tool_name: str) -> Optional[str]:
         ).fetchone()
         return row["policy"] if row else None
     finally: conn.close()
+
+
+def get_source_hash(server_id: str) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM source_hashes WHERE server_id = ?", (server_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["file_paths"] = _jloads(d.pop("file_paths_json", "[]"), [])
+        return d
+    finally:
+        conn.close()
+
+
+def upsert_source_hash(
+    server_id: str,
+    github_url: str,
+    files_hash: str,
+    file_paths: List[str],
+) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO source_hashes
+                (server_id, github_url, files_hash, file_paths_json, first_seen_at, last_checked_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(server_id) DO UPDATE SET
+                github_url=excluded.github_url,
+                files_hash=excluded.files_hash,
+                file_paths_json=excluded.file_paths_json,
+                last_checked_at=excluded.last_checked_at
+            """,
+            (server_id, github_url, files_hash, json.dumps(file_paths), now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()

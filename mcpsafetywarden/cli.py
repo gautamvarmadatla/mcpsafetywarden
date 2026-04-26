@@ -184,6 +184,7 @@ def cmd_onboard(
     scan_provider: Optional[str] = typer.Option(None, "--scan-provider", help="anthropic | openai | gemini | ollama | cisco | snyk"),
     scan_model: Optional[str] = typer.Option(None, "--scan-model"),
     scan_api_key: Optional[str] = typer.Option(None, "--scan-api-key"),
+    github_url: Optional[str] = typer.Option(None, "--github-url", help="GitHub repo URL for source code analysis"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip authorization prompt"),
     json_output: bool = typer.Option(False, "--json"),
 ):
@@ -207,6 +208,7 @@ def cmd_onboard(
             scan_model=scan_model,
             scan_api_key=scan_api_key,
             confirm_scan_authorized=bool(confirm_scan),
+            github_url=github_url,
         )))
     _die(result)
     if json_output:
@@ -288,6 +290,7 @@ def cmd_scan(
     destructive: bool = typer.Option(False, "--destructive", help="Enable path traversal / command injection probes"),
     skip_web_research: bool = typer.Option(True, "--skip-web-research/--web-research", help="Skip DuckDuckGo/HackerNews/Arxiv CVE research (default: skip to avoid leaking findings)"),
     timeout: int = typer.Option(300, "--timeout", help="Scan timeout in seconds"),
+    github_url: Optional[str] = typer.Option(None, "--github-url", help="GitHub repo URL for source code analysis (auto-detected if omitted)"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip authorization prompt"),
     json_output: bool = typer.Option(False, "--json"),
 ):
@@ -308,6 +311,7 @@ def cmd_scan(
             skip_web_research=skip_web_research,
             scan_timeout_s=timeout,
             background=False,
+            github_url=github_url,
         )))
     _die(result)
     if json_output:

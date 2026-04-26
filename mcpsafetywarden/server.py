@@ -227,6 +227,7 @@ async def register_server(
     classify_provider: Optional[str] = None,
     classify_model: Optional[str] = None,
     classify_api_key: Optional[str] = None,
+    github_url: Optional[str] = None,
 ) -> str:
     """
     Register an MCP server to wrap and profile.
@@ -296,7 +297,7 @@ Examples:
 
     _log.info("register_server server_id=%s transport=%s auto_inspect=%s", server_id, transport, auto_inspect)
 
-    db.upsert_server(server_id, transport, command, args or [], url, env or {}, headers or {})
+    db.upsert_server(server_id, transport, command, args or [], url, env or {}, headers or {}, github_url)
     result: Dict[str, Any] = {"registered": server_id, "transport": transport}
 
     if auto_inspect:
@@ -863,7 +864,10 @@ async def _execute_scan_core(
     allow_destructive_probes: bool,
     skip_web_research: bool,
     scan_timeout_s: int,
+    github_url: Optional[str] = None,
 ) -> Dict[str, Any]:
+    effective_github_url = github_url or server.get("github_url")
+
     async def _run_one(prov: str) -> Dict[str, Any]:
         try:
             if prov == "cisco":
@@ -878,6 +882,7 @@ async def _execute_scan_core(
                 allow_destructive_probes=allow_destructive_probes,
                 skip_web_research=skip_web_research,
                 scan_timeout_s=scan_timeout_s,
+                github_url=effective_github_url,
             )
         except Exception as exc:
             _log.error("security_scan_server provider=%s failed: %s", prov, exc, exc_info=True)
@@ -909,6 +914,7 @@ async def security_scan_server(
     skip_web_research: bool = True,
     scan_timeout_s: int = 300,
     background: bool = True,
+    github_url: Optional[str] = None,
 ) -> str:
     """
     Run a live security audit on a registered server's tools.
@@ -1006,6 +1012,7 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
                     allow_destructive_probes=allow_destructive_probes,
                     skip_web_research=skip_web_research,
                     scan_timeout_s=scan_timeout_s,
+                    github_url=github_url,
                 )
                 _bg_scan_status[server_id] = "completed"
             except Exception as exc:
@@ -1035,6 +1042,7 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
             allow_destructive_probes=allow_destructive_probes,
             skip_web_research=skip_web_research,
             scan_timeout_s=scan_timeout_s,
+            github_url=github_url,
         )
         return json.dumps(findings, indent=2)
 
@@ -1440,6 +1448,7 @@ async def onboard_server(
     scan_model: Optional[str] = None,
     scan_api_key: Optional[str] = None,
     confirm_scan_authorized: bool = False,
+    github_url: Optional[str] = None,
 ) -> str:
     """
     One-shot server onboarding: register + security scan + inspect in sequence.
@@ -1455,6 +1464,7 @@ async def onboard_server(
         classify_provider=scan_provider,
         classify_model=scan_model,
         classify_api_key=scan_api_key,
+        github_url=github_url,
     )
     reg_result = json.loads(reg_json)
     result: Dict[str, Any] = {"server_id": server_id, "register": reg_result, "security_scan": None}

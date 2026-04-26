@@ -1,0 +1,64 @@
+rules:
+  - id: mcp-command-injection
+    patterns:
+      - pattern: subprocess.run($X, shell=True, ...)
+      - pattern-not: subprocess.run(["..."], shell=True, ...)
+    message: >
+      subprocess.run with shell=True and a variable argument enables OS command injection.
+      Use a list of arguments with shell=False instead.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-78
+
+  - id: mcp-popen-shell-injection
+    patterns:
+      - pattern: subprocess.Popen($X, shell=True, ...)
+      - pattern-not: subprocess.Popen(["..."], shell=True, ...)
+    message: >
+      subprocess.Popen with shell=True and a variable enables OS command injection.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-78
+
+  - id: mcp-unsafe-pickle
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+    message: >
+      Pickle deserialization of untrusted data enables arbitrary code execution (RCE).
+      Use JSON or another safe serialization format instead.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: CWE-502
+
+  - id: mcp-unsafe-yaml-load
+    patterns:
+      - pattern: yaml.load(...)
+      - pattern-not: yaml.load(..., Loader=yaml.SafeLoader)
+      - pattern-not: yaml.load(..., yaml.SafeLoader)
+      - pattern-not: yaml.load(..., Loader=yaml.FullLoader)
+    message: >
+      yaml.load called without an explicit safe Loader. Use yaml.safe_load() or
+      yaml.load(data, Loader=yaml.SafeLoader) to prevent arbitrary code execution.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: CWE-502
+
+  - id: mcp-hardcoded-credential
+    pattern-regex: '(?i)(api_key|secret_key|access_key|private_key|password|auth_token)\s*=\s*["\'][A-Za-z0-9+/\-_]{20,}["\']'
+    message: >
+      Potential hardcoded credential detected. Store secrets in environment variables
+      or a secrets manager instead of source code.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: CWE-798

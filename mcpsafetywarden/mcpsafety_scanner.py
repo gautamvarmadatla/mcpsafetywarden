@@ -44,6 +44,7 @@ from typing import Any, Dict, List, Optional
 from . import database as db
 from .client_manager import open_streams as _open_streams, scan_for_injection as _scan_for_injection
 from .scanner import call_llm as _call_llm_scanner
+from .source_recon import run_source_recon as _run_source_recon
 from .security_utils import normalise_arg as _normalise_probe_str
 from .security_utils import redact_args as _redact_probe_args
 from .security_utils import redact_text as _redact_in_text
@@ -1552,11 +1553,26 @@ async def _run_planner(
         "but still include them so coverage gaps are visible - the probe agent will skip them."
     )
 
+    source_recon = recon.get("source_recon", {})
+    source_section = ""
+    if source_recon.get("taint_flows") or source_recon.get("findings"):
+        taint_flows = source_recon.get("taint_flows", [])[:10]
+        sr_findings = source_recon.get("findings", [])[:10]
+        caps = source_recon.get("import_capabilities", [])
+        source_section = (
+            f"\n\nSOURCE CODE ANALYSIS (from {source_recon.get('github_url', 'unknown')}):\n"
+            f"Import capabilities: {', '.join(caps) if caps else 'none'}\n"
+            f"Taint flows (param -> dangerous sink): {json.dumps(taint_flows, indent=2)}\n"
+            f"Static analysis findings: {json.dumps(sr_findings, indent=2)}\n"
+        )
+
+    recon_without_source = {k: v for k, v in recon.items() if k != "source_recon"}
     prompt = (
         f"{_PLANNER_SYSTEM}\n\n"
         f"PROBE MODE: {mode_context}\n\n"
         f"Tool list:\n{json.dumps(slim_tools, indent=2)}\n\n"
-        f"Recon report:\n{json.dumps(recon, indent=2)}\n\n"
+        f"Recon report:\n{json.dumps(recon_without_source, indent=2)}\n"
+        f"{source_section}\n"
         "Produce the attack plan JSON."
     )
 
@@ -1593,6 +1609,7 @@ async def run_mcpsafety_scan(
     skip_web_research: bool = True,
     scan_timeout_s: int = 300,
     max_calls_per_turn: int = 5,
+    github_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     5-stage MCPSafety penetration testing pipeline.
@@ -1640,6 +1657,28 @@ async def run_mcpsafety_scan(
 
         _log.info("mcpsafety Stage 0: Recon (server=%s provider=%s)", server_id, llm_provider)
         recon = await _run_recon(tools, llm_provider, model_id, api_key, network_scan=network_scan)
+
+        _log.info("mcpsafety Stage 0a: Source Recon (server=%s)", server_id)
+        source_recon: Dict[str, Any] = {}
+        try:
+            source_recon = await asyncio.wait_for(
+                _run_source_recon(
+                    server_id, server_config, tools,
+                    github_url or server_config.get("github_url"),
+                    llm_provider, model_id, api_key,
+                ),
+                timeout=150,
+            )
+            if source_recon.get("github_url"):
+                recon["source_recon"] = source_recon
+                _log.info(
+                    "Source recon: %d files, %d findings, layers=%s",
+                    source_recon.get("files_analyzed", 0),
+                    len(source_recon.get("findings", [])),
+                    source_recon.get("layers_run", []),
+                )
+        except (asyncio.TimeoutError, Exception) as exc:
+            _log.warning("Source recon failed/timed out (%s) - continuing without it", exc)
 
         _log.info("mcpsafety Stage 0b: Planning (server=%s)", server_id)
         attack_plan = await _run_planner(
@@ -1730,6 +1769,8 @@ async def run_mcpsafety_scan(
             report["network_scan"] = network_scan
         if burp_findings:
             report["burp_findings_count"] = len(burp_findings)
+        if source_recon.get("github_url"):
+            report["source_recon"] = source_recon
         return report
 
     try: report = await asyncio.wait_for(_pipeline(), timeout=scan_timeout_s)
@@ -1792,6 +1833,10 @@ async def run_mcpsafety_scan_multi(
     for entry in servers:
         sid = entry["server_id"]
         _log.info("mcpsafety multi-scan: starting server '%s' (%d/%d)", sid, len(per_server) + 1, len(servers))
+        entry_github_url = (
+            entry.get("github_url")
+            or (entry.get("server_config") or {}).get("github_url")
+        )
         try:
             result = await run_mcpsafety_scan(
                 server_id=sid,
@@ -1806,6 +1851,7 @@ async def run_mcpsafety_scan_multi(
                 skip_web_research=skip_web_research,
                 scan_timeout_s=scan_timeout_s,
                 max_calls_per_turn=max_calls_per_turn,
+                github_url=entry_github_url,
             )
         except Exception as exc:
             _log.error("mcpsafety multi-scan: server '%s' failed: %s", sid, exc)

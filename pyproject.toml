@@ -54,6 +54,7 @@ cisco = ["cisco-ai-mcp-scanner>=4.0.0"]
 snyk = ["snyk-agent-scan>=0.4.0"]
 research = ["duckduckgo-search>=6.0.0", "arxiv>=2.0.0"]
 encryption = ["cryptography>=42.0.0"]
+source = ["bandit>=1.7.0", "semgrep>=1.50.0"]
 all = [
     "anthropic>=0.40.0",
     "openai>=1.0.0",
@@ -63,6 +64,8 @@ all = [
     "duckduckgo-search>=6.0.0",
     "arxiv>=2.0.0",
     "cryptography>=42.0.0",
+    "bandit>=1.7.0",
+    "semgrep>=1.50.0",
 ]
 
 [project.scripts]
