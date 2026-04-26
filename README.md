@@ -33,6 +33,8 @@ Use as a proxy to add safety gating to any MCP server, or point it at a server y
 
 <p align="center">
   <img src="assets/pipeline.png" alt="mcpsafety+ five-stage pipeline" width="900"/>
+  <br/>
+  <em>Fig 2. mcpsafety+ five-stage pipeline, triggered when you run a full security audit against any registered server</em>
 </p>
 
 **Safe execution**: Argument scanning (20+ attack categories, LLM second-pass). Two-layer output injection scanning. Risk gating with alternatives and per-tool policies. Drift detection on every call and standalone check.
