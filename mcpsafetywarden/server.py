@@ -979,7 +979,7 @@ async def _execute_scan_core(
 
 @mcp.tool()
 async def security_scan_server(
-    server_id: str,
+    server_id: Optional[str] = None,
     provider: Optional[str] = None,
     model_id: Optional[str] = None,
     api_key: Optional[str] = None,
@@ -991,7 +991,14 @@ async def security_scan_server(
     github_url: Optional[str] = None,
 ) -> str:
     """
-    Run a live security audit on a registered server's tools.
+    Run a security audit on a registered server's tools, or a standalone source-only scan.
+
+    Two modes:
+        server_id provided - full audit of a registered server's tools plus optional source scan.
+        server_id omitted  - standalone source-only scan via github_url, no registration needed.
+            Use this when onboard_server fails inspection (stdio server requiring local setup).
+            Returns scan results directly so the user can review before deciding to set up locally
+            and re-run onboard_server.
 
     Runs in the background by default (background=True) - returns immediately and stores
     results for get_security_scan to retrieve. Set background=False only for CLI or direct
@@ -1022,13 +1029,11 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
         background:               True = return immediately, poll get_security_scan for results.
                                   False = block until complete (default, safe for CLI/Python).
 
-    github_url: override or supplement the server's stored GitHub URL for source-code scanning.
-        Pass this when the server has no tools (e.g. stdio servers that require local setup and
-        cannot be inspected) to run a source-only scan directly from the repository without
-        spawning the server. The mcpsafety+ pipeline will fetch and analyze source code for
-        secrets, taint flows, and suspicious patterns even with 0 tools discovered.
+    github_url: required when server_id is omitted. Also used to override the stored GitHub URL
+        for an existing registered server. The mcpsafety+ pipeline fetches and analyzes source
+        code for secrets, taint flows, and suspicious patterns.
 
-    Results are stored and automatically included in future preflight_tool_call responses.
+    Results are stored (keyed by server_id or github_url) and returned directly.
     """
     if provider in _LLM_SHORTHANDS:
         provider = f"mcpsafety+{provider}"
@@ -1039,25 +1044,34 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
             "valid_providers": sorted(_LLM_SHORTHANDS) + ALL_PROVIDERS,
         })
 
-    server = db.get_server(server_id)
-    if not server:
-        return json.dumps({"error": f"Server '{server_id}' not registered."})
+    if server_id is None:
+        if not github_url:
+            return json.dumps({
+                "error": "server_id or github_url is required.",
+                "hint": "Pass github_url to run a standalone source-only scan without a registered server.",
+            })
+        server = {"server_id": github_url, "github_url": github_url}
+        server_id = github_url
+        tools = []
+    else:
+        server = db.get_server(server_id)
+        if not server:
+            return json.dumps({"error": f"Server '{server_id}' not registered."})
 
-    rl = _check_mgmt_rate_limit(f"scan:{server_id}")
-    if rl:
-        return json.dumps({"error": rl})
+        rl = _check_mgmt_rate_limit(f"scan:{server_id}")
+        if rl:
+            return json.dumps({"error": rl})
 
-    tools = db.list_tools(server_id)
-    if not tools and not github_url:
-        return json.dumps({
-            "error": f"No tools found for '{server_id}'.",
-            "hint": (
-                "Run inspect_server first, or pass github_url to run a source-only scan. "
-                "stdio servers that require local setup (missing config, credentials, or "
-                "dependencies) cannot be inspected remotely - use github_url to scan the "
-                "source code directly without spawning the server."
-            ),
-        })
+        tools = db.list_tools(server_id)
+        if not tools and not github_url:
+            return json.dumps({
+                "error": f"No tools found for '{server_id}'.",
+                "hint": (
+                    "Run inspect_server first, or pass github_url to run a source-only scan. "
+                    "stdio servers that require local setup cannot be inspected remotely - "
+                    "use github_url to scan source code directly without spawning the server."
+                ),
+            })
 
     scan_timeout_s = max(30, min(scan_timeout_s, 3600))
 
@@ -1559,9 +1573,11 @@ async def onboard_server(
 
     confirm_scan_authorized: defaults True - calling onboard_server is itself an
     authorization act. Set False only if you want to skip active security probing.
-    github_url: required for stdio servers that cannot be locally inspected (missing config,
-    credentials, or dependencies). Enables source-only scanning directly from GitHub without
-    spawning the server. If omitted and inspection fails, the scan is skipped entirely.
+    github_url: provide for stdio servers that cannot be locally inspected (missing config,
+    credentials, or dependencies). If inspection fails and github_url is given, a source-only
+    scan runs via security_scan_server without registering the server. Review results, then fix
+    local setup and re-run onboard_server to complete registration. If inspection fails and no
+    github_url is given, onboarding is aborted with a clear error.
     """
     reg_json = await register_server(
         server_id=server_id, transport=transport,
@@ -1578,16 +1594,51 @@ async def onboard_server(
     if "error" in reg_result:
         return json.dumps(result, indent=2)
 
-    if "inspect_error" in reg_result and not github_url:
-        db.delete_server(server_id)
-        return json.dumps({
-            "server_id": server_id,
-            "error": "Onboarding aborted - server could not be inspected and no github_url was provided.",
-            "hint": (
-                "Fix the local setup so the server can be inspected, or pass github_url "
-                "to run a source-only scan against the GitHub repository."
-            ),
-        })
+    if "inspect_error" in reg_result:
+        if not github_url:
+            return json.dumps({
+                "server_id": server_id,
+                "error": "Onboarding aborted - server could not be inspected and no github_url was provided.",
+                "hint": (
+                    "Fix the local setup so the server can be inspected, or pass github_url "
+                    "to run a source-only scan. Review the scan results before setting up locally "
+                    "and re-running onboard_server."
+                ),
+            })
+        effective_provider = scan_provider or _detect_llm_provider()
+        if not effective_provider:
+            return json.dumps({
+                "server_id": server_id,
+                "error": "Onboarding aborted - inspection failed.",
+                "source_scan": {"skipped": "No LLM provider detected. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY."},
+            })
+        try:
+            scan_json = await security_scan_server(
+                server_id=None,
+                provider=effective_provider,
+                model_id=scan_model,
+                api_key=scan_api_key,
+                confirm_authorized=confirm_scan_authorized,
+                github_url=github_url,
+                background=False,
+            )
+            return json.dumps({
+                "server_id": server_id,
+                "registered": False,
+                "reason": "Inspection failed - server not registered until tools can be discovered.",
+                "source_scan": json.loads(scan_json),
+                "next_step": (
+                    "Review the scan results above. If clean, fix local setup and re-run "
+                    "onboard_server to complete registration."
+                ),
+            }, indent=2)
+        except Exception as exc:
+            _log.error("onboard_server source scan failed for %s: %s", server_id, exc, exc_info=True)
+            return json.dumps({
+                "server_id": server_id,
+                "error": "Onboarding aborted - inspection failed and source scan errored.",
+                "detail": str(exc),
+            })
 
     effective_provider = scan_provider or _detect_llm_provider()
     if not effective_provider:
