@@ -1565,6 +1565,7 @@ async def onboard_server(
             server_id=server_id, provider=effective_provider,
             model_id=scan_model, api_key=scan_api_key,
             confirm_authorized=confirm_scan_authorized,
+            github_url=github_url,
         )
         result["security_scan"] = json.loads(scan_json)
     except Exception as exc:
