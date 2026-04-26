@@ -18,6 +18,7 @@ from rich.table import Table
 
 from . import database as _db
 from .server import (
+    check_server_drift as _check_server_drift,
     get_run_history as _get_run_history,
     get_retry_policy as _get_retry_policy,
     get_security_scan as _get_security_scan,
@@ -279,6 +280,60 @@ def cmd_inspect(
         console.print_json(json.dumps(result))
         return
     console.print(f"[green]✓[/green] Inspected [cyan]{server_id}[/cyan] - {result.get('tools_discovered', 0)} tool(s)")
+    if result.get("drift"):
+        drift = result["drift"]
+        sev = drift.get("overall_severity", "")
+        _SEV_COLOR = {"CRITICAL": "bold red", "HIGH": "red", "MEDIUM": "yellow", "LOW": "cyan"}
+        color = _SEV_COLOR.get(sev, "white")
+        console.print(f"  [{color}]Drift detected[/{color}] ({sev}): {len(drift.get('findings', []))} change(s) - run [dim]mcpsafetywarden drift {server_id}[/dim] for details")
+
+
+@app.command("drift")
+def cmd_drift(
+    server_id: str = typer.Argument(...),
+    no_update: bool = typer.Option(False, "--no-update", help="Audit only - do not update baseline after check"),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Check for tool schema or list changes since last inspection."""
+    with console.status(f"Checking drift for [cyan]{server_id}[/cyan]..."):
+        result = _load(_run(_check_server_drift(server_id, update_baseline=not no_update)))
+    _die(result)
+    if json_output:
+        console.print_json(json.dumps(result))
+        return
+
+    _SEV_COLOR = {"CRITICAL": "bold red", "HIGH": "red", "MEDIUM": "yellow", "LOW": "cyan"}
+
+    if not result.get("drift_detected"):
+        console.print(f"[green]✓[/green] No drift for [cyan]{server_id}[/cyan]")
+        if result.get("baseline_snapshot_at"):
+            console.print(f"  Baseline: {result['baseline_snapshot_at'][:19]}")
+        return
+
+    sev = result.get("overall_severity", "UNKNOWN")
+    color = _SEV_COLOR.get(sev, "white")
+    console.print(f"[{color}]Drift detected[/{color}] - severity: [{color}]{sev}[/{color}]")
+
+    findings = result.get("findings", [])
+    if findings:
+        t = Table(box=box.SIMPLE_HEAD)
+        t.add_column("Tool", style="cyan")
+        t.add_column("Change")
+        t.add_column("Severity")
+        t.add_column("Detail")
+        for f in findings:
+            sev_f = f.get("severity", "")
+            color_f = _SEV_COLOR.get(sev_f, "white")
+            t.add_row(
+                f.get("tool_name", ""),
+                f.get("change_type", "").replace("_", " "),
+                f"[{color_f}]{sev_f}[/{color_f}]",
+                (f.get("detail") or "")[:70],
+            )
+        console.print(t)
+
+    if result.get("baseline_updated"):
+        console.print("[dim]Baseline updated to current state.[/dim]")
 
 
 @app.command("scan")

@@ -23,6 +23,16 @@ from .scanner import call_llm as _call_llm, detect_llm_provider as _detect_llm_p
 
 _log = logging.getLogger(__name__)
 
+
+class DriftDetectedError(Exception):
+    """Raised when a tool's live definition differs from the stored baseline."""
+
+    def __init__(self, change_type: str, tool_name: str, detail: Dict[str, Any]) -> None:
+        super().__init__(f"drift_detected:{change_type}:{tool_name}")
+        self.change_type = change_type
+        self.tool_name = tool_name
+        self.detail = detail
+
 _RATE_LIMIT_MAX_CALLS  = 20
 _RATE_LIMIT_WINDOW_S   = 60
 _INSPECT_TIMEOUT_S     = 30
@@ -516,6 +526,11 @@ async def inspect_server_tools(
     for t in raw_tools:
         tool_ids.append(db.upsert_tool(server_id, t["name"], t["description"], t["schema"], t["annotations"]))
 
+    db.upsert_tool_snapshot(
+        server_id,
+        {t["name"]: db.make_hash(t.get("schema") or {}) for t in raw_tools},
+    )
+
     loop = asyncio.get_running_loop()
 
     async def _classify_one(t: Dict[str, Any]) -> Any:
@@ -619,14 +634,53 @@ async def call_tool_with_telemetry(
         if any(_arg_has_secret(v) for v in args.values()) else None
     )
 
+    stored_hash = tool.get("schema_hash", "")
+    stored_desc = tool.get("description") or ""
+    _drift: List[DriftDetectedError] = []
+
     async def _do_call():
         async with open_streams(server) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
+                if stored_hash and stored_hash != "OVERSIZED":
+                    live_result = await session.list_tools()
+                    live_tool = next(
+                        (t for t in live_result.tools if t.name == tool_name), None
+                    )
+                    if live_tool is None:
+                        _drift.append(DriftDetectedError(
+                            "tool_removed", tool_name,
+                            {"detail": "Tool no longer served by this server"},
+                        ))
+                        return None
+                    live_schema = (
+                        live_tool.inputSchema
+                        if isinstance(live_tool.inputSchema, dict)
+                        else {}
+                    )
+                    live_hash = db.make_hash(live_schema)
+                    live_desc = live_tool.description or ""
+                    if live_desc != stored_desc:
+                        _drift.append(DriftDetectedError(
+                            "description_changed", tool_name,
+                            {
+                                "old_description": stored_desc[:300],
+                                "new_description": live_desc[:300],
+                            },
+                        ))
+                        return None
+                    if live_hash != stored_hash:
+                        _drift.append(DriftDetectedError(
+                            "schema_changed", tool_name,
+                            {"detail": "Input schema changed since last inspect"},
+                        ))
+                        return None
                 return await session.call_tool(tool_name, args)
 
     try:
         result = await asyncio.wait_for(_do_call(), timeout=TOOL_CALL_TIMEOUT_S)
+        if _drift:
+            raise _drift[0]
 
         latency_ms    = (time.monotonic() - start) * 1000
         is_tool_error = bool(getattr(result, "isError", False))
@@ -645,6 +699,8 @@ async def call_tool_with_telemetry(
 
         output_preview = _redact_text(result_str[:500])[0]
 
+    except DriftDetectedError:
+        raise
     except asyncio.TimeoutError:
         latency_ms = (time.monotonic() - start) * 1000
         error_msg  = f"Tool call timed out after {TOOL_CALL_TIMEOUT_S}s."

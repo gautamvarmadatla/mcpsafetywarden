@@ -177,10 +177,20 @@ def init_db() -> None:
                 PRIMARY KEY (server_id, tool_name)
             );
 
+            CREATE TABLE IF NOT EXISTS tool_snapshots (
+                snapshot_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                server_id        TEXT NOT NULL,
+                snapshot_at      TEXT NOT NULL,
+                tool_names_json  TEXT NOT NULL,
+                tools_hash       TEXT NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_tool_runs_tool_id
                 ON tool_runs(tool_id);
             CREATE INDEX IF NOT EXISTS idx_security_scans_server_scanned
                 ON security_scans(server_id, scanned_at);
+            CREATE INDEX IF NOT EXISTS idx_tool_snapshots_server
+                ON tool_snapshots(server_id, snapshot_at);
         """)
         conn.commit()
         try:
@@ -584,6 +594,43 @@ def get_tool_policy(server_id: str, tool_name: str) -> Optional[str]:
         ).fetchone()
         return row["policy"] if row else None
     finally: conn.close()
+
+
+def upsert_tool_snapshot(server_id: str, tool_name_to_hash: Dict[str, str]) -> None:
+    """Record a snapshot of tool schemas. No-op if the combined hash is unchanged from latest."""
+    combined_hash = make_hash(dict(sorted(tool_name_to_hash.items())))
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_connection()
+    try:
+        last = conn.execute(
+            "SELECT tools_hash FROM tool_snapshots WHERE server_id = ? ORDER BY snapshot_at DESC LIMIT 1",
+            (server_id,),
+        ).fetchone()
+        if last and last["tools_hash"] == combined_hash:
+            return
+        conn.execute(
+            "INSERT INTO tool_snapshots (server_id, snapshot_at, tool_names_json, tools_hash) VALUES (?, ?, ?, ?)",
+            (server_id, now, json.dumps(sorted(tool_name_to_hash.keys())), combined_hash),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_latest_tool_snapshot(server_id: str) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM tool_snapshots WHERE server_id = ? ORDER BY snapshot_at DESC LIMIT 1",
+            (server_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["tool_names"] = _jloads(d.pop("tool_names_json", "[]"), [])
+        return d
+    finally:
+        conn.close()
 
 
 def get_source_hash(server_id: str) -> Optional[Dict[str, Any]]:

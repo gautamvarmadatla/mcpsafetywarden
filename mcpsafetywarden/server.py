@@ -5,6 +5,7 @@ import json
 import logging
 import os as _os
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from mcp.server.fastmcp import FastMCP
@@ -16,6 +17,7 @@ from . import database as db
 from . import client_manager as cm
 from .classifier import classify_tool
 from .scanner import ALL_PROVIDERS, call_llm, detect_llm_provider as _detect_llm_provider, run_cisco_scan, run_snyk_scan, run_security_scan, auto_detect_providers as _auto_detect_providers, merge_findings as _merge_findings
+from .drift import compare_db_snapshots as _compare_tool_snapshots, check_server_drift as _check_drift
 from .mcpsafety_scanner import run_mcpsafety_scan, run_mcpsafety_scan_multi, run_deterministic_scan
 from .arg_scanner import SSRF_RE, scan_args_for_threats
 from .aux_integrations import kali_recon, burp_proxy_evidence
@@ -346,6 +348,9 @@ classify_provider:
 
     effective_provider = classify_provider or _detect_llm_provider()
     _log.info("inspect_server server_id=%s provider=%s", server_id, effective_provider or "rule_based")
+
+    old_tools = {t["tool_name"]: t for t in db.list_tools(server_id)}
+
     try:
         tools = await cm.inspect_server_tools(
             server_id,
@@ -353,14 +358,62 @@ classify_provider:
             llm_model=classify_model,
             llm_api_key=classify_api_key,
         )
-        return json.dumps(
-            {"server_id": server_id, "tools_discovered": len(tools), "tools": tools},
-            indent=2,
-        )
+        result: Dict[str, Any] = {
+            "server_id": server_id,
+            "tools_discovered": len(tools),
+            "tools": tools,
+        }
+        if old_tools:
+            new_tools = {t["tool_name"]: t for t in db.list_tools(server_id)}
+            drift = _compare_tool_snapshots(
+                server_id, old_tools, new_tools,
+                datetime.now(timezone.utc).isoformat(),
+            )
+            if drift["drift_detected"]:
+                result["drift"] = drift
+                _log.warning(
+                    "inspect_server: drift detected for %s severity=%s findings=%d",
+                    server_id, drift["overall_severity"], len(drift["findings"]),
+                )
+        return json.dumps(result, indent=2)
     except (ValueError, RuntimeError) as exc:
         return json.dumps({"error": str(exc)})
     except Exception as exc:
         _log.error("inspect_server failed for %s: %s", server_id, exc, exc_info=True)
+        return json.dumps({"error": "Internal error. Check server logs."})
+
+
+@mcp.tool()
+async def check_server_drift(
+    server_id: str,
+    update_baseline: bool = True,
+) -> str:
+    """
+    Detect schema and tool-list drift for a registered MCP server.
+
+Connects to the live server, re-enumerates all tools, and compares against the
+    stored baseline from the last inspect_server call.
+
+Change severities:
+      CRITICAL - tool removed (callers will break)
+      HIGH     - parameter removed or type changed
+      MEDIUM   - description changed (prompt-injection risk) or new required param
+      LOW      - new optional param or new tool added
+
+update_baseline: when True (default), updates the stored baseline to the current
+    live state after reporting drift so repeated calls track incremental changes.
+    Set to False to audit without modifying the baseline.
+    """
+    rl = _check_mgmt_rate_limit(f"drift:{server_id}")
+    if rl:
+        return json.dumps({"error": rl})
+    try:
+        result = await _check_drift(server_id, update_baseline=update_baseline)
+        return json.dumps(result, indent=2)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
+    except Exception as exc:
+        _log.error("check_server_drift failed for %s: %s", server_id, exc, exc_info=True)
         return json.dumps({"error": "Internal error. Check server logs."})
 
 
@@ -1236,6 +1289,22 @@ async def _call_and_format(
         if extra: response.update(extra)
         if telemetry.get("output_truncated"): response["warning"] = "Output exceeded limit and was truncated."
         return json.dumps(response, indent=2)
+    except cm.DriftDetectedError as exc:
+        _log.warning(
+            "drift detected on call to %s::%s: change_type=%s",
+            server_id, tool_name, exc.change_type,
+        )
+        return json.dumps({
+            "blocked": True,
+            "reason": "drift_detected",
+            "tool": tool_name,
+            "change_type": exc.change_type,
+            "drift": exc.detail,
+            "message": (
+                "Tool definition changed since last inspect. "
+                "Run inspect_server to review and re-establish baseline."
+            ),
+        }, indent=2)
     except (ValueError, RuntimeError) as exc:
         return json.dumps({"error": str(exc)})
     except Exception as exc:
