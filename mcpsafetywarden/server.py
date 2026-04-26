@@ -1026,10 +1026,15 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
         return json.dumps({"error": rl})
 
     tools = db.list_tools(server_id)
-    if not tools:
+    if not tools and not github_url:
         return json.dumps({
             "error": f"No tools found for '{server_id}'.",
-            "hint": "Run inspect_server first.",
+            "hint": (
+                "Run inspect_server first, or pass github_url to run a source-only scan. "
+                "stdio servers that require local setup (missing config, credentials, or "
+                "dependencies) cannot be inspected remotely - use github_url to scan the "
+                "source code directly without spawning the server."
+            ),
         })
 
     scan_timeout_s = max(30, min(scan_timeout_s, 3600))
