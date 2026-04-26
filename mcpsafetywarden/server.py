@@ -1016,6 +1016,12 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
         background:               True = return immediately, poll get_security_scan for results.
                                   False = block until complete (default, safe for CLI/Python).
 
+    github_url: override or supplement the server's stored GitHub URL for source-code scanning.
+        Pass this when the server has no tools (e.g. stdio servers that require local setup and
+        cannot be inspected) to run a source-only scan directly from the repository without
+        spawning the server. The mcpsafety+ pipeline will fetch and analyze source code for
+        secrets, taint flows, and suspicious patterns even with 0 tools discovered.
+
     Results are stored and automatically included in future preflight_tool_call responses.
     """
     if provider in _LLM_SHORTHANDS:
@@ -1547,6 +1553,9 @@ async def onboard_server(
 
     confirm_scan_authorized: defaults True - calling onboard_server is itself an
     authorization act. Set False only if you want to skip active security probing.
+    github_url: required for stdio servers that cannot be locally inspected (missing config,
+    credentials, or dependencies). Enables source-only scanning directly from GitHub without
+    spawning the server. If omitted and inspection fails, the scan is skipped entirely.
     """
     reg_json = await register_server(
         server_id=server_id, transport=transport,
