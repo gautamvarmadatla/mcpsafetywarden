@@ -3,7 +3,7 @@
   "name": "io.github.gautamvarmadatla/mcpsafetywarden",
   "title": "MCP Safety Warden",
   "description": "MCP proxy adding security scanning, behavioral profiling, risk gating, and safe tool call execution.",
-  "version": "1.0.9",
+  "version": "1.1.0",
   "repository": {
     "url": "https://github.com/gautamvarmadatla/mcpsafetywarden",
     "source": "github"
@@ -12,7 +12,7 @@
     {
       "registryType": "pypi",
       "identifier": "mcpsafetywarden",
-      "version": "1.0.9",
+      "version": "1.1.0",
       "transport": { "type": "stdio" }
     }
   ]
