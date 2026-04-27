@@ -405,7 +405,7 @@ def cmd_scan(
             t.add_row(
                 f.get("name", ""),
                 _risk_badge((f.get("risk_level") or "").lower()),
-                (f.get("finding") or "")[:80],
+                (f.get("finding") or ""),
             )
         console.print(t)
 
@@ -865,7 +865,7 @@ def cmd_get_scan(
             t.add_row(
                 f.get("name", ""),
                 _risk_badge((f.get("risk_level") or "").lower()),
-                (f.get("finding") or "")[:80],
+                (f.get("finding") or ""),
             )
         console.print(t)
 
@@ -925,7 +925,7 @@ def cmd_scan_all(
                 f.get("_server_id", ""),
                 f.get("name", ""),
                 _risk_badge((f.get("risk_level") or "").lower()),
-                (f.get("finding") or "")[:70],
+                (f.get("finding") or ""),
             )
         console.print(t)
 
