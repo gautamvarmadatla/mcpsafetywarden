@@ -696,6 +696,7 @@ def upsert_discovered_server(entry: Dict[str, Any]) -> None:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(discovery_id) DO UPDATE SET
                 client_name=excluded.client_name,
+                scope=excluded.scope,
                 config_path=excluded.config_path,
                 transport=excluded.transport,
                 command=excluded.command,
@@ -745,8 +746,8 @@ def get_discovered_server(discovery_id: str) -> Optional[Dict[str, Any]]:
             return None
         d = dict(row)
         d["args"] = _jloads(d.pop("args_json", "[]"), [])
-        d["env"] = _jloads(_decrypt_field(d.pop("env_json", "{}")), {})
-        d["headers"] = _jloads(_decrypt_field(d.pop("headers_json", "{}")), {})
+        d["env"] = _jloads(_decrypt_field(d.pop("env_json", None) or "{}"), {})
+        d["headers"] = _jloads(_decrypt_field(d.pop("headers_json", None) or "{}"), {})
         d["env_keys"] = _jloads(d.pop("env_keys_json", "[]"), [])
         d["headers_keys"] = _jloads(d.pop("headers_keys_json", "[]"), [])
         d["activation_state_only"] = bool(d.get("activation_state_only"))
@@ -771,8 +772,8 @@ def list_discovered_servers(client: Optional[str] = None) -> List[Dict[str, Any]
         for row in rows:
             d = dict(row)
             d["args"] = _jloads(d.pop("args_json", "[]"), [])
-            d.pop("env_json", None)
-            d.pop("headers_json", None)
+            d["env"] = _jloads(_decrypt_field(d.pop("env_json", None) or "{}"), {})
+            d["headers"] = _jloads(_decrypt_field(d.pop("headers_json", None) or "{}"), {})
             d["env_keys"] = _jloads(d.pop("env_keys_json", "[]"), [])
             d["headers_keys"] = _jloads(d.pop("headers_keys_json", "[]"), [])
             d["activation_state_only"] = bool(d.get("activation_state_only"))

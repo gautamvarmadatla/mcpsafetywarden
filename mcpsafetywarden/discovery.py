@@ -89,7 +89,7 @@ _REGISTRY: List[Dict[str, Any]] = [
         "id": "zed", "name": "Zed",
         "paths": [
             {"path": _w("Zed", "settings.json"), "key": "context_servers", "scope": "user", "confidence": "ecosystem_verified", "os": "win"},
-            {"path": _u(".config", "zed", "settings.json"), "key": "context_servers", "scope": "user", "confidence": "verified", "os": "mac"},
+            {"path": _m("Zed", "settings.json"), "key": "context_servers", "scope": "user", "confidence": "verified", "os": "mac"},
             {"path": _u(".config", "zed", "settings.json"), "key": "context_servers", "scope": "user", "confidence": "verified", "os": "linux"},
             {"path": ".zed/settings.json", "key": "context_servers", "scope": "project", "confidence": "verified", "os": None, "relative": True},
         ],
@@ -116,7 +116,7 @@ _REGISTRY: List[Dict[str, Any]] = [
         "paths": [
             {"path": _u(".continue", "config.yaml"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": None, "format": "yaml"},
             {"path": _u(".continue", "config.json"), "key": "mcpServers", "scope": "user", "confidence": "verified_legacy", "os": None},
-            {"path": ".continue/mcpServers", "key": "mcpServers", "scope": "project", "confidence": "verified", "os": None, "relative": True, "glob": "*.yaml"},
+            {"path": ".continue/mcpServers", "key": "__file__", "scope": "project", "confidence": "verified", "os": None, "relative": True, "glob": "*.yaml", "format": "yaml"},
         ],
     },
     {
@@ -210,6 +210,31 @@ def _read_text(path: Path) -> Optional[str]:
         return None
 
 
+def _strip_jsonc(text: str) -> str:
+    result: list = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] == '"':
+            result.append(text[i]); i += 1
+            while i < n:
+                c = text[i]; result.append(c); i += 1
+                if c == '\\' and i < n:
+                    result.append(text[i]); i += 1
+                elif c == '"':
+                    break
+        elif text[i:i+2] == '//':
+            while i < n and text[i] != '\n':
+                i += 1
+        elif text[i:i+2] == '/*':
+            i += 2
+            while i < n and text[i:i+2] != '*/':
+                i += 1
+            i += 2
+        else:
+            result.append(text[i]); i += 1
+    return ''.join(result)
+
+
 def _parse_json(text: str) -> Any:
     text = text.strip()
     if not text:
@@ -217,10 +242,8 @@ def _parse_json(text: str) -> Any:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        stripped = re.sub(r"//[^\n]*", "", text)
-        stripped = re.sub(r"/\*.*?\*/", "", stripped, flags=re.DOTALL)
         try:
-            return json.loads(stripped)
+            return json.loads(_strip_jsonc(text))
         except Exception:
             return None
 
@@ -295,6 +318,12 @@ def _extract_servers(data: Any, key: str) -> Dict[str, Any]:
             out[name] = item
         return out
 
+    if key == "__file__":
+        if isinstance(data, dict) and (data.get("command") or data.get("url") or data.get("cmd")):
+            name = str(data.get("name") or "server")
+            return {name: data}
+        return {}
+
     if "." in key:
         head, _, tail = key.partition(".")
         nested = data.get(head)
@@ -330,11 +359,13 @@ def _normalize_entry(
 
     if isinstance(command_raw, dict):
         command = command_raw.get("path") or command_raw.get("cmd")
-        args = list(command_raw.get("args") or [])
+        raw_args = command_raw.get("args")
+        args = [raw_args] if isinstance(raw_args, str) else list(raw_args or [])
         env: Dict[str, str] = dict(command_raw.get("env") or {})
     else:
         command = str(command_raw) if command_raw is not None else None
-        args = list(raw.get("args") or [])
+        raw_args = raw.get("args")
+        args = [raw_args] if isinstance(raw_args, str) else list(raw_args or [])
         env = dict(raw.get("env") or raw.get("envs") or {})
 
     headers: Dict[str, str] = dict(raw.get("headers") or {})
@@ -344,7 +375,7 @@ def _normalize_entry(
 
     raw_type = raw.get("type") or raw.get("transport") or ""
     if url:
-        transport = "sse" if raw_type == "sse" else "streamable_http"
+        transport = "sse" if raw_type.lower() == "sse" else "streamable_http"
     else:
         transport = "stdio"
 
@@ -371,7 +402,7 @@ def _normalize_entry(
 
 
 def make_server_id(client_id: str, server_name: str) -> str:
-    safe_client = client_id.replace("-", "_")
+    safe_client = re.sub(r"[^a-zA-Z0-9_]", "_", client_id)
     safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", server_name)
     sid = f"{safe_client}__{safe_name}"
     return sid[:256]
@@ -428,6 +459,8 @@ def _load_path(
 
         servers_map = _extract_servers(data, key)
         for name, entry in servers_map.items():
+            if key == "__file__" and not (isinstance(entry, dict) and entry.get("name")):
+                name = f.stem
             results.append({
                 "server_name": name,
                 "entry": entry,

@@ -151,7 +151,7 @@ def cmd_list(
         t.add_column("Confidence", justify="right")
         for tool in result.get("tools", []):
             t.add_row(
-                tool["name"],
+                tool["tool_name"],
                 _effect_badge(tool.get("effect_class", "unknown")),
                 str(tool.get("run_count", 0)),
                 f"{tool.get('confidence', 0):.0%}",
@@ -387,7 +387,7 @@ def cmd_scan(
 
     if result.get("status") == "running":
         console.print(f"[cyan]⟳[/cyan]  {result.get('message', 'Scan started in background.')}")
-        console.print(f"[dim]Retrieve results:[/dim]  mcpsafetywarden get-scan {server_id or ''}")
+        console.print(f"[dim]Retrieve results:[/dim]  mcpsafetywarden get-scan {server_id or github_url or ''}")
         return
 
     risk = (result.get("overall_risk_level") or "unknown").lower()
@@ -1043,7 +1043,8 @@ def cmd_onboard_discovered(
     results = result.get("results", [])
     registered = result.get("registered", 0)
     attempted = result.get("attempted", 0)
-    console.print(f"[green]✓[/green] Registered {registered}/{attempted} server(s)")
+    total = result.get("total", attempted)
+    console.print(f"[green]✓[/green] Registered {registered}/{attempted} server(s) ({total} total found)")
 
     for r in results:
         status = r.get("status", "")

@@ -117,9 +117,21 @@ _MAX_HEADER_PAIRS  = 20
 mcp = FastMCP(
     "mcpsafetywarden",
     instructions=(
-        "This server wraps other MCP servers and provides behavioral analysis of their tools. "
-        "Typical flow: onboard_server -> safe_tool_call. "
-        "Profiles improve automatically as more calls are made through safe_tool_call."
+        "Security proxy that wraps MCP servers to enforce risk gating, behavioral profiling, "
+        "and security scanning before any tool is called. "
+        "All tool calls to wrapped servers MUST go through safe_tool_call, never directly. "
+
+        "PRIMARY FLOWS: "
+        "(1) Find servers already on this machine: discover_servers -> onboard_discovered_servers -> safe_tool_call. "
+        "(2) Register a known server manually: onboard_server (preferred one-shot) or register_server -> security_scan_server -> safe_tool_call. "
+        "(3) Execute a tool: safe_tool_call. If blocked, either safe_tool_call(approved=True), safe_tool_call(use_alternative=X), or suggest_safer_alternative first. "
+        "(4) Security audit: security_scan_server -> get_security_scan (poll every 30s if background=True) -> set_tool_policy('block') for HIGH risk tools. "
+        "(5) Drift monitoring: check_server_drift -> if drift severity MEDIUM or above, re-run security_scan_server. "
+
+        "KEY RULES: "
+        "Never call preflight_tool_call before safe_tool_call - safe_tool_call runs preflight internally. "
+        "Never call register_server and then skip security_scan_server for untrusted servers. "
+        "Always use safe_tool_call, never call wrapped server tools directly."
     ),
 )
 
@@ -324,26 +336,19 @@ async def register_server(
     github_url: Optional[str] = None,
 ) -> str:
     """
-    Register an MCP server to wrap and profile.
+    Register a server so it can be wrapped, profiled, and called via safe_tool_call.
+    Prefer onboard_server for a single trusted server - it does register + security scan + inspect in one call.
+    Use register_server directly only when you want to control the steps separately.
 
-transport options:
-        "stdio"           - local process (supply command + args)
-      "sse"             - legacy SSE remote server (supply url)
-      "streamable_http" - modern hosted MCP servers (supply url; most common for cloud-hosted servers)
+    transport: "stdio" (local process, supply command+args) | "sse" (legacy remote, supply url) | "streamable_http" (modern hosted, supply url)
+    auto_inspect: connect immediately and discover tools (default true). Set false only if the server is not yet running.
+    headers: auth headers for remote servers, e.g. {"Authorization": "Bearer TOKEN"}
+    github_url: optional repo URL; enables source code analysis in subsequent security scans.
 
-    headers: HTTP headers for sse/streamable_http, e.g. {"Authorization": "Bearer sk-..."}
-    auto_inspect: immediately connect and discover tools (default true)
-classify_provider:
-        LLM to use for deep tool classification during inspect
-      ("anthropic"|"openai"|"gemini"). Falls back to rule-based if omitted or on error.
-
-    Security note: classify_api_key is accepted as a convenience for testing. In production,
-    prefer setting the provider's API key via the corresponding environment variable instead
-    of passing it as a parameter (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY).
-
-Examples:
-        stdio: command="python", args=["my_server.py"]
-      streamable_http: url="https://mcp.example.com/mcp", headers={"Authorization": "Bearer TOKEN"}
+    NEXT STEPS after success:
+    - Run security_scan_server to audit the tools before trusting this server.
+    - Then use safe_tool_call to execute tools with automatic risk gating.
+    - If auto_inspect failed (stdio server not yet running): fix local setup, then call inspect_server.
     """
     rl = _check_mgmt_rate_limit(f"register:{server_id}")
     if rl:
@@ -367,13 +372,18 @@ async def inspect_server(
     classify_api_key: Optional[str] = None,
 ) -> str:
     """
-    Connect to a registered MCP server, retrieve its tool list, classify each tool,
-    and update stored profiles. Call this to refresh after server updates.
+    Re-connect to a registered server, enumerate its tools, classify each one, and update stored profiles.
 
-classify_provider:
-        LLM to use for deep tool classification ("anthropic"|"openai"|"gemini").
-        Auto-detected from env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY)
-        if omitted. Falls back to rule-based if no key is found or the LLM call fails.
+    Use this when register_server was called with auto_inspect=False (server was not yet running),
+    or after a server update to refresh tool definitions and risk classifications.
+
+    BEFORE: register_server or onboard_server (server must be registered).
+    AFTER: run security_scan_server if untrusted; use list_server_tools to review discovered tools.
+    Drift from the previous baseline is reported automatically if a prior snapshot exists.
+
+    classify_provider: LLM for tool classification ("anthropic"|"openai"|"gemini").
+    Auto-detected from ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY if omitted.
+    Falls back to rule-based classification if no LLM key is found.
     """
     rl = _check_mgmt_rate_limit(f"inspect:{server_id}")
     if rl:
@@ -422,20 +432,24 @@ async def check_server_drift(
     update_baseline: bool = True,
 ) -> str:
     """
-    Detect schema and tool-list drift for a registered MCP server.
+    Detect tool schema and tool-list changes since the last inspect_server baseline.
 
-Connects to the live server, re-enumerates all tools, and compares against the
-    stored baseline from the last inspect_server call.
+    Run this periodically or whenever a server may have been updated.
+    CRITICAL/HIGH drift means safe_tool_call may fail for affected tools.
+    MEDIUM drift (description changed) is a prompt-injection risk - re-scan after.
 
-Change severities:
-      CRITICAL - tool removed (callers will break)
-      HIGH     - parameter removed or type changed
-      MEDIUM   - description changed (prompt-injection risk) or new required param
-      LOW      - new optional param or new tool added
+    Severities:
+      CRITICAL: tool removed (safe_tool_call will error for that tool)
+      HIGH: parameter removed or type changed
+      MEDIUM: description changed (prompt-injection risk) or new required param
+      LOW: new optional param or new tool added
 
-update_baseline: when True (default), updates the stored baseline to the current
-    live state after reporting drift so repeated calls track incremental changes.
-    Set to False to audit without modifying the baseline.
+    update_baseline: True (default) updates baseline after reporting, so repeated calls
+    track incremental changes. Set False to audit without modifying the baseline.
+
+    BEFORE: inspect_server (to establish initial baseline).
+    AFTER severity CRITICAL/HIGH: inspect_server to re-establish baseline.
+    AFTER severity MEDIUM+: security_scan_server to re-audit for prompt-injection in new descriptions.
     """
     rl = _check_mgmt_rate_limit(f"drift:{server_id}")
     if rl:
@@ -452,7 +466,13 @@ update_baseline: when True (default), updates the stored baseline to the current
 
 @mcp.tool()
 def list_servers() -> str:
-    """List all registered MCP servers with their tool counts."""
+    """
+    List all registered servers with transport type and tool count.
+
+    Use this first when you don't know which servers are available, before calling
+    safe_tool_call, security_scan_server, or list_server_tools.
+    NEXT: list_server_tools(server_id) to see available tools on a specific server.
+    """
     servers = db.list_servers()
     return json.dumps(
         [
@@ -470,7 +490,15 @@ def list_servers() -> str:
 
 @mcp.tool()
 def list_server_tools(server_id: str) -> str:
-    """List all known tools for a server with their summarised behavior profiles."""
+    """
+    List all known tools for a server with summarized risk profiles (effect class, retry safety, risk level).
+
+    Use this before safe_tool_call to choose which tool to call and assess risk.
+    Returns error with hint to run inspect_server if no tools are found.
+
+    BEFORE: inspect_server (to populate tool profiles).
+    AFTER: safe_tool_call to execute a tool, or set_tool_policy('block') for any HIGH-risk tools.
+    """
     tools = db.list_tools(server_id)
     if not tools:
             return json.dumps({
@@ -513,20 +541,22 @@ async def preflight_tool_call(
     """
     Get a risk assessment for a tool WITHOUT executing it.
 
-    Use this ONLY when you need to show the user the risk level before deciding
-    whether to proceed - for example, to ask for explicit confirmation before calling
-    safe_tool_call. Do NOT call this before safe_tool_call as a routine step:
-    safe_tool_call runs preflight internally and will duplicate the work.
+    DO NOT call this before safe_tool_call - safe_tool_call runs preflight internally.
+    Only use preflight_tool_call when you need to show the user risk details before
+    deciding whether to proceed, separate from actually calling the tool.
 
-    Returns: effect class, retry safety, risk level, approval recommendation,
-    latency band, output size risk, confidence, and evidence trail.
+    Returns: effect class, retry safety, risk level, approval_recommended flag,
+    latency band, output size risk, confidence, evidence trail, and security findings.
 
-    auto_scan_provider: LLM provider to use if no security scan exists yet for this server.
-    Auto-detected from env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY) if omitted.
-    Accepts "anthropic", "openai", "gemini", "cisco", or "snyk". mcpsafety+ providers are NOT
-    accepted here - use security_scan_server with confirm_authorized=True instead.
-    Scan runs once on first preflight, result is stored and reused on all subsequent calls.
-    Scan failure is non-fatal.
+    BEFORE: inspect_server (tool must be registered and known).
+    AFTER: if approval_recommended=True, either get user confirmation then call
+    safe_tool_call(approved=True), or call suggest_safer_alternative first.
+
+    auto_scan_provider: LLM to auto-trigger a one-time security scan if none exists.
+    Auto-detected from ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY if omitted.
+    Accepts "anthropic", "openai", "gemini", "cisco", "snyk" - not mcpsafety+ providers
+    (use security_scan_server with confirm_authorized=True for those).
+    Scan runs once per server and is cached; subsequent preflight calls reuse the result.
     """
     tool = db.get_tool(server_id, tool_name)
     if not tool:
@@ -599,7 +629,15 @@ async def preflight_tool_call(
 
 @mcp.tool()
 def get_tool_profile(server_id: str, tool_name: str) -> str:
-    """Get the full behavior profile for a tool including all observed metrics."""
+    """
+    Get the full raw behavior profile for a tool with all observed metrics and confidence scores.
+
+    Returns latency percentiles, failure rate, output size stats, schema stability,
+    and per-field confidence. More detailed than the summary in list_server_tools.
+
+    BEFORE: safe_tool_call (at least a few runs build observed stats; before that, data is inferred).
+    Use this to debug unexpected risk classifications or review learned behavioral data.
+    """
     tool = db.get_tool(server_id, tool_name)
     if not tool: return json.dumps({"error": f"Tool '{tool_name}' not found on server '{server_id}'."})
     profile = db.get_profile(tool["tool_id"])
@@ -617,7 +655,16 @@ def get_retry_policy(
     llm_model: Optional[str] = None,
     llm_api_key: Optional[str] = None,
 ) -> str:
-    """Recommended retry policy for a tool based on its behavior profile."""
+    """
+    Get the recommended retry policy for a tool: max retries, backoff strategy, and suggested timeout.
+
+    Returns policy name ("retry_freely", "no_retry", "retry_once_with_caution"), max_retries,
+    backoff_strategy, and suggested_timeout_ms derived from observed p95 latency.
+
+    BEFORE: inspect_server (tool must be known). More accurate after several safe_tool_call runs.
+    AFTER: implement retry logic around safe_tool_call using max_retries and backoff_strategy.
+    To verify actual idempotency before relying on retry_safety="safe", run run_replay_test.
+    """
     tool = db.get_tool(server_id, tool_name)
     if not tool: return json.dumps({"error": f"Tool '{tool_name}' not found."})
     effective_llm = llm_provider or _detect_llm_provider()
@@ -768,16 +815,19 @@ def suggest_safer_alternative(
     llm_api_key: Optional[str] = None,
 ) -> str:
     """
-    Find lower-risk alternatives to a tool on the same server.
+    Find lower-risk alternatives to a tool on the same server, ranked by risk reduction.
 
-    LLM path (default): auto-detects an available LLM provider from env vars
-    (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY) and performs semantic
-    matching across all server tools - finds functionally similar substitutes
-    even when names differ, ranks by risk reduction, and explains what the agent
-    gives up by switching. Pass llm_provider to override the auto-detected provider.
+    Call this when safe_tool_call returns blocked=True and you want safer substitutes.
+    Returns alternatives with risk_reduction (HIGH/MEDIUM/LOW), functional_coverage,
+    why_safer, and what_it_loses for informed trade-off decisions.
 
-    Rule-based fallback: used when no LLM provider is available or the LLM returns
-    nothing - looks for read-only tools with a similar name stem and no HIGH security flag.
+    LLM path (default): semantic matching using effect_class ordering and security findings.
+    Auto-detects provider from ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY.
+    Rule-based fallback: name-stem matching for read-only tools; used when no LLM is available.
+
+    BEFORE: safe_tool_call (blocked=True shows which tool needs an alternative).
+    AFTER: safe_tool_call(use_alternative="<tool_name>") with the chosen alternative.
+    Shortcut: pass use_alternative directly to safe_tool_call without calling this first.
     """
     tool = db.get_tool(server_id, tool_name)
     if not tool: return json.dumps({"error": f"Tool '{tool_name}' not found."})
@@ -882,9 +932,17 @@ async def run_replay_test(
     approved: bool = False,
 ) -> str:
     """
-    Test idempotency by calling a tool twice with the same args and comparing outputs.
-    WARNING: executes the tool TWICE - requires approved=True for any tool that is not
-    read_only, or that has a HIGH/MEDIUM security flag or approval_recommended.
+    Test idempotency by calling a tool TWICE with identical args and comparing outputs.
+
+    WARNING: this executes the tool twice and has real side effects for non-read-only tools.
+    The response will indicate if approved=True is required before the test can run.
+
+    Use this to verify whether a tool is truly safe to retry on failure, confirming or
+    refuting the retry_safety classification returned by get_retry_policy.
+
+    BEFORE: get_retry_policy (check current retry_safety classification).
+    Only worth running if retry_safety is "safe" or "unknown" - skip for "unsafe".
+    AFTER: if idempotent=True confirmed, rely on get_retry_policy for max_retries/backoff.
     """
     rl = _check_mgmt_rate_limit(f"replay:{server_id}")
     if rl:
@@ -1010,12 +1068,18 @@ async def security_scan_server(
     """
     Run a security audit on a registered server's tools, or a standalone source-only scan.
 
+    REQUIRED for any untrusted server before using safe_tool_call.
+    BEFORE: register_server or onboard_server (or pass github_url for source-only mode, no registration needed).
+    AFTER (server_id mode): get_security_scan(server_id) -> set_tool_policy('block') for HIGH-risk tools.
+    AFTER (source-only mode): get_security_scan(github_url) to retrieve results -> review findings ->
+        fix local setup -> re-run onboard_server. set_tool_policy does not apply (no registered server).
+
     Two modes:
         server_id provided - full audit of a registered server's tools plus optional source scan.
         server_id omitted  - standalone source-only scan via github_url, no registration needed.
-            Use this when onboard_server fails inspection (stdio server requiring local setup).
-            Returns scan results directly so the user can review before deciding to set up locally
-            and re-run onboard_server.
+            Use this when onboard_server fails inspection (stdio server not yet running locally).
+            Results are stored under github_url as the key - retrieve with get_security_scan(github_url).
+            Review findings, fix local setup, then re-run onboard_server.
 
     Runs in the background by default (background=True) - returns immediately and stores
     results for get_security_scan to retrieve. Set background=False only for CLI or direct
@@ -1171,7 +1235,15 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
 
 @mcp.tool()
 def get_security_scan(server_id: str) -> str:
-    """Retrieve the latest security scan report for a registered server. If a background scan is running, returns status='running' - call again in ~30 seconds to poll for results."""
+    """
+    Retrieve the latest stored security scan report for a server.
+
+    If a background scan is running (security_scan_server with background=True),
+    returns status="running" - poll again in ~30 seconds until status is absent.
+
+    BEFORE: security_scan_server (to start or have completed a scan).
+    AFTER: check tool_findings for HIGH-risk tools, then set_tool_policy('block') as needed.
+    """
     status = _bg_scan_status.get(server_id)
     if status == "running":
         return json.dumps({
@@ -1203,15 +1275,18 @@ async def scan_all_servers(
     server_ids: Optional[List[str]] = None,
 ) -> str:
     """
-    Run the 5-stage MCPSafety pipeline against all registered servers (or a specified subset).
+    Run the MCPSafety 5-stage security pipeline against all registered servers in one call.
 
-    Scans servers sequentially and returns a combined report with per-server results and
-    an aggregate overall_risk_level reflecting the worst finding across all servers.
-    Each server's result is also stored and will appear in future preflight_tool_call responses.
+    Prefer this over looping security_scan_server individually. Results are stored per-server
+    and appear in subsequent preflight_tool_call and safe_tool_call responses.
+    Returns a combined report with per-server results and an aggregate overall_risk_level.
 
-    provider:      "anthropic" | "openai" | "gemini" | "ollama"
-                   (same providers as security_scan_server; cisco/snyk not supported here)
-    server_ids:    optional list of server IDs to scan; scans all registered servers if omitted
+    BEFORE: inspect_server for each server (tools must be known). Check list_servers first.
+    AFTER: set_tool_policy('block') for HIGH-risk tools; then use safe_tool_call normally.
+
+    provider: "anthropic" | "openai" | "gemini" | "ollama"
+    (same providers as security_scan_server; cisco/snyk not supported here)
+    server_ids: optional list of server IDs to scan; scans all registered servers if omitted
     confirm_authorized: MUST be True - confirms you own and are authorized to test all listed servers
     allow_destructive_probes: enable path traversal, command injection, credential file probes
     skip_web_research: skip DuckDuckGo/HackerNews/Arxiv research (prevents leaking findings externally)
@@ -1389,16 +1464,22 @@ async def safe_tool_call(
     llm_api_key: Optional[str] = None,
 ) -> str:
     """
-    Execute a tool with automatic safety gating. Do NOT call preflight_tool_call
-    before this - preflight runs automatically inside safe_tool_call.
+    Execute a tool through the safety proxy. This is the ONLY correct way to call tools on registered servers.
+    Do NOT call preflight_tool_call before this - preflight runs automatically inside.
 
-    First call: runs preflight internally. Low risk executes immediately.
-    Medium/high risk returns a numbered alternatives list instead of executing.
+    First call: low-risk tools execute immediately. Medium/high risk returns blocked=True with alternatives.
 
-    Follow-up calls:
-      approved=True          - execute despite the risk level
-      use_alternative=<name> - execute a listed lower-risk alternative instead
-      show_more_options=True - see the proceed-anyway and abort options
+    When blocked:
+      approved=True: proceed despite risk (confirm with user first)
+      use_alternative="<tool_name>": execute a safer alternative from the alternatives list
+      show_more_options=True: see all options including abort
+
+    When blocked by "policy_blocked": use set_tool_policy(policy=None) to clear if intentional.
+    When blocked by "drift_detected": run inspect_server to re-establish the tool baseline.
+    When blocked by "arg_scan_blocked": review the flagged argument; args_scan_override=True only if confirmed safe.
+    When result has quarantined=True: output contained injection signals; check get_run_history for details.
+
+    BEFORE: register_server or onboard_server (server must be registered and tools inspected).
     """
     if use_alternative:
         alt_tool = db.get_tool(server_id, use_alternative)
@@ -1585,16 +1666,22 @@ async def onboard_server(
     github_url: Optional[str] = None,
 ) -> str:
     """
-    One-shot server onboarding: register + security scan + inspect in sequence.
-    Equivalent to calling register_server then security_scan_server manually.
+    One-shot server onboarding: register + inspect + security scan in a single call.
 
-    confirm_scan_authorized: defaults True - calling onboard_server is itself an
-    authorization act. Set False only if you want to skip active security probing.
-    github_url: provide for stdio servers that cannot be locally inspected (missing config,
-    credentials, or dependencies). If inspection fails and github_url is given, a source-only
-    scan runs via security_scan_server without registering the server. Review results, then fix
-    local setup and re-run onboard_server to complete registration. If inspection fails and no
-    github_url is given, onboarding is aborted with a clear error.
+    This is the preferred entry point for adding a new server. Equivalent to register_server
+    then security_scan_server, but handles inspection failures with a source-only fallback.
+    Use register_server directly only when you need to control the steps separately.
+
+    If inspection fails (stdio server not running) and github_url is provided, runs a
+    source-only scan without registering - review results, fix local setup, then re-run.
+    If inspection fails and no github_url is given, onboarding is aborted with a clear error.
+
+    confirm_scan_authorized: True by default (calling onboard_server is itself authorization).
+    Set False only to skip active security probing.
+    github_url: enables source code analysis in the scan pipeline; required when local inspection fails.
+
+    AFTER success: review security_scan in the response for HIGH-risk tools.
+    AFTER: set_tool_policy('block') for HIGH-risk tools, then use safe_tool_call.
     """
     reg_json = await register_server(
         server_id=server_id, transport=transport,
@@ -1670,6 +1757,7 @@ async def onboard_server(
             model_id=scan_model, api_key=scan_api_key,
             confirm_authorized=confirm_scan_authorized,
             github_url=github_url,
+            background=False,
         )
         result["security_scan"] = json.loads(scan_json)
     except Exception as exc:
@@ -1686,11 +1774,18 @@ def set_tool_policy(
     policy: Optional[str] = None,
 ) -> str:
     """
-    Set a permanent execution policy for a tool.
+    Set a permanent execution policy for a tool, overriding the normal preflight flow.
 
-    policy: "allow" - always execute without preflight (trusted tool).
-            "block" - never execute regardless of approval.
-            null    - clear any existing policy, resume normal preflight flow.
+    Use "block" after security_scan_server reveals a HIGH-risk tool you never want called.
+    Use "allow" for trusted internal tools where you want to skip risk checks for speed.
+    Use null to restore the normal safe_tool_call preflight behavior.
+
+    policy: "allow" - always execute without preflight check.
+            "block" - never execute; safe_tool_call returns blocked=True immediately.
+            null    - clear policy; resume normal risk-gated preflight flow.
+
+    BEFORE: security_scan_server or get_security_scan (to identify HIGH-risk tools).
+    AFTER: safe_tool_call respects the new policy immediately.
     """
     tool = db.get_tool(server_id, tool_name)
     if not tool:
@@ -1709,7 +1804,15 @@ def set_tool_policy(
 
 @mcp.tool()
 def get_run_history(server_id: str, tool_name: str, limit: int = 20) -> str:
-    """Recent execution history for a tool: timestamps, latency, success/fail, injection warnings."""
+    """
+    Get recent execution history for a tool: timestamps, latency, success/fail, and injection warnings.
+
+    Use this to debug failures, audit executions, or review calls that were quarantined
+    (quarantined=True) by safe_tool_call due to injection signals in the output.
+
+    BEFORE: safe_tool_call (calls must have been made to have history).
+    AFTER: if injection_warning runs are found, consider set_tool_policy('block').
+    """
     tool = db.get_tool(server_id, tool_name)
     if not tool:
         return json.dumps({"error": f"Tool '{tool_name}' not found on server '{server_id}'."})
@@ -1720,7 +1823,15 @@ def get_run_history(server_id: str, tool_name: str, limit: int = 20) -> str:
 
 @mcp.tool()
 async def ping_server(server_id: str) -> str:
-    """Check if a registered server is reachable. Returns status and round-trip latency."""
+    """
+    Check if a registered server is reachable. Returns status and round-trip latency.
+
+    Use before safe_tool_call if you suspect the server is down, or to diagnose connection errors.
+    For remote (SSE/HTTP) servers, also runs a fast network recon scan via kali_recon.
+
+    BEFORE: register_server (server must be registered).
+    AFTER: if unreachable, fix local setup then call inspect_server to refresh the tool list.
+    """
     try:
         result = await cm.ping_server(server_id)
     except ValueError as exc:
@@ -1747,16 +1858,20 @@ async def discover_servers(
     """
     Scan the local machine for MCP servers configured in known MCP client apps.
 
-Checks 20 MCP clients (VS Code, Claude Desktop, Cursor, Windsurf, Zed, Continue, Goose,
+    Checks 20 MCP clients: VS Code, Claude Desktop, Cursor, Windsurf, Zed, Continue, Goose,
     Cline, Roo Code, Amazon Q, Kiro, GitHub Copilot, Amp, Gemini CLI, OpenCode, Antigravity,
-    Codex CLI, 5ire, Witsy, and more).
+    Codex CLI, 5ire, Witsy, and more.
+
+    Does NOT register or execute anything - read-only config file scan.
+    Results are cached in the database; use discovery_id values to onboard specific servers.
 
     client: filter to a specific client ID (e.g. "cursor", "claude-desktop", "vscode")
-    include_project: also scan project-level config files in the current directory
+    include_project: also scan project-level config files in the current working directory
     include_community_paths: include paths that are community-verified (not from official docs)
 
-    Returns inventory of discovered servers. Does NOT register or execute anything.
-    Call onboard_discovered_servers to register them.
+    NEXT: onboard_discovered_servers(all_found=True) to register all found servers,
+    or onboard_discovered_servers(discovery_ids=[...]) to register specific ones.
+    AFTER onboarding: security_scan_server per server before trusting with safe_tool_call.
     """
     rl = _check_mgmt_rate_limit("discover:scan")
     if rl:
@@ -1806,19 +1921,20 @@ async def onboard_discovered_servers(
     github_url: Optional[str] = None,
 ) -> str:
     """
-    Register previously discovered MCP servers into the Safety Warden pipeline.
+    Register previously discovered servers into the Safety Warden pipeline (register + inspect).
 
-    Feeds discovered server configs into the existing register -> inspect -> snapshot flow.
-    Must call discover_servers first. Skips servers that are already registered and
-    servers where only activation state was found (5ire).
+    Must call discover_servers first to populate the discovery cache.
+    Skips already-registered servers and servers with only activation_state_only data (5ire).
+    Does NOT run security scans - call security_scan_server after for untrusted servers.
 
-    discovery_ids: list of specific discovery_id strings to onboard
-    client: onboard all discovered servers from a specific client
-    all_found: onboard every discovered server that is not yet registered
+    discovery_ids: specific discovery_id values from the discover_servers response
+    client: all discovered servers from one client (e.g. "cursor", "claude-desktop", "vscode")
+    all_found: register every unregistered server found in the last discover_servers scan
     auto_inspect: connect and enumerate tools after registration (default true)
     classify_provider: LLM for tool classification ("anthropic"|"openai"|"gemini")
 
-    Returns per-server registration results.
+    BEFORE: discover_servers (to find and cache servers).
+    AFTER: security_scan_server for each registered server before trusting with safe_tool_call.
     """
     rl = _check_mgmt_rate_limit("discover:onboard")
     if rl:
@@ -1836,7 +1952,7 @@ async def onboard_discovered_servers(
         entries = db.list_discovered_servers()
 
     if not entries:
-        return json.dumps({"message": "No discovered servers found. Run discover_servers first.", "registered": []})
+        return json.dumps({"message": "No discovered servers found. Run discover_servers first.", "registered": 0})
 
     results = []
     for entry in entries:
@@ -1861,20 +1977,25 @@ async def onboard_discovered_servers(
             results.append({"discovery_id": did, "server_name": server_name, "status": "rate_limited", "reason": rl_entry})
             continue
 
-        reg_result = await _do_register(
-            server_id=suggested_id,
-            transport=entry["transport"],
-            command=entry.get("command"),
-            args=entry.get("args") or [],
-            url=entry.get("url"),
-            env=entry.get("env") or {},
-            headers=entry.get("headers") or {},
-            auto_inspect=auto_inspect,
-            classify_provider=classify_provider,
-            classify_model=classify_model,
-            classify_api_key=classify_api_key,
-            github_url=github_url,
-        )
+        try:
+            reg_result = await _do_register(
+                server_id=suggested_id,
+                transport=entry["transport"],
+                command=entry.get("command"),
+                args=entry.get("args") or [],
+                url=entry.get("url"),
+                env=entry.get("env") or {},
+                headers=entry.get("headers") or {},
+                auto_inspect=auto_inspect,
+                classify_provider=classify_provider,
+                classify_model=classify_model,
+                classify_api_key=classify_api_key,
+                github_url=github_url,
+            )
+        except Exception as exc:
+            _log.error("onboard_discovered_servers: _do_register raised for %s: %s", suggested_id, exc, exc_info=True)
+            results.append({"discovery_id": did, "server_name": server_name, "status": "failed", "error": str(exc)})
+            continue
 
         if "error" in reg_result:
             results.append({"discovery_id": did, "server_name": server_name, "status": "failed", "error": reg_result["error"], "hint": reg_result.get("hint")})
@@ -1891,8 +2012,10 @@ async def onboard_discovered_servers(
             })
 
     registered_count = sum(1 for r in results if r["status"] == "registered")
+    attempted_count = sum(1 for r in results if r["status"] in ("registered", "failed"))
     return json.dumps({
-        "attempted": len(results),
+        "total": len(results),
+        "attempted": attempted_count,
         "registered": registered_count,
         "results": results,
     }, indent=2)
