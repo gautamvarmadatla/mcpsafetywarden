@@ -15,6 +15,7 @@ from starlette.types import ASGIApp
 
 from . import database as db
 from . import client_manager as cm
+from . import discovery as _discovery
 from .classifier import classify_tool
 from .scanner import ALL_PROVIDERS, call_llm, detect_llm_provider as _detect_llm_provider, run_cisco_scan, run_snyk_scan, run_security_scan, auto_detect_providers as _auto_detect_providers, merge_findings as _merge_findings
 from .drift import compare_db_snapshots as _compare_tool_snapshots, check_server_drift as _check_drift
@@ -216,6 +217,97 @@ async def _is_ssrf_hostname(url: str) -> bool:
     return False
 
 
+async def _do_register(
+    server_id: str,
+    transport: str,
+    command: Optional[str] = None,
+    args: Optional[list] = None,
+    url: Optional[str] = None,
+    env: Optional[dict] = None,
+    headers: Optional[dict] = None,
+    auto_inspect: bool = True,
+    classify_provider: Optional[str] = None,
+    classify_model: Optional[str] = None,
+    classify_api_key: Optional[str] = None,
+    github_url: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Core registration logic shared by register_server and onboard_discovered_servers."""
+    if transport not in ("stdio", "sse", "streamable_http"):
+        return {"error": f"transport must be 'stdio', 'sse', or 'streamable_http', got '{transport}'"}
+    if transport == "stdio" and not command:
+        return {"error": "command is required for stdio transport"}
+    if transport in ("sse", "streamable_http") and not url:
+        return {"error": "url is required for sse/streamable_http transport"}
+    if "::" in server_id:
+        return {"error": "server_id must not contain '::'."}
+    if len(server_id) > _MAX_SERVER_ID_LEN:
+        return {"error": f"server_id exceeds maximum length of {_MAX_SERVER_ID_LEN}."}
+    if command and len(command) > _MAX_COMMAND_LEN:
+        return {"error": f"command exceeds maximum length of {_MAX_COMMAND_LEN}."}
+    if url and len(url) > _MAX_URL_LEN:
+        return {"error": f"url exceeds maximum length of {_MAX_URL_LEN}."}
+    if args and len(args) > _MAX_ARGS_COUNT:
+        return {"error": f"args list exceeds maximum of {_MAX_ARGS_COUNT} entries."}
+    if args and any(len(str(a)) > _MAX_ARG_LEN for a in args):
+        return {"error": f"An arg value exceeds maximum length of {_MAX_ARG_LEN}."}
+    if env and len(env) > _MAX_ENV_VARS:
+        return {"error": f"env dict exceeds maximum of {_MAX_ENV_VARS} entries."}
+    if headers and len(headers) > _MAX_HEADER_PAIRS:
+        return {"error": f"headers dict exceeds maximum of {_MAX_HEADER_PAIRS} entries."}
+
+    _parsed_host = url and __import__("urllib.parse", fromlist=["urlparse"]).urlparse(url).hostname or ""
+    _is_loopback = _parsed_host in ("localhost", "127.0.0.1") or _parsed_host.startswith("127.")
+    if url and not _is_loopback and SSRF_RE.search(url):
+        return {"error": "URL targets a private or restricted address and cannot be registered."}
+    if url and not _is_loopback and await _is_ssrf_hostname(url):
+        return {"error": "URL targets a private or restricted address and cannot be registered."}
+
+    if transport == "stdio" and command:
+        cmd_base = _os.path.basename(command).lower()
+        if cmd_base.endswith(".exe"):
+            cmd_base = cmd_base[:-4]
+        if cmd_base in _SHELL_INTERPS and any(str(a).lower() in _SHELL_EVAL_FLAGS for a in (args or [])):
+            return {"error": "Registering a shell interpreter with an eval flag (-c, /c, -e) is not permitted."}
+
+    _log.info("_do_register server_id=%s transport=%s auto_inspect=%s", server_id, transport, auto_inspect)
+
+    db.upsert_server(server_id, transport, command, args or [], url, env or {}, headers or {}, github_url)
+    result: Dict[str, Any] = {"registered": server_id, "transport": transport}
+
+    if auto_inspect:
+        _stdio_hint = (
+            "stdio server requires local setup before it can be inspected. "
+            "Use onboard_server with github_url to run a source-only scan instead."
+        )
+        try:
+            tools = await cm.inspect_server_tools(
+                server_id,
+                llm_provider=classify_provider or _detect_llm_provider(),
+                llm_model=classify_model,
+                llm_api_key=classify_api_key,
+            )
+            result["tools_discovered"] = len(tools)
+            result["tools"] = [
+                {"name": t["name"], "effect_class": t["effect_class"], "confidence": t["confidence"]}
+                for t in tools
+            ]
+        except (ValueError, RuntimeError) as exc:
+            db.delete_server(server_id)
+            return {
+                "error": f"Registration aborted - inspection failed: {exc}",
+                "hint": _stdio_hint if transport == "stdio" else "Fix the server and try again.",
+            }
+        except Exception as exc:
+            _log.error("_do_register auto-inspect failed for %s: %s", server_id, exc, exc_info=True)
+            db.delete_server(server_id)
+            return {
+                "error": "Registration aborted - inspection failed.",
+                "hint": _stdio_hint if transport == "stdio" else "Fix the server and try again.",
+            }
+
+    return result
+
+
 @mcp.tool()
 async def register_server(
     server_id: str,
@@ -256,89 +348,14 @@ Examples:
     rl = _check_mgmt_rate_limit(f"register:{server_id}")
     if rl:
         return json.dumps({"error": rl})
-
-    if transport not in ("stdio", "sse", "streamable_http"):
-        return json.dumps({"error": f"transport must be 'stdio', 'sse', or 'streamable_http', got '{transport}'"})
-    if transport == "stdio" and not command:
-        return json.dumps({"error": "command is required for stdio transport"})
-    if transport in ("sse", "streamable_http") and not url:
-        return json.dumps({"error": "url is required for sse/streamable_http transport"})
-
-    # '::' is the tool_id separator; it must not appear in server_id.
-    if "::" in server_id:
-        return json.dumps({"error": "server_id must not contain '::'."})
-
-    if len(server_id) > _MAX_SERVER_ID_LEN:
-        return json.dumps({"error": f"server_id exceeds maximum length of {_MAX_SERVER_ID_LEN}."})
-    if command and len(command) > _MAX_COMMAND_LEN:
-        return json.dumps({"error": f"command exceeds maximum length of {_MAX_COMMAND_LEN}."})
-    if url and len(url) > _MAX_URL_LEN:
-        return json.dumps({"error": f"url exceeds maximum length of {_MAX_URL_LEN}."})
-    if args and len(args) > _MAX_ARGS_COUNT:
-        return json.dumps({"error": f"args list exceeds maximum of {_MAX_ARGS_COUNT} entries."})
-    if args and any(len(str(a)) > _MAX_ARG_LEN for a in args):
-        return json.dumps({"error": f"An arg value exceeds maximum length of {_MAX_ARG_LEN}."})
-    if env and len(env) > _MAX_ENV_VARS:
-        return json.dumps({"error": f"env dict exceeds maximum of {_MAX_ENV_VARS} entries."})
-    if headers and len(headers) > _MAX_HEADER_PAIRS:
-        return json.dumps({"error": f"headers dict exceeds maximum of {_MAX_HEADER_PAIRS} entries."})
-
-    _parsed_host = url and __import__("urllib.parse", fromlist=["urlparse"]).urlparse(url).hostname or ""
-    _is_loopback = _parsed_host in ("localhost", "127.0.0.1") or _parsed_host.startswith("127.")
-    if url and not _is_loopback and SSRF_RE.search(url):
-        return json.dumps({"error": "URL targets a private or restricted address and cannot be registered."})
-    if url and not _is_loopback and await _is_ssrf_hostname(url):
-        return json.dumps({"error": "URL targets a private or restricted address and cannot be registered."})
-
-    if transport == "stdio" and command:
-        cmd_base = _os.path.basename(command).lower()
-        if cmd_base.endswith(".exe"):
-            cmd_base = cmd_base[:-4]
-        if cmd_base in _SHELL_INTERPS and any(str(a).lower() in _SHELL_EVAL_FLAGS for a in (args or [])):
-            return json.dumps({"error": "Registering a shell interpreter with an eval flag (-c, /c, -e) is not permitted."})
-
-    _log.info("register_server server_id=%s transport=%s auto_inspect=%s", server_id, transport, auto_inspect)
-
-    db.upsert_server(server_id, transport, command, args or [], url, env or {}, headers or {}, github_url)
-    result: Dict[str, Any] = {"registered": server_id, "transport": transport}
-
-    if auto_inspect:
-        try:
-            tools = await cm.inspect_server_tools(
-                server_id,
-                llm_provider=classify_provider or _detect_llm_provider(),
-                llm_model=classify_model,
-                llm_api_key=classify_api_key,
-            )
-            result["tools_discovered"] = len(tools)
-            result["tools"] = [
-                {"name": t["name"], "effect_class": t["effect_class"], "confidence": t["confidence"]}
-                for t in tools
-            ]
-        except (ValueError, RuntimeError) as exc:
-            db.delete_server(server_id)
-            return json.dumps({
-                "error": f"Registration aborted - inspection failed: {exc}",
-                "hint": (
-                    "stdio server requires local setup before it can be inspected. "
-                    "Use onboard_server with github_url to run a source-only scan instead."
-                    if transport == "stdio"
-                    else "Fix the server and try again."
-                ),
-            })
-        except Exception as exc:
-            _log.error("register_server auto-inspect failed for %s: %s", server_id, exc, exc_info=True)
-            db.delete_server(server_id)
-            return json.dumps({
-                "error": "Registration aborted - inspection failed.",
-                "hint": (
-                    "stdio server requires local setup before it can be inspected. "
-                    "Use onboard_server with github_url to run a source-only scan instead."
-                    if transport == "stdio"
-                    else "Fix the server and try again."
-                ),
-            })
-
+    result = await _do_register(
+        server_id=server_id, transport=transport, command=command, args=args,
+        url=url, env=env, headers=headers, auto_inspect=auto_inspect,
+        classify_provider=classify_provider, classify_model=classify_model,
+        classify_api_key=classify_api_key, github_url=github_url,
+    )
+    if "error" in result:
+        return json.dumps(result)
     return json.dumps(result, indent=2)
 
 
@@ -1719,6 +1736,166 @@ async def ping_server(server_id: str) -> str:
             result["network_scan"] = network_scan
 
     return json.dumps({"server_id": server_id, **result}, indent=2)
+
+
+@mcp.tool()
+async def discover_servers(
+    client: Optional[str] = None,
+    include_project: bool = True,
+    include_community_paths: bool = True,
+) -> str:
+    """
+    Scan the local machine for MCP servers configured in known MCP client apps.
+
+Checks 20 MCP clients (VS Code, Claude Desktop, Cursor, Windsurf, Zed, Continue, Goose,
+    Cline, Roo Code, Amazon Q, Kiro, GitHub Copilot, Amp, Gemini CLI, OpenCode, Antigravity,
+    Codex CLI, 5ire, Witsy, and more).
+
+    client: filter to a specific client ID (e.g. "cursor", "claude-desktop", "vscode")
+    include_project: also scan project-level config files in the current directory
+    include_community_paths: include paths that are community-verified (not from official docs)
+
+    Returns inventory of discovered servers. Does NOT register or execute anything.
+    Call onboard_discovered_servers to register them.
+    """
+    rl = _check_mgmt_rate_limit("discover:scan")
+    if rl:
+        return json.dumps({"error": rl})
+
+    registered_ids = {s["server_id"] for s in db.list_servers()}
+
+    try:
+        found = _discovery.discover_mcp_servers(
+            client_filter=client,
+            include_project=include_project,
+            include_community=include_community_paths,
+            registered_server_ids=registered_ids,
+        )
+    except Exception as exc:
+        _log.error("discover_servers failed: %s", exc, exc_info=True)
+        return json.dumps({"error": "Discovery scan failed. Check server logs."})
+
+    for entry in found:
+        try:
+            db.upsert_discovered_server(entry)
+        except Exception as exc:
+            _log.warning("discover_servers: failed to cache entry %s: %s", entry.get("discovery_id"), exc)
+
+    public = []
+    for entry in found:
+        pub = {k: v for k, v in entry.items() if k not in ("env", "headers")}
+        public.append(pub)
+
+    clients_found = sorted({e["client"] for e in public})
+    return json.dumps({
+        "count": len(public),
+        "clients_found": clients_found,
+        "discovered": public,
+    }, indent=2)
+
+
+@mcp.tool()
+async def onboard_discovered_servers(
+    discovery_ids: Optional[List[str]] = None,
+    client: Optional[str] = None,
+    all_found: bool = False,
+    auto_inspect: bool = True,
+    classify_provider: Optional[str] = None,
+    classify_model: Optional[str] = None,
+    classify_api_key: Optional[str] = None,
+    github_url: Optional[str] = None,
+) -> str:
+    """
+    Register previously discovered MCP servers into the Safety Warden pipeline.
+
+    Feeds discovered server configs into the existing register -> inspect -> snapshot flow.
+    Must call discover_servers first. Skips servers that are already registered and
+    servers where only activation state was found (5ire).
+
+    discovery_ids: list of specific discovery_id strings to onboard
+    client: onboard all discovered servers from a specific client
+    all_found: onboard every discovered server that is not yet registered
+    auto_inspect: connect and enumerate tools after registration (default true)
+    classify_provider: LLM for tool classification ("anthropic"|"openai"|"gemini")
+
+    Returns per-server registration results.
+    """
+    rl = _check_mgmt_rate_limit("discover:onboard")
+    if rl:
+        return json.dumps({"error": rl})
+
+    if not discovery_ids and not client and not all_found:
+        return json.dumps({"error": "Provide discovery_ids, client, or set all_found=true."})
+
+    if discovery_ids:
+        entries = [db.get_discovered_server(did) for did in discovery_ids]
+        entries = [e for e in entries if e is not None]
+    elif client:
+        entries = db.list_discovered_servers(client=client)
+    else:
+        entries = db.list_discovered_servers()
+
+    if not entries:
+        return json.dumps({"message": "No discovered servers found. Run discover_servers first.", "registered": []})
+
+    results = []
+    for entry in entries:
+        did = entry["discovery_id"]
+        server_name = entry["server_name"]
+        suggested_id = _discovery.make_server_id(entry["client"], server_name)
+
+        if entry.get("registered_server_id"):
+            results.append({"discovery_id": did, "server_name": server_name, "status": "already_registered", "server_id": entry["registered_server_id"]})
+            continue
+
+        if entry.get("activation_state_only"):
+            results.append({"discovery_id": did, "server_name": server_name, "status": "skipped", "reason": "activation_state_only - full server definition not available in config file"})
+            continue
+
+        if not entry.get("command") and not entry.get("url"):
+            results.append({"discovery_id": did, "server_name": server_name, "status": "skipped", "reason": "no command or url in discovered config"})
+            continue
+
+        rl_entry = _check_mgmt_rate_limit(f"register:{suggested_id}")
+        if rl_entry:
+            results.append({"discovery_id": did, "server_name": server_name, "status": "rate_limited", "reason": rl_entry})
+            continue
+
+        reg_result = await _do_register(
+            server_id=suggested_id,
+            transport=entry["transport"],
+            command=entry.get("command"),
+            args=entry.get("args") or [],
+            url=entry.get("url"),
+            env=entry.get("env") or {},
+            headers=entry.get("headers") or {},
+            auto_inspect=auto_inspect,
+            classify_provider=classify_provider,
+            classify_model=classify_model,
+            classify_api_key=classify_api_key,
+            github_url=github_url,
+        )
+
+        if "error" in reg_result:
+            results.append({"discovery_id": did, "server_name": server_name, "status": "failed", "error": reg_result["error"], "hint": reg_result.get("hint")})
+        else:
+            db.mark_discovered_registered(did, suggested_id)
+            results.append({
+                "discovery_id": did,
+                "server_name": server_name,
+                "status": "registered",
+                "server_id": suggested_id,
+                "tools_discovered": reg_result.get("tools_discovered", 0),
+                "source": entry.get("client"),
+                "config_path": entry.get("config_path"),
+            })
+
+    registered_count = sum(1 for r in results if r["status"] == "registered")
+    return json.dumps({
+        "attempted": len(results),
+        "registered": registered_count,
+        "results": results,
+    }, indent=2)
 
 
 def main():

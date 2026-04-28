@@ -19,6 +19,7 @@ from rich.table import Table
 from . import database as _db
 from .server import (
     check_server_drift as _check_server_drift,
+    discover_servers as _discover_servers,
     get_run_history as _get_run_history,
     get_retry_policy as _get_retry_policy,
     get_security_scan as _get_security_scan,
@@ -26,6 +27,7 @@ from .server import (
     inspect_server as _inspect_server,
     list_server_tools as _list_server_tools,
     list_servers as _list_servers,
+    onboard_discovered_servers as _onboard_discovered_servers,
     onboard_server as _onboard_server,
     ping_server as _ping_server,
     preflight_tool_call as _preflight_tool_call,
@@ -932,6 +934,132 @@ def cmd_scan_all(
     skipped = result.get("skipped_servers", [])
     for s in skipped:
         console.print(f"[yellow]⚠[/yellow]  {s['server_id']} skipped: {s['reason']}")
+
+
+@app.command("discover")
+def cmd_discover(
+    client: Optional[str] = typer.Option(None, "--client", "-c", help="Filter to a specific client ID (e.g. cursor, vscode, claude-desktop)"),
+    no_project: bool = typer.Option(False, "--no-project", help="Skip project-level config files in current directory"),
+    no_community: bool = typer.Option(False, "--no-community", help="Skip community-verified paths"),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Scan local MCP client configs to find installed MCP servers."""
+    with console.status("Scanning MCP client configs..."):
+        result = _load(_run(_discover_servers(
+            client=client,
+            include_project=not no_project,
+            include_community_paths=not no_community,
+        )))
+    _die(result)
+    if json_output:
+        console.print_json(json.dumps(result))
+        return
+
+    discovered = result.get("discovered", [])
+    if not discovered:
+        console.print("[yellow]No MCP servers found in any client config.[/yellow]")
+        return
+
+    t = Table(title=f"Discovered MCP Servers ({result.get('count', 0)} total)", box=box.SIMPLE_HEAD)
+    t.add_column("Client", style="dim")
+    t.add_column("Server Name", style="cyan")
+    t.add_column("Scope")
+    t.add_column("Transport")
+    t.add_column("Command / URL")
+    t.add_column("Registered")
+    t.add_column("Confidence", style="dim")
+
+    for entry in discovered:
+        cmd_display = entry.get("command") or entry.get("url") or ""
+        args = entry.get("args") or []
+        if args:
+            cmd_display += " " + " ".join(str(a) for a in args[:3])
+            if len(args) > 3:
+                cmd_display += f" (+{len(args)-3})"
+        registered = "[green]yes[/green]" if entry.get("registered") else "[dim]no[/dim]"
+        activation_only = entry.get("activation_state_only")
+        reg_display = "[yellow]state only[/yellow]" if activation_only else registered
+        t.add_row(
+            entry.get("client_name", entry.get("client", "")),
+            entry.get("server_name", ""),
+            entry.get("scope", ""),
+            entry.get("transport", ""),
+            cmd_display[:60],
+            reg_display,
+            entry.get("confidence", ""),
+        )
+
+    console.print(t)
+    clients_found = result.get("clients_found", [])
+    if clients_found:
+        console.print(f"[dim]Clients scanned: {', '.join(clients_found)}[/dim]")
+    unregistered = sum(1 for e in discovered if not e.get("registered") and not e.get("activation_state_only"))
+    if unregistered:
+        console.print(f"\n[cyan]{unregistered}[/cyan] server(s) not yet registered. Run [dim]mcpsafetywarden onboard-discovered --all[/dim] to register them.")
+
+
+@app.command("onboard-discovered")
+def cmd_onboard_discovered(
+    discovery_ids: Optional[str] = typer.Option(None, "--ids", help="Comma-separated discovery_id values"),
+    client: Optional[str] = typer.Option(None, "--client", "-c", help="Onboard all discovered servers from a specific client"),
+    all_found: bool = typer.Option(False, "--all", help="Onboard all unregistered discovered servers"),
+    no_inspect: bool = typer.Option(False, "--no-inspect", help="Skip auto-inspect after registration"),
+    provider: Optional[str] = typer.Option(None, "--provider", help="LLM for tool classification"),
+    model: Optional[str] = typer.Option(None, "--model"),
+    api_key: Optional[str] = typer.Option(None, "--api-key"),
+    github_url: Optional[str] = typer.Option(None, "--github-url"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt"),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Register discovered MCP servers into the Safety Warden pipeline."""
+    if not discovery_ids and not client and not all_found:
+        err.print("[red]Provide --ids, --client, or --all[/red]")
+        raise typer.Exit(1)
+
+    confirmed = yes or Confirm.ask(
+        "This will register and inspect discovered MCP servers. Confirm?"
+    )
+    if not confirmed:
+        raise typer.Exit(0)
+
+    ids_list = [i.strip() for i in discovery_ids.split(",")] if discovery_ids else None
+
+    with console.status("Onboarding discovered servers..."):
+        result = _load(_run(_onboard_discovered_servers(
+            discovery_ids=ids_list,
+            client=client,
+            all_found=all_found,
+            auto_inspect=not no_inspect,
+            classify_provider=provider,
+            classify_model=model,
+            classify_api_key=api_key,
+            github_url=github_url,
+        )))
+    _die(result)
+    if json_output:
+        console.print_json(json.dumps(result))
+        return
+
+    results = result.get("results", [])
+    registered = result.get("registered", 0)
+    attempted = result.get("attempted", 0)
+    console.print(f"[green]✓[/green] Registered {registered}/{attempted} server(s)")
+
+    for r in results:
+        status = r.get("status", "")
+        name = r.get("server_name", r.get("discovery_id", ""))
+        if status == "registered":
+            tools = r.get("tools_discovered", 0)
+            console.print(f"  [green]✓[/green] {name} -> [cyan]{r.get('server_id')}[/cyan] ({tools} tool(s))")
+        elif status == "already_registered":
+            console.print(f"  [dim]=[/dim] {name} already registered as [cyan]{r.get('server_id')}[/cyan]")
+        elif status == "skipped":
+            console.print(f"  [yellow]-[/yellow] {name} skipped: {r.get('reason', '')}")
+        elif status == "failed":
+            hint = f" ({r['hint']})" if r.get("hint") else ""
+            console.print(f"  [red]✗[/red] {name} failed: {r.get('error', '')}{hint}")
+        elif status == "rate_limited":
+            console.print(f"  [yellow]⚠[/yellow] {name} rate limited: {r.get('reason', '')}")
 
 
 if __name__ == "__main__":

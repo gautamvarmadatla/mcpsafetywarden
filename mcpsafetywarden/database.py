@@ -185,12 +185,36 @@ def init_db() -> None:
                 tools_hash       TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS discovered_servers (
+                discovery_id          TEXT PRIMARY KEY,
+                client                TEXT NOT NULL,
+                client_name           TEXT NOT NULL,
+                scope                 TEXT NOT NULL,
+                config_path           TEXT NOT NULL,
+                server_name           TEXT NOT NULL,
+                transport             TEXT NOT NULL,
+                command               TEXT,
+                args_json             TEXT DEFAULT '[]',
+                url                   TEXT,
+                env_json              TEXT DEFAULT '{}',
+                headers_json          TEXT DEFAULT '{}',
+                env_keys_json         TEXT DEFAULT '[]',
+                headers_keys_json     TEXT DEFAULT '[]',
+                confidence            TEXT,
+                activation_state_only INTEGER DEFAULT 0,
+                discovered_at         TEXT NOT NULL,
+                last_seen_at          TEXT NOT NULL,
+                registered_server_id  TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_tool_runs_tool_id
                 ON tool_runs(tool_id);
             CREATE INDEX IF NOT EXISTS idx_security_scans_server_scanned
                 ON security_scans(server_id, scanned_at);
             CREATE INDEX IF NOT EXISTS idx_tool_snapshots_server
                 ON tool_snapshots(server_id, snapshot_at);
+            CREATE INDEX IF NOT EXISTS idx_discovered_servers_client
+                ON discovered_servers(client, last_seen_at);
         """)
         conn.commit()
         try:
@@ -654,6 +678,118 @@ def get_source_hash(server_id: str) -> Optional[Dict[str, Any]]:
         d = dict(row)
         d["file_paths"] = _jloads(d.pop("file_paths_json", "[]"), [])
         return d
+    finally:
+        conn.close()
+
+
+def upsert_discovered_server(entry: Dict[str, Any]) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO discovered_servers
+                (discovery_id, client, client_name, scope, config_path, server_name,
+                 transport, command, args_json, url, env_json, headers_json,
+                 env_keys_json, headers_keys_json, confidence, activation_state_only,
+                 discovered_at, last_seen_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(discovery_id) DO UPDATE SET
+                client_name=excluded.client_name,
+                config_path=excluded.config_path,
+                transport=excluded.transport,
+                command=excluded.command,
+                args_json=excluded.args_json,
+                url=excluded.url,
+                env_json=excluded.env_json,
+                headers_json=excluded.headers_json,
+                env_keys_json=excluded.env_keys_json,
+                headers_keys_json=excluded.headers_keys_json,
+                confidence=excluded.confidence,
+                activation_state_only=excluded.activation_state_only,
+                last_seen_at=excluded.last_seen_at
+            """,
+            (
+                entry["discovery_id"],
+                entry["client"],
+                entry["client_name"],
+                entry["scope"],
+                entry["config_path"],
+                entry["server_name"],
+                entry["transport"],
+                entry.get("command"),
+                json.dumps(entry.get("args") or []),
+                entry.get("url"),
+                _encrypt_field(json.dumps(entry.get("env") or {})),
+                _encrypt_field(json.dumps(entry.get("headers") or {})),
+                json.dumps(entry.get("env_keys") or []),
+                json.dumps(entry.get("headers_keys") or []),
+                entry.get("confidence"),
+                1 if entry.get("activation_state_only") else 0,
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_discovered_server(discovery_id: str) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM discovered_servers WHERE discovery_id = ?", (discovery_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["args"] = _jloads(d.pop("args_json", "[]"), [])
+        d["env"] = _jloads(_decrypt_field(d.pop("env_json", "{}")), {})
+        d["headers"] = _jloads(_decrypt_field(d.pop("headers_json", "{}")), {})
+        d["env_keys"] = _jloads(d.pop("env_keys_json", "[]"), [])
+        d["headers_keys"] = _jloads(d.pop("headers_keys_json", "[]"), [])
+        d["activation_state_only"] = bool(d.get("activation_state_only"))
+        return d
+    finally:
+        conn.close()
+
+
+def list_discovered_servers(client: Optional[str] = None) -> List[Dict[str, Any]]:
+    conn = get_connection()
+    try:
+        if client:
+            rows = conn.execute(
+                "SELECT * FROM discovered_servers WHERE client = ? ORDER BY last_seen_at DESC",
+                (client,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM discovered_servers ORDER BY client, last_seen_at DESC"
+            ).fetchall()
+        result = []
+        for row in rows:
+            d = dict(row)
+            d["args"] = _jloads(d.pop("args_json", "[]"), [])
+            d.pop("env_json", None)
+            d.pop("headers_json", None)
+            d["env_keys"] = _jloads(d.pop("env_keys_json", "[]"), [])
+            d["headers_keys"] = _jloads(d.pop("headers_keys_json", "[]"), [])
+            d["activation_state_only"] = bool(d.get("activation_state_only"))
+            result.append(d)
+        return result
+    finally:
+        conn.close()
+
+
+def mark_discovered_registered(discovery_id: str, server_id: str) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE discovered_servers SET registered_server_id = ? WHERE discovery_id = ?",
+            (server_id, discovery_id),
+        )
+        conn.commit()
     finally:
         conn.close()
 
