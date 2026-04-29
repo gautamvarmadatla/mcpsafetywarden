@@ -121,17 +121,27 @@ mcp = FastMCP(
         "and security scanning before any tool is called. "
         "All tool calls to wrapped servers MUST go through safe_tool_call, never directly. "
 
-        "PRIMARY FLOWS: "
-        "(1) Find servers already on this machine: discover_servers -> onboard_discovered_servers -> safe_tool_call. "
-        "(2) Register a known server manually: onboard_server (preferred one-shot) or register_server -> security_scan_server -> safe_tool_call. "
-        "(3) Execute a tool: safe_tool_call. If blocked, either safe_tool_call(approved=True), safe_tool_call(use_alternative=X), or suggest_safer_alternative first. "
-        "(4) Security audit: security_scan_server -> get_security_scan (poll every 30s if background=True) -> set_tool_policy('block') for HIGH risk tools. "
-        "(5) Drift monitoring: check_server_drift -> if drift severity MEDIUM or above, re-run security_scan_server. "
+        "ENTRY POINT - pick the right starting point based on what you have: "
+        "- User mentions a server by name/URL but it is not registered -> onboard_server (one-shot preferred) or register_server. "
+        "- User asks what servers are available on this machine -> discover_servers -> onboard_discovered_servers. "
+        "- Server is already registered and user wants to call a tool -> safe_tool_call directly. "
+        "- User has a GitHub URL but no local setup (server not running) -> security_scan_server(github_url=...) for source-only scan, then user fixes local setup, then onboard_server. "
+        "- User wants a security audit of an already-registered server -> security_scan_server(server_id=...). "
+        "- User wants to check for drift since last scan -> check_server_drift. "
 
-        "KEY RULES: "
-        "Never call preflight_tool_call before safe_tool_call - safe_tool_call runs preflight internally. "
-        "Never call register_server and then skip security_scan_server for untrusted servers. "
-        "Always use safe_tool_call, never call wrapped server tools directly."
+        "FLOWS after entry: "
+        "(1) discover_servers -> onboard_discovered_servers -> safe_tool_call. "
+        "(2) onboard_server -> review scan in response -> set_tool_policy('block') for HIGH-risk tools -> safe_tool_call. "
+        "(3) register_server -> security_scan_server -> get_security_scan (poll every 30s) -> set_tool_policy('block') -> safe_tool_call. "
+        "(4) safe_tool_call blocked -> safe_tool_call(approved=True) | safe_tool_call(use_alternative=X) | suggest_safer_alternative. "
+        "(5) check_server_drift severity MEDIUM+ -> security_scan_server -> get_security_scan -> update policies. "
+
+        "NEVER: "
+        "- Call preflight_tool_call before safe_tool_call (safe_tool_call runs it internally). "
+        "- Skip security_scan_server for an untrusted server that was just registered. "
+        "- Call wrapped server tools directly - always use safe_tool_call. "
+        "- Pass provider= to security_scan_server unless the user explicitly names one (omit it to auto-detect from env keys). "
+        "- Call set_tool_policy after a source-only scan (no server is registered, policies do not apply)."
     ),
 )
 
