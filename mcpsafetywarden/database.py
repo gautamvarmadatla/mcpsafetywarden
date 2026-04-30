@@ -1,5 +1,6 @@
 import logging
 import os
+import secrets
 import sqlite3
 import json
 import hashlib
@@ -215,6 +216,13 @@ def init_db() -> None:
                 ON tool_snapshots(server_id, snapshot_at);
             CREATE INDEX IF NOT EXISTS idx_discovered_servers_client
                 ON discovered_servers(client, last_seen_at);
+
+            CREATE TABLE IF NOT EXISTS credential_refs (
+                ref_id       TEXT PRIMARY KEY,
+                value_enc    TEXT NOT NULL,
+                created_at   TEXT NOT NULL,
+                last_used_at TEXT
+            );
         """)
         conn.commit()
         try:
@@ -791,6 +799,73 @@ def mark_discovered_registered(discovery_id: str, server_id: str) -> None:
             (server_id, discovery_id),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def create_credential_ref(value: str) -> str:
+    """Store a secret value encrypted and return an opaque cref_ identifier."""
+    ref_id = "cref_" + secrets.token_hex(8)
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO credential_refs (ref_id, value_enc, created_at) VALUES (?, ?, ?)",
+            (ref_id, _encrypt_field(value), datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return ref_id
+
+
+def delete_credential_refs(ref_ids: List[str]) -> None:
+    """Delete a batch of credential refs. Safe to call with an empty list."""
+    if not ref_ids:
+        return
+    conn = get_connection()
+    try:
+        placeholders = ",".join("?" * len(ref_ids))
+        conn.execute(f"DELETE FROM credential_refs WHERE ref_id IN ({placeholders})", ref_ids)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _decrypt_cref(ciphertext: str) -> Optional[str]:
+    """Decrypt a cref value. Returns None on failure so callers can distinguish
+    'wrong key / corrupted' from 'not found', unlike _decrypt_field which returns '{}'."""
+    if _fernet is None:
+        return ciphertext
+    try:
+        return _fernet.decrypt(ciphertext.encode()).decode()
+    except Exception as _dec_err:
+        _log.error(
+            "_decrypt_cref failed - MCP_DB_ENCRYPTION_KEY may have been rotated "
+            "after this credential was stored: %s",
+            _dec_err,
+        )
+        return None
+
+
+def resolve_credential_ref(ref_id: str) -> Optional[str]:
+    """Return the plaintext value for a cref_ identifier, or None if not found."""
+    if not isinstance(ref_id, str) or not ref_id.startswith("cref_"):
+        return None
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT value_enc FROM credential_refs WHERE ref_id = ?", (ref_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        plaintext = _decrypt_cref(row["value_enc"])
+        if plaintext is not None:
+            conn.execute(
+                "UPDATE credential_refs SET last_used_at = ? WHERE ref_id = ?",
+                (datetime.now(timezone.utc).isoformat(), ref_id),
+            )
+            conn.commit()
+        return plaintext
     finally:
         conn.close()
 

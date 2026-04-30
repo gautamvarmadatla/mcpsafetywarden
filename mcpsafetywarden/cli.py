@@ -221,6 +221,9 @@ def cmd_onboard(
     reg = result.get("register", {})
     tools_found = reg.get("tools_discovered", 0)
     console.print(f"[green]✓[/green] Registered [cyan]{server_id}[/cyan] - {tools_found} tool(s) discovered")
+    if reg.get("credential_refs"):
+        n = sum(len(v) for v in reg["credential_refs"].values())
+        console.print(f"[yellow]~[/yellow] {n} secret(s) detected in headers/env and stored securely as cref_ refs (run with --json to see mappings)")
 
     scan = result.get("security_scan") or {}
     if scan.get("skipped"):
@@ -267,6 +270,9 @@ def cmd_register(
         console.print_json(json.dumps(result))
         return
     console.print(f"[green]✓[/green] Registered [cyan]{server_id}[/cyan] - {result.get('tools_discovered', 0)} tool(s)")
+    if result.get("credential_refs"):
+        n = sum(len(v) for v in result["credential_refs"].values())
+        console.print(f"[yellow]~[/yellow] {n} secret(s) detected in headers/env and stored securely as cref_ refs (run with --json to see mappings)")
 
 
 @app.command("inspect")
@@ -1052,6 +1058,9 @@ def cmd_onboard_discovered(
         if status == "registered":
             tools = r.get("tools_discovered", 0)
             console.print(f"  [green]✓[/green] {name} -> [cyan]{r.get('server_id')}[/cyan] ({tools} tool(s))")
+            if r.get("credential_refs"):
+                n = sum(len(v) for v in r["credential_refs"].values())
+                console.print(f"    [yellow]~[/yellow] {n} secret(s) stored as cref_ refs (run with --json to see mappings)")
         elif status == "already_registered":
             console.print(f"  [dim]=[/dim] {name} already registered as [cyan]{r.get('server_id')}[/cyan]")
         elif status == "skipped":

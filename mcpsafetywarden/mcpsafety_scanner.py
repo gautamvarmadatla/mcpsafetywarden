@@ -418,7 +418,7 @@ Reference the hypothesis ID (H001, C001, etc.) in every probe entry.
 - Empty string, null, whitespace-only strings
 - Boundary integers: 0, -1, 2147483647, -2147483648
 - Type confusion: pass [] or {{}} where a string/int is expected; pass true/false; pass null
-- Malformed strings: special characters (quotes, semicolons, angle brackets, U+0000–U+001F)
+- Malformed strings: special characters (quotes, semicolons, angle brackets, U+0000-U+001F)
 - SSTI detection probes: {{{{7*7}}}}, ${{7*7}}, <%= 7*7 %>, #{{7*7}} (read-only arithmetic only)
 - Strings up to 500 characters
 - IDOR probes: substitute numeric IDs (0, -1, 2, 999999); substitute "me" with "admin"

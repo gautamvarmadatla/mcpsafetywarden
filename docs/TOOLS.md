@@ -40,15 +40,15 @@ One-shot onboarding: registers the server, inspects its tools, and runs a securi
 | `command` | string | stdio only | Executable to launch (e.g. `"python"`) |
 | `args` | list | No | Arguments for the command (e.g. `["server.py"]`) |
 | `url` | string | sse/http only | Server URL |
-| `env` | object | No | Extra environment variables for the child process |
-| `headers` | object | No | HTTP headers for sse/streamable_http |
+| `env` | object | No | Extra environment variables for the child process. Secret values are automatically stored as encrypted `cref_` references; the model context never holds real credentials. |
+| `headers` | object | No | HTTP headers for sse/streamable_http. Secret values (Bearer tokens, API keys) are automatically stored as encrypted `cref_` references. |
 | `scan_provider` | string | No | LLM provider for the security scan (`"anthropic"`, `"openai"`, `"gemini"`, `"ollama"`, `"cisco"`, `"snyk"`) |
 | `scan_model` | string | No | Model ID override for the scan provider |
 | `scan_api_key` | string | No | API key override (prefer env vars in production) |
 | `github_url` | string | No | GitHub URL of the server's source repository; enables source-code scanning layers during security scans |
 | `confirm_scan_authorized` | bool | No | Must be `true` to authorize active probing with all providers including `cisco` and `snyk` (default `false`) |
 
-**Returns** JSON with `server_id`, `register` result, and `security_scan` result. If no LLM provider is detected, `security_scan` is skipped with a hint.
+**Returns** JSON with `server_id`, `register` result (which may include a `credential_refs` map if any secrets were detected in `env` or `headers`), and `security_scan` result. If no LLM provider is detected, `security_scan` is skipped with a hint.
 
 **Example**
 ```json
@@ -75,15 +75,15 @@ Register a server for proxying without running a security scan. `auto_inspect` (
 | `command` | string | stdio only | Executable path or name |
 | `args` | list | No | Command arguments. Max 50 entries, each max 1024 chars. |
 | `url` | string | sse/http only | Server URL. SSRF-checked; private IPs and cloud metadata endpoints are blocked. |
-| `env` | object | No | Key-value pairs overlaid onto the parent env (minus wrapper secrets) for the child process |
-| `headers` | object | No | HTTP headers sent with every request. Max 20 pairs. |
+| `env` | object | No | Key-value pairs overlaid onto the parent env (minus wrapper secrets) for the child process. Secret values are automatically stored as encrypted `cref_` references; the model context never holds real credentials. |
+| `headers` | object | No | HTTP headers sent with every request. Max 20 pairs. Secret values (Bearer tokens, API keys) are automatically stored as encrypted `cref_` references. |
 | `auto_inspect` | bool | No | Discover and classify tools immediately (default `true`) |
 | `classify_provider` | string | No | LLM provider for tool classification during inspect |
 | `classify_model` | string | No | Model ID for the classify provider |
 | `classify_api_key` | string | No | API key override |
 | `github_url` | string | No | GitHub URL of the server's source repository; used by source-code scanning layers during security scans |
 
-**Returns** JSON with `registered`, `transport`, and (if `auto_inspect`) `tools_discovered` and a `tools` array with `name`, `effect_class`, `confidence` for each tool.
+**Returns** JSON with `registered`, `transport`, and (if `auto_inspect`) `tools_discovered` and a `tools` array with `name`, `effect_class`, `confidence` for each tool. If any secret values were detected in `env` or `headers`, a `credential_refs` map is included showing which keys were substituted and their `cref_` identifiers.
 
 **Security constraints enforced at registration**
 - `server_id` must not contain `::`

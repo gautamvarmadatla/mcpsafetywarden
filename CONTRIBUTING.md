@@ -17,3 +17,4 @@
 2. Use `db.*` for persistence, `cm.call_tool_with_telemetry` for proxied execution.
 3. Add a corresponding CLI command in `mcpsafetywarden/cli.py` with `@app.command()`.
 4. Follow the existing pattern: validate input, check rate limit if it is a management operation, return `json.dumps(...)`.
+5. If your tool reads `env` or `headers` from a server dict (via `db.get_server()`), call `cm.resolve_server_crefs()` on the result before using those values. Credentials are stored as opaque `cref_` identifiers and must be resolved before use. Tools that go through `cm.call_tool_with_telemetry` or `cm.open_streams()` resolve crefs automatically.

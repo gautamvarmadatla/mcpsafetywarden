@@ -22,7 +22,7 @@ from .drift import compare_db_snapshots as _compare_tool_snapshots, check_server
 from .mcpsafety_scanner import run_mcpsafety_scan, run_mcpsafety_scan_multi, run_deterministic_scan
 from .arg_scanner import SSRF_RE, scan_args_for_threats
 from .aux_integrations import kali_recon, burp_proxy_evidence
-from .security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
+from .security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence, looks_like_secret as _looks_like_secret
 
 _log = logging.getLogger(__name__)
 
@@ -293,8 +293,50 @@ async def _do_register(
 
     _log.info("_do_register server_id=%s transport=%s auto_inspect=%s", server_id, transport, auto_inspect)
 
-    db.upsert_server(server_id, transport, command, args or [], url, env or {}, headers or {}, github_url)
+    # Collect cref_ refs from any existing registration so we can delete them after
+    # the upsert - they will no longer be referenced once overwritten.
+    old_cref_ids: List[str] = []
+    existing = db.get_server(server_id)
+    if existing:
+        for _d in (existing.get("headers") or {}, existing.get("env") or {}):
+            for v in _d.values():
+                if isinstance(v, str) and v.startswith("cref_"):
+                    old_cref_ids.append(v)
+
+    cref_map: Dict[str, Dict[str, str]] = {}
+    safe_env: Dict[str, str] = {}
+    for k, v in (env or {}).items():
+        if isinstance(v, str) and _looks_like_secret(v):
+            ref = db.create_credential_ref(v)
+            safe_env[k] = ref
+            cref_map.setdefault("env", {})[k] = ref
+        else:
+            safe_env[k] = v
+
+    safe_headers: Dict[str, str] = {}
+    for k, v in (headers or {}).items():
+        if isinstance(v, str) and _looks_like_secret(v):
+            ref = db.create_credential_ref(v)
+            safe_headers[k] = ref
+            cref_map.setdefault("headers", {})[k] = ref
+        else:
+            safe_headers[k] = v
+
+    db.upsert_server(server_id, transport, command, args or [], url, safe_env, safe_headers, github_url)
+
+    # Delete previous crefs that are no longer referenced. Skip any that were
+    # passed back in unchanged (user re-registered with an existing cref_ ref).
+    still_in_use = set(safe_headers.values()) | set(safe_env.values())
+    db.delete_credential_refs([c for c in old_cref_ids if c not in still_in_use])
+
     result: Dict[str, Any] = {"registered": server_id, "transport": transport}
+    if cref_map:
+        result["credential_refs"] = cref_map
+        result["credential_refs_note"] = (
+            f"{sum(len(v) for v in cref_map.values())} secret(s) detected and stored securely. "
+            "Original values replaced with cref_ identifiers shown above. "
+            "The model context never holds the real credentials."
+        )
 
     if auto_inspect:
         _stdio_hint = (
@@ -315,6 +357,10 @@ async def _do_register(
             ]
         except (ValueError, RuntimeError) as exc:
             db.delete_server(server_id)
+            # Clean up every cref the failed registration was going to reference,
+            # including preserved old crefs (still_in_use) not just newly-created ones.
+            _crefs_for_server = [v for v in still_in_use if isinstance(v, str) and v.startswith("cref_")]
+            db.delete_credential_refs(_crefs_for_server)
             return {
                 "error": f"Registration aborted - inspection failed: {exc}",
                 "hint": _stdio_hint if transport == "stdio" else "Fix the server and try again.",
@@ -322,6 +368,8 @@ async def _do_register(
         except Exception as exc:
             _log.error("_do_register auto-inspect failed for %s: %s", server_id, exc, exc_info=True)
             db.delete_server(server_id)
+            _crefs_for_server = [v for v in still_in_use if isinstance(v, str) and v.startswith("cref_")]
+            db.delete_credential_refs(_crefs_for_server)
             return {
                 "error": "Registration aborted - inspection failed.",
                 "hint": _stdio_hint if transport == "stdio" else "Fix the server and try again.",
@@ -352,7 +400,11 @@ async def register_server(
 
     transport: "stdio" (local process, supply command+args) | "sse" (legacy remote, supply url) | "streamable_http" (modern hosted, supply url)
     auto_inspect: connect immediately and discover tools (default true). Set false only if the server is not yet running.
-    headers: auth headers for remote servers, e.g. {"Authorization": "Bearer TOKEN"}
+    headers: auth headers for remote servers, e.g. {"Authorization": "Bearer TOKEN"}.
+        Secret values (Bearer tokens, API keys) are automatically detected and replaced with
+        opaque cref_ identifiers before anything is stored. The response includes a
+        credential_refs map showing which keys were substituted. Real credentials never
+        appear in model context or conversation history.
     github_url: optional repo URL; enables source code analysis in subsequent security scans.
 
     NEXT STEPS after success:
@@ -589,7 +641,7 @@ async def preflight_tool_call(
             async with _preflight_scan_locks[server_id]:
                 if not db.get_latest_security_scan(server_id):
                     try:
-                        server = db.get_server(server_id)
+                        server = cm.resolve_server_crefs(db.get_server(server_id))
                         tools  = db.list_tools(server_id)
                         if effective_scan_provider == "cisco":
                             findings = await asyncio.wait_for(
@@ -1145,7 +1197,7 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
         server_id = github_url
         tools = []
     else:
-        server = db.get_server(server_id)
+        server = cm.resolve_server_crefs(db.get_server(server_id))
         if not server:
             return json.dumps({"error": f"Server '{server_id}' not registered."})
 
@@ -1689,6 +1741,9 @@ async def onboard_server(
     confirm_scan_authorized: True by default (calling onboard_server is itself authorization).
     Set False only to skip active security probing.
     github_url: enables source code analysis in the scan pipeline; required when local inspection fails.
+    headers/env: secret values (Bearer tokens, API keys) are automatically detected and replaced
+    with opaque cref_ identifiers before storage. The response register.credential_refs shows which
+    keys were substituted. Real credentials never appear in model context or conversation history.
 
     AFTER success: review security_scan in the response for HIGH-risk tools.
     AFTER: set_tool_policy('block') for HIGH-risk tools, then use safe_tool_call.
@@ -2011,7 +2066,7 @@ async def onboard_discovered_servers(
             results.append({"discovery_id": did, "server_name": server_name, "status": "failed", "error": reg_result["error"], "hint": reg_result.get("hint")})
         else:
             db.mark_discovered_registered(did, suggested_id)
-            results.append({
+            entry_result: Dict[str, Any] = {
                 "discovery_id": did,
                 "server_name": server_name,
                 "status": "registered",
@@ -2019,7 +2074,11 @@ async def onboard_discovered_servers(
                 "tools_discovered": reg_result.get("tools_discovered", 0),
                 "source": entry.get("client"),
                 "config_path": entry.get("config_path"),
-            })
+            }
+            if reg_result.get("credential_refs"):
+                entry_result["credential_refs"] = reg_result["credential_refs"]
+                entry_result["credential_refs_note"] = reg_result.get("credential_refs_note")
+            results.append(entry_result)
 
     registered_count = sum(1 for r in results if r["status"] == "registered")
     attempted_count = sum(1 for r in results if r["status"] in ("registered", "failed"))

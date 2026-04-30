@@ -46,3 +46,29 @@ mcpsafetywarden call test-server <tool_name>
 # Should return policy_blocked immediately
 mcpsafetywarden policy test-server <tool_name> --set clear
 ```
+
+**Credential protection (cref_ substitution):**
+
+Register a server with a real credential and confirm the original value never appears in the response:
+
+```bash
+mcpsafetywarden register test-server --transport sse --url https://mcp.example.com \
+  --headers '{"Authorization": "Bearer sk-ant-api03-test"}' --json
+# Response should include credential_refs.headers.Authorization = "cref_<16hex>"
+# Original "Bearer sk-ant-..." must NOT appear anywhere in the output
+```
+
+Confirm the credential is stored and resolved at connection time (use `--no-inspect` to skip a live server):
+
+```bash
+mcpsafetywarden register test-server --transport sse --url https://mcp.example.com \
+  --headers '{"Authorization": "Bearer sk-ant-api03-test"}' --no-inspect --json | python -c "
+import json, sys
+r = json.load(sys.stdin)
+crefs = r.get('credential_refs', {}).get('headers', {})
+assert 'Authorization' in crefs, 'No cref created for Authorization header'
+assert crefs['Authorization'].startswith('cref_'), 'Value is not a cref reference'
+assert 'Bearer sk-ant' not in json.dumps(r), 'Real token leaked into response'
+print('PASS: credential substituted correctly')
+"
+```

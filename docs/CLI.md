@@ -77,6 +77,8 @@ mcpsafetywarden onboard my-server --transport stdio --command python --args '["s
 mcpsafetywarden onboard my-server --transport streamable_http --url https://mcp.example.com/mcp \
   --headers '{"Authorization": "Bearer TOKEN"}' \
   --scan-provider anthropic --scan-model claude-opus-4-7 --scan-api-key sk-ant-... --yes
+# Secret values in --headers and --env are automatically stored as encrypted cref_ references.
+# The real token is never written to model context or conversation history.
 mcpsafetywarden onboard my-server --transport stdio --command python --args '["server.py"]' \
   --github-url https://github.com/owner/repo
 ```
@@ -97,6 +99,8 @@ Register only, without scanning.
 mcpsafetywarden register my-server --transport stdio --command python --args '["server.py"]'
 mcpsafetywarden register my-server --transport stdio --command python --no-inspect
 mcpsafetywarden register my-server --transport stdio --command python --args '["server.py"]' --provider anthropic
+# Secret values in --headers and --env are automatically stored as encrypted cref_ references.
+# The real token is never written to model context or conversation history.
 ```
 
 **`inspect <server_id>`**

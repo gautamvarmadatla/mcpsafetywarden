@@ -107,6 +107,10 @@ pip install .
 
 The SQLite database is created automatically on first run in the platform user data directory (`~/.local/share/mcpsafetywarden/` on Linux, `~/Library/Application Support/mcpsafetywarden/` on macOS, `%APPDATA%\mcpsafetywarden\` on Windows). Override with `MCP_DB_PATH`.
 
+**Credential protection (automatic, no action required)**
+
+Secret values passed to `register_server` or `onboard_server` (Bearer tokens, API keys in `headers` or `env`) are automatically detected and replaced with opaque `cref_` identifiers before anything touches the model context. The real credential is stored encrypted in the database and resolved silently at connection time. The model, conversation history, and logs only ever see `cref_<id>`.
+
 **Optional: at-rest encryption for stored credentials**
 
 ```bash
@@ -114,7 +118,7 @@ pip install cryptography
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-Set the printed key as `MCP_DB_ENCRYPTION_KEY` before starting the server.
+Set the printed key as `MCP_DB_ENCRYPTION_KEY` before starting the server. This encrypts both server credentials and `cref_` values at rest.
 
 
 ## Configuration

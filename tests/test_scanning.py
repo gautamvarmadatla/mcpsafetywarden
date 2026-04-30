@@ -23,6 +23,7 @@ class TestScan:
 
     @needs_key
     async def test_scan_with_llm(self, registered_server):
+        import asyncio
         from mcpsafetywarden.server import security_scan_server, get_security_scan
         result = j(await security_scan_server(
             SERVER,
@@ -33,11 +34,21 @@ class TestScan:
         ))
         if "error" in result:
             pytest.skip(f"LLM API error (possibly credits): {result['error']}")
-        assert "overall_risk_level" in result
-        assert result["overall_risk_level"] in ("HIGH", "MEDIUM", "LOW", "NONE")
 
-        stored = j(get_security_scan(SERVER))
+        # Scan runs in the background; poll get_security_scan until complete.
+        if result.get("status") == "running":
+            for _ in range(24):
+                await asyncio.sleep(10)
+                stored = j(get_security_scan(SERVER))
+                if "overall_risk_level" in stored:
+                    break
+            else:
+                pytest.skip("Scan did not complete within 240 s")
+        else:
+            stored = result
+
         assert "overall_risk_level" in stored
+        assert stored["overall_risk_level"] in ("HIGH", "MEDIUM", "LOW", "NONE")
 
     async def test_get_scan_nonexistent_server(self):
         from mcpsafetywarden.server import get_security_scan

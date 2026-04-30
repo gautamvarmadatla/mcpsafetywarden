@@ -41,4 +41,8 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 ```
 
 **Decryption failure logged at ERROR level.**
-The encryption key changed after data was written (key rotation). The affected server's env and headers will read as empty until the server is re-registered with the new key.
+The encryption key changed after data was written (key rotation). Two things happen:
+- The affected server's `env` and `headers` fields in the `servers` table will decrypt to empty dicts.
+- Any `cref_` credential references stored before the key change cannot be decrypted. `_resolve_crefs` logs a warning ("cref_ ref could not be resolved") and falls back to passing the literal `cref_` identifier as the credential, causing auth failures on the next connection attempt.
+
+Re-register all affected servers with the new key in place. The old `cref_` records in the database can be removed manually: `DELETE FROM credential_refs WHERE created_at < '<rotation_timestamp>'`.

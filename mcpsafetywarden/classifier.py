@@ -464,11 +464,11 @@ CONFIDENCE CALIBRATION
 =======================
 confidence reflects how strongly the metadata supports the classification - not severity.
 
-  0.9–1.0 : classification follows directly from a deterministic pattern above
-  0.7–0.9 : description explicitly states the capability
-  0.5–0.7 : description implies it; moderate inference required
-  0.3–0.5 : weak signals; significant inference
-  0.0–0.3 : almost no evidence; unknown classifications land here
+  0.9-1.0 : classification follows directly from a deterministic pattern above
+  0.7-0.9 : description explicitly states the capability
+  0.5-0.7 : description implies it; moderate inference required
+  0.3-0.5 : weak signals; significant inference
+  0.0-0.3 : almost no evidence; unknown classifications land here
 
 RULES
 =====
