@@ -23,6 +23,7 @@ from .mcpsafety_scanner import run_mcpsafety_scan, run_mcpsafety_scan_multi, run
 from .arg_scanner import SSRF_RE, scan_args_for_threats
 from .aux_integrations import kali_recon, burp_proxy_evidence
 from .security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence, looks_like_secret as _looks_like_secret
+from .graph import store as _graph_store, builder as _graph_builder, explain as _graph_explain
 
 _log = logging.getLogger(__name__)
 
@@ -79,6 +80,67 @@ _MGMT_DICT_MAX_ENTRIES    = 5_000
 _mgmt_call_times: Dict[str, collections.deque] = {}
 _global_call_times: collections.deque = collections.deque(maxlen=_GLOBAL_RATE_LIMIT_MAX)
 _bg_scan_status: Dict[str, str] = {}
+
+
+def _gh_on_registered(server_id: str, transport: str, command: Optional[str], url: Optional[str]) -> None:
+    try:
+        _graph_builder.on_server_registered(server_id, transport, command, url)
+    except Exception as _ge:
+        _log.debug("graph hook on_server_registered failed: %s", _ge)
+
+
+def _gh_on_tools_inspected(server_id: str, tools: List[Dict[str, Any]]) -> None:
+    try:
+        tool_ids = [
+            t.get("tool_id") or f"{server_id}::{t.get('tool_name') or t.get('name', '')}"
+            for t in tools
+        ]
+        profiles = db.get_profiles_batch([tid for tid in tool_ids if tid])
+        enriched = [
+            {**t, **(profiles.get(
+                t.get("tool_id") or f"{server_id}::{t.get('tool_name') or t.get('name', '')}",
+                {},
+            ) or {})}
+            for t in tools
+        ]
+        _graph_builder.on_tools_inspected(server_id, enriched)
+    except Exception as _ge:
+        _log.debug("graph hook on_tools_inspected failed: %s", _ge)
+
+
+def _gh_on_credentials_detected(server_id: str, cref_map: Dict[str, Any]) -> None:
+    env_keys = list((cref_map.get("env") or {}).keys())
+    header_keys = list((cref_map.get("headers") or {}).keys())
+    if not env_keys and not header_keys:
+        return
+    try:
+        _graph_builder.on_credentials_detected(server_id, env_keys, header_keys)
+    except Exception as _ge:
+        _log.debug("graph hook on_credentials_detected failed: %s", _ge)
+
+
+def _gh_cleanup_server(server_id: str) -> None:
+    try:
+        _graph_builder.cleanup_server_graph(server_id)
+    except Exception as _ge:
+        _log.debug("graph hook cleanup_server failed for %s: %s", server_id, _ge)
+
+
+def _gh_on_scan_stored(server_id: str, findings: Dict[str, Any]) -> None:
+    try:
+        _graph_builder.on_scan_stored(server_id, findings)
+    except Exception as _ge:
+        _log.debug("graph hook on_scan_stored failed: %s", _ge)
+
+
+def _gh_on_server_discovered(
+    discovery_id: str, client: str, client_name: str, server_name: str,
+    registered_server_id: Optional[str] = None,
+) -> None:
+    try:
+        _graph_builder.on_server_discovered(discovery_id, client, client_name, server_name, registered_server_id)
+    except Exception as _ge:
+        _log.debug("graph hook on_server_discovered failed: %s", _ge)
 
 
 def _check_mgmt_rate_limit(key: str) -> Optional[str]:
@@ -183,11 +245,39 @@ def _preflight_assessment(profile: Dict, tool_name: str, server_id: str) -> dict
             "exploitation_scenario": sec_finding.get("exploitation_scenario"),
             "remediation": sec_finding.get("remediation"),
         }
-        sec_risk = sec_finding.get("risk_level")
-        if sec_risk == "HIGH":
+        sec_risk_upper = (sec_finding.get("risk_level") or "").upper()
+        if sec_risk_upper in ("HIGH", "CRITICAL"):
             risk = "high"
-        elif sec_risk == "MEDIUM" and risk not in ("high",):
+        elif sec_risk_upper == "MEDIUM" and risk not in ("high",):
             risk = "medium"
+
+    graph_context = None
+    graph_note = None
+    try:
+        gc = _graph_explain.explain_tool_risk(server_id, tool_name)
+        if "error" not in gc:
+            blast = gc.get("blast_radius", "none")
+            if blast in ("critical", "high") and risk not in ("high",):
+                risk = "high"
+            elif blast == "medium" and risk not in ("high", "medium"):
+                risk = "medium"
+            graph_context = {
+                "blast_radius": blast,
+                "composite_risk_score": gc.get("composite_risk_score"),
+                "confidence": gc.get("confidence"),
+                "risk_paths": gc.get("risk_paths", []),
+                "composition_risks": [
+                    c for c in gc.get("composition_risks", []) if not c.get("mitigated")
+                ],
+                "agent_clients": gc.get("agent_clients", []),
+                "interaction_risks": gc.get("interaction_risks", []),
+                "recommended_action": gc.get("recommended_action"),
+            }
+        if graph_context is None:
+            graph_note = "Graph not yet populated - call get_risk_graph(rebuild=True) for full risk context."
+    except Exception as _ge:
+        _log.debug("graph context for preflight failed: %s", _ge)
+        graph_note = "Graph context unavailable."
 
     return {
         "server_id": server_id,
@@ -203,6 +293,8 @@ def _preflight_assessment(profile: Dict, tool_name: str, server_id: str) -> dict
             "output_size_risk": profile.get("output_risk", "unknown"),
         },
         "security": sec_block,
+        "graph_context": graph_context,
+        "graph_note": graph_note,
         "observed_stats": {
             "run_count": runs,
             "failure_rate": profile.get("failure_rate"),
@@ -323,6 +415,8 @@ async def _do_register(
             safe_headers[k] = v
 
     db.upsert_server(server_id, transport, command, args or [], url, safe_env, safe_headers, github_url)
+    _gh_on_registered(server_id, transport, command, url)
+    _gh_on_credentials_detected(server_id, cref_map)
 
     # Delete previous crefs that are no longer referenced. Skip any that were
     # passed back in unchanged (user re-registered with an existing cref_ ref).
@@ -350,6 +444,7 @@ async def _do_register(
                 llm_model=classify_model,
                 llm_api_key=classify_api_key,
             )
+            _gh_on_tools_inspected(server_id, tools)
             result["tools_discovered"] = len(tools)
             result["tools"] = [
                 {"name": t["name"], "effect_class": t["effect_class"], "confidence": t["confidence"]}
@@ -357,6 +452,7 @@ async def _do_register(
             ]
         except (ValueError, RuntimeError) as exc:
             db.delete_server(server_id)
+            _gh_cleanup_server(server_id)
             # Clean up every cref the failed registration was going to reference,
             # including preserved old crefs (still_in_use) not just newly-created ones.
             _crefs_for_server = [v for v in still_in_use if isinstance(v, str) and v.startswith("cref_")]
@@ -368,6 +464,7 @@ async def _do_register(
         except Exception as exc:
             _log.error("_do_register auto-inspect failed for %s: %s", server_id, exc, exc_info=True)
             db.delete_server(server_id)
+            _gh_cleanup_server(server_id)
             _crefs_for_server = [v for v in still_in_use if isinstance(v, str) and v.startswith("cref_")]
             db.delete_credential_refs(_crefs_for_server)
             return {
@@ -463,6 +560,7 @@ async def inspect_server(
             llm_model=classify_model,
             llm_api_key=classify_api_key,
         )
+        _gh_on_tools_inspected(server_id, tools)
         result: Dict[str, Any] = {
             "server_id": server_id,
             "tools_discovered": len(tools),
@@ -668,6 +766,7 @@ async def preflight_tool_call(
                                 timeout=_PREFLIGHT_SCAN_TIMEOUT_S,
                             )
                         db.store_security_scan(server_id, findings)
+                        _gh_on_scan_stored(server_id, findings)
                     except Exception as exc:
                         _log.warning("preflight auto-scan skipped for '%s': %s", server_id, exc)
 
@@ -992,6 +1091,9 @@ async def run_replay_test(
     tool_name: str,
     args: Optional[dict] = None,
     approved: bool = False,
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    llm_api_key: Optional[str] = None,
 ) -> str:
     """
     Test idempotency by calling a tool TWICE with identical args and comparing outputs.
@@ -1015,11 +1117,13 @@ async def run_replay_test(
 
     profile = db.get_profile(tool["tool_id"])
     if profile is None:
+        _classify_provider = llm_provider or _detect_llm_provider()
         loop = asyncio.get_running_loop()
         profile = await loop.run_in_executor(
             None,
             lambda: classify_tool(
                 tool_name, tool.get("description", ""), tool.get("schema", {}), tool.get("annotations", {}),
+                llm_provider=_classify_provider, llm_model=llm_model, llm_api_key=llm_api_key,
             ),
         )
         profile.pop("_security_finding", None)
@@ -1105,6 +1209,7 @@ async def _execute_scan_core(
         findings = _merge_findings(server_id, list(results))
 
     scan_id = db.store_security_scan(server_id, findings)
+    _gh_on_scan_stored(server_id, findings)
     findings["scan_id"] = scan_id
     if "providers" not in findings:
         findings["providers"] = [findings.pop("provider", providers_to_run[0])]
@@ -1165,12 +1270,13 @@ provider options:
                           api_key = Snyk token (falls back to SNYK_TOKEN env var).
 
 mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", auto):
-        confirm_authorized:       MUST be True - confirms you own and are authorized to test this server
+        confirm_authorized:       Required for LLM-based and active-probe scans (default False). Rule-based
+                                  deterministic scan runs without it when no LLM provider is available.
         allow_destructive_probes: enable path traversal / command injection probes (default False)
         skip_web_research:        skip CVE/Arxiv research to avoid leaking findings (default True)
-        scan_timeout_s:           hard timeout per scan in seconds (default 300, max 3600)
-        background:               True = return immediately, poll get_security_scan for results.
-                                  False = block until complete (default, safe for CLI/Python).
+        scan_timeout_s:           hard timeout per scan in seconds (default 900, max 3600)
+        background:               True = return immediately, poll get_security_scan for results (default).
+                                  False = block until complete (safe for CLI/Python direct calls).
 
     github_url: required when server_id is omitted. Also used to override the stored GitHub URL
         for an existing registered server. The mcpsafety+ pipeline fetches and analyzes source
@@ -1223,6 +1329,7 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
         if not providers_to_run:
             findings = run_deterministic_scan(server_id=server_id, tools=tools)
             scan_id = db.store_security_scan(server_id, findings)
+            _gh_on_scan_stored(server_id, findings)
             findings["scan_id"] = scan_id
             return json.dumps(findings, indent=2)
     else:
@@ -1352,7 +1459,7 @@ async def scan_all_servers(
     confirm_authorized: MUST be True - confirms you own and are authorized to test all listed servers
     allow_destructive_probes: enable path traversal, command injection, credential file probes
     skip_web_research: skip DuckDuckGo/HackerNews/Arxiv research (prevents leaking findings externally)
-    scan_timeout_s: timeout per server in seconds (default 300, max 3600)
+    scan_timeout_s: timeout per server in seconds (default 900, max 3600)
     """
     if provider in _LLM_SHORTHANDS:
         provider = f"mcpsafety+{provider}"
@@ -1421,6 +1528,7 @@ async def scan_all_servers(
     for sid, result in combined.get("server_results", {}).items():
         try:
             db.store_security_scan(sid, result)
+            _gh_on_scan_stored(sid, result)
         except Exception as db_exc:
             _log.warning("scan_all_servers: failed to store scan for '%s': %s", sid, db_exc)
 
@@ -1634,9 +1742,44 @@ async def safe_tool_call(
     assessment = _preflight_assessment(profile, tool_name, server_id)
     risk_level = assessment["assessment"]["risk_level"]
 
+    _graph_policy = _os.environ.get("MCP_GRAPH_POLICY", "warn").lower()
+    _graph_ctx = assessment.get("graph_context") or {}
+    _blast = _graph_ctx.get("blast_radius", "none")
+    _graph_extra: Dict[str, Any] = (
+        {
+            "graph_context": {
+                "blast_radius": _blast,
+                "composite_risk_score": _graph_ctx.get("composite_risk_score"),
+                "risk_paths": (_graph_ctx.get("risk_paths") or [])[:3],
+                "recommended_action": _graph_ctx.get("recommended_action"),
+            }
+        }
+        if _graph_policy != "off" and _blast not in ("none", "")
+        else {}
+    )
+
+    if _graph_policy == "block" and _blast in ("critical", "high") and not approved:
+        return json.dumps(
+            {
+                "blocked": True,
+                "reason": "graph_policy_block",
+                "tool": tool_name,
+                "blast_radius": _blast,
+                "composite_risk_score": _graph_ctx.get("composite_risk_score"),
+                "risk_paths": (_graph_ctx.get("risk_paths") or [])[:5],
+                "interaction_risks": _graph_ctx.get("interaction_risks", []),
+                "message": (
+                    f"'{tool_name}' blocked by graph policy (MCP_GRAPH_POLICY=block): "
+                    f"blast_radius={_blast}. Pass approved=True to override."
+                ),
+            },
+            indent=2,
+        )
+
     if not assessment["assessment"]["approval_recommended"]:
         return await _call_and_format(
             server_id, tool_name, args or {},
+            _graph_extra or None,
             args_scan_override=args_scan_override,
             llm_provider=llm_provider or _detect_llm_provider(),
             llm_model=llm_model, llm_api_key=llm_api_key,
@@ -1646,7 +1789,7 @@ async def safe_tool_call(
     if approved:
         return await _call_and_format(
             server_id, tool_name, args or {},
-            {"executed_with": "explicit_approval", "risk_level": risk_level},
+            {"executed_with": "explicit_approval", "risk_level": risk_level, **_graph_extra},
             args_scan_override=args_scan_override,
             llm_provider=llm_provider or _detect_llm_provider(),
             llm_model=llm_model, llm_api_key=llm_api_key,
@@ -1702,6 +1845,7 @@ async def safe_tool_call(
         "how": "Re-call safe_tool_call with show_more_options=True",
     })
 
+    _graph_note = assessment.get("graph_note")
     return json.dumps({
         "blocked": True,
         "reason": "approval_required",
@@ -1709,6 +1853,8 @@ async def safe_tool_call(
         "risk_level": risk_level,
         "preflight": assessment,
         "alternatives": choices,
+        **(_graph_extra if _graph_extra else {}),
+        **({"graph_note": _graph_note} if _graph_note else {}),
     }, indent=2)
 
 
@@ -1958,6 +2104,9 @@ async def discover_servers(
     for entry in found:
         try:
             db.upsert_discovered_server(entry)
+            _gh_on_server_discovered(
+                entry["discovery_id"], entry["client"], entry["client_name"], entry["server_name"],
+            )
         except Exception as exc:
             _log.warning("discover_servers: failed to cache entry %s: %s", entry.get("discovery_id"), exc)
 
@@ -2066,6 +2215,7 @@ async def onboard_discovered_servers(
             results.append({"discovery_id": did, "server_name": server_name, "status": "failed", "error": reg_result["error"], "hint": reg_result.get("hint")})
         else:
             db.mark_discovered_registered(did, suggested_id)
+            _gh_on_server_discovered(did, entry["client"], entry["client_name"], server_name, suggested_id)
             entry_result: Dict[str, Any] = {
                 "discovery_id": did,
                 "server_name": server_name,
@@ -2088,6 +2238,106 @@ async def onboard_discovered_servers(
         "registered": registered_count,
         "results": results,
     }, indent=2)
+
+
+@mcp.tool()
+def get_risk_graph(server_id: Optional[str] = None, rebuild: bool = False) -> str:
+    """
+    Return the inventory graph of MCP servers, tools, security findings, and their relationships.
+
+    The graph exposes connections that preflight_tool_call and safe_tool_call use for
+    blast-radius context. On first call the graph may be empty - pass rebuild=True to
+    populate it from all data Safety Warden has already stored.
+
+    server_id: scope the graph to one server; omit for the full workspace graph.
+    rebuild:   True = rebuild from existing Safety Warden tables before returning.
+
+    Returns objects (nodes) and relations (edges). Node types: mcp_server, tool, finding,
+    agent_client, mcp_config, credential_surface. Relation types: exposes, affected_by,
+    can_exfiltrate, declares, uses_credential.
+
+    NEXT: explain_tool_risk(server_id, tool_name) to walk risk paths for a specific tool.
+    NEXT: export_graph(format="mermaid") for a diagram.
+    """
+    try:
+        if rebuild:
+            counts = _graph_builder.rebuild_from_db()
+            graph = _graph_store.get_full_graph(server_id)
+            return json.dumps({"rebuilt": counts, "graph": graph}, indent=2)
+
+        graph = _graph_store.get_full_graph(server_id)
+        if not graph["objects"]:
+            if server_id and _graph_store.get_full_graph()["objects"]:
+                return json.dumps({
+                    "note": f"No graph nodes found for server '{server_id}'. Run inspect_server to populate.",
+                    "graph": graph,
+                }, indent=2)
+            counts = _graph_builder.rebuild_from_db()
+            graph = _graph_store.get_full_graph(server_id)
+            return json.dumps({
+                "note": "Graph was empty - rebuilt from existing Safety Warden data",
+                "rebuilt": counts,
+                "graph": graph,
+            }, indent=2)
+
+        return json.dumps(graph, indent=2)
+    except Exception as exc:
+        return json.dumps({"error": str(exc)}, indent=2)
+
+
+@mcp.tool()
+def explain_tool_risk(server_id: str, tool_name: str) -> str:
+    """
+    Walk the risk graph for a specific tool and return blast radius, risk paths, and recommended action.
+
+    Returns:
+      blast_radius: critical | high | medium | low | none
+      direct_findings: security scan findings that affect this tool
+      composition_risks: dangerous tool combinations (e.g. read + external_post = exfiltration)
+      risk_paths: human-readable paths from findings to the tool
+      agent_clients: which AI clients have this server configured
+      recommended_action: allow | warn | require_approval | block
+
+    BEFORE: get_risk_graph (to ensure graph is populated).
+    AFTER: set_tool_policy('block') if recommended_action is 'block'.
+    """
+    try:
+        result = _graph_explain.explain_tool_risk(server_id, tool_name)
+        if "error" in result:
+            _graph_builder.rebuild_from_db()
+            result = _graph_explain.explain_tool_risk(server_id, tool_name)
+            if "error" in result:
+                result["hint"] = (
+                    f"Tool '{tool_name}' may not have been inspected yet. "
+                    "Run inspect_server to populate tool data, then retry."
+                )
+            else:
+                result["note"] = "Graph rebuilt from existing data before analysis"
+        return json.dumps(result, indent=2)
+    except Exception as exc:
+        return json.dumps({"error": str(exc)}, indent=2)
+
+
+@mcp.tool()
+def export_graph(format: str = "json", server_id: Optional[str] = None) -> str:
+    """
+    Export the risk graph in the requested format.
+
+    format: "json" (default) - structured objects and relations list.
+            "mermaid" - Mermaid LR diagram with color-coded node types for pasting into docs.
+
+    server_id: scope export to one server; omit for full workspace graph.
+
+    BEFORE: get_risk_graph (graph must be populated).
+    """
+    try:
+        if format == "mermaid":
+            diagram = _graph_explain.export_as_mermaid(server_id)
+            return json.dumps({"format": "mermaid", "diagram": diagram}, indent=2)
+        graph = _graph_store.get_full_graph(server_id)
+        return json.dumps({"format": "json", **graph}, indent=2)
+    except Exception as exc:
+        return json.dumps({"error": str(exc)}, indent=2)
 
 
 def main():

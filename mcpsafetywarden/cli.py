@@ -20,6 +20,9 @@ from . import database as _db
 from .server import (
     check_server_drift as _check_server_drift,
     discover_servers as _discover_servers,
+    explain_tool_risk as _explain_tool_risk,
+    export_graph as _export_graph,
+    get_risk_graph as _get_risk_graph,
     get_run_history as _get_run_history,
     get_retry_policy as _get_retry_policy,
     get_security_scan as _get_security_scan,
@@ -1070,6 +1073,145 @@ def cmd_onboard_discovered(
             console.print(f"  [red]✗[/red] {name} failed: {r.get('error', '')}{hint}")
         elif status == "rate_limited":
             console.print(f"  [yellow]⚠[/yellow] {name} rate limited: {r.get('reason', '')}")
+
+
+@app.command("graph")
+def cmd_graph(
+    server_id: Optional[str] = typer.Argument(None, help="Scope to one server; omit for the full workspace graph"),
+    rebuild: bool = typer.Option(False, "--rebuild", "-r", help="Rebuild graph from all stored Safety Warden data before returning"),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Show the inventory risk graph: node counts by type, relation count, and build status."""
+    result = _load(_get_risk_graph(server_id=server_id, rebuild=rebuild))
+    _die(result)
+    if json_output:
+        console.print_json(json.dumps(result))
+        return
+
+    if result.get("rebuilt"):
+        c = result["rebuilt"]
+        console.print(
+            f"[green]Rebuilt:[/green] {c.get('servers', 0)} server(s), "
+            f"{c.get('tools', 0)} tool(s), {c.get('findings', 0)} finding(s), "
+            f"{c.get('discovered', 0)} discovered"
+        )
+    if result.get("note"):
+        console.print(f"[yellow]Note:[/yellow] {result['note']}")
+
+    graph = result.get("graph", result)
+    objects = graph.get("objects", [])
+    relations = graph.get("relations", [])
+
+    by_type: dict = {}
+    for obj in objects:
+        otype = obj.get("obj_type", "unknown")
+        by_type[otype] = by_type.get(otype, 0) + 1
+
+    tbl = Table(title="Graph Nodes", box=box.SIMPLE_HEAD)
+    tbl.add_column("Type", style="cyan")
+    tbl.add_column("Count", justify="right")
+    for otype in sorted(by_type):
+        tbl.add_row(otype, str(by_type[otype]))
+    tbl.add_row("[bold]Total[/bold]", f"[bold]{len(objects)}[/bold]")
+    console.print(tbl)
+    console.print(f"Relations: {len(relations)}")
+    if objects:
+        console.print("[dim]Run [bold]explain-risk <server_id> <tool_name>[/bold] for a full tool risk breakdown.[/dim]")
+
+
+@app.command("explain-risk")
+def cmd_explain_risk(
+    server_id: str = typer.Argument(...),
+    tool_name: str = typer.Argument(...),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Walk the risk graph for a tool: blast radius, composition risks, MITRE tags, recommended action."""
+    result = _load(_explain_tool_risk(server_id=server_id, tool_name=tool_name))
+    _die(result)
+    if json_output:
+        console.print_json(json.dumps(result))
+        return
+
+    blast = (result.get("blast_radius") or "none").lower()
+    score = result.get("composite_risk_score", 0.0)
+    action = result.get("recommended_action", "allow")
+    conf = result.get("confidence", 0.0)
+
+    blast_colors = {"critical": "bold red", "high": "red", "medium": "yellow", "low": "green", "none": "dim"}
+    action_colors = {"block": "bold red", "require_approval": "red", "warn": "yellow", "allow": "green"}
+    bc = blast_colors.get(blast, "white")
+    ac = action_colors.get(action, "white")
+
+    lines = [
+        f"Blast radius:       [{bc}]{blast.upper()}[/{bc}]",
+        f"Composite score:    {score}/10.0  (confidence: {conf:.0%})",
+        f"Recommended action: [{ac}]{action}[/{ac}]",
+        f"Effect class:       {result.get('effect_class', 'unknown')}",
+    ]
+    if result.get("has_credential_surface"):
+        lines.append("[red]! Credential surface exposed[/red]")
+    if result.get("agent_clients"):
+        lines.append(f"Agent clients:      {', '.join(result['agent_clients'])}")
+    console.print(Panel("\n".join(lines), title=f"Risk - {tool_name} @ {server_id}"))
+
+    findings = result.get("direct_findings", [])
+    if findings:
+        t = Table(title="Direct Findings", box=box.SIMPLE_HEAD)
+        t.add_column("Severity")
+        t.add_column("Tags")
+        t.add_column("MITRE")
+        for f in findings:
+            t.add_row(
+                _risk_badge((f.get("risk_level") or "").lower()),
+                ", ".join(f.get("risk_tags", [])),
+                ", ".join(f.get("mitre_techniques", [])),
+            )
+        console.print(t)
+
+    live = result.get("live_composition_risks_count", 0)
+    mitigated = result.get("mitigated_composition_risks_count", 0)
+    if live or mitigated:
+        console.print(
+            f"Composition risks: [red]{live} live[/red]"
+            + (f", [dim]{mitigated} mitigated[/dim]" if mitigated else "")
+        )
+
+    paths = result.get("risk_paths", [])
+    if paths:
+        console.print("[bold]Risk paths:[/bold]")
+        for p in paths[:5]:
+            console.print(f"  {p}")
+        if len(paths) > 5:
+            console.print(f"  [dim]... {len(paths) - 5} more (use --json for full list)[/dim]")
+
+    irs = [ir for ir in result.get("interaction_risks", []) if not ir.get("mitigated")]
+    if irs:
+        console.print("[bold]Interaction risks:[/bold]")
+        for ir in irs:
+            console.print(f"  [{ir.get('risk_score', 0.0):.1f}] {ir.get('pattern')}: {(ir.get('description') or '')[:100]}")
+
+    if result.get("note"):
+        console.print(f"[dim]{result['note']}[/dim]")
+
+
+@app.command("export-graph")
+def cmd_export_graph(
+    server_id: Optional[str] = typer.Argument(None, help="Scope to one server; omit for the full workspace graph"),
+    fmt: str = typer.Option("mermaid", "--format", "-f", help="Output format: json | mermaid (default: mermaid)"),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Export the risk graph as a Mermaid diagram or structured JSON."""
+    result = _load(_export_graph(format=fmt, server_id=server_id))
+    _die(result)
+    if json_output:
+        console.print_json(json.dumps(result))
+        return
+    if fmt == "mermaid":
+        diagram = result.get("diagram", "")
+        console.print(Panel(diagram, title="Risk Graph (Mermaid)", expand=False))
+        console.print("[dim]Paste the diagram content into https://mermaid.live to render it.[/dim]")
+    else:
+        console.print_json(json.dumps(result))
 
 
 if __name__ == "__main__":

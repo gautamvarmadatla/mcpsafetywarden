@@ -51,7 +51,7 @@ Use as a proxy to add safety gating to any MCP server, or point it at a server y
   <em>Fig 3. Safe execution pipeline: the five checks every proxied tool call passes through</em>
 </p>
 
-**CLI**: 17 subcommands, interactive risk menu, `--json` flag on every command, `--yes` for CI.
+**CLI**: 19 subcommands, interactive risk menu, `--json` flag on every command, `--yes` for CI.
 
 **What it detects**
 
@@ -141,6 +141,7 @@ All configuration is via environment variables.
 | `MCP_SCANNER_API_KEY` | (unset) | Cisco AI Defense cloud ML engine key |
 | `MCP_SCANNER_LLM_API_KEY` | (unset) | LLM key for Cisco internal AST analysis |
 | `MCP_DB_PATH` | (unset) | Override the SQLite database file path |
+| `MCP_GRAPH_POLICY` | `warn` | Graph enforcement in `safe_tool_call`: `off` (disabled), `warn` (attach risk context to response), `block` (hard-block critical/high blast-radius tools unless `approved=True`) |
 | `GITHUB_TOKEN` | (unset) | GitHub personal access token for source-code scanning (raises rate limit from 60 to 5,000 req/hour) |
 
 **Security note:** Never commit API keys or the encryption key. The wrapper strips its own secrets from child process environments before spawning stdio servers.
@@ -205,11 +206,16 @@ See [docs/TOOLS.md](docs/TOOLS.md) for the full tool reference.
 | `set_tool_policy` | Permanent allow/block policy for a tool |
 | `get_run_history` | Recent execution history for a tool |
 | `ping_server` | Reachability check with latency |
+| `discover_servers` | Scan filesystem for MCP client configs and extract server entries |
+| `onboard_discovered_servers` | Register discovered servers in bulk |
+| `get_risk_graph` | Build or query the inventory risk graph (servers, tools, findings, agent clients) |
+| `explain_tool_risk` | Walk risk paths for a tool: blast radius, composition risks, MITRE tags, recommended action |
+| `export_graph` | Export risk graph as JSON or Mermaid diagram |
 
 
 ## CLI Reference
 
-17 subcommands covering all 18 MCP tools. Every command supports `--json` for machine-readable output and `--yes` / `-y` to skip confirmation prompts.
+19 subcommands covering all 23 MCP tools. Every command supports `--json` for machine-readable output and `--yes` / `-y` to skip confirmation prompts.
 
 See [docs/CLI.md](docs/CLI.md) for the full reference with flags and examples.
 
@@ -251,7 +257,7 @@ Set an LLM API key to include LLM-assisted tests; without one they are skipped a
 
 | Doc | Contents |
 |---|---|
-| [docs/TOOLS.md](docs/TOOLS.md) | Full reference for all 18 MCP tools |
+| [docs/TOOLS.md](docs/TOOLS.md) | Full reference for all 23 MCP tools |
 | [docs/CLI.md](docs/CLI.md) | CLI subcommands, flags, and examples |
 | [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Kali, Burp Suite, and Snyk setup |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | stdio, HTTP, container, and gateway deployment |

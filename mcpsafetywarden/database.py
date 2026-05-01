@@ -48,6 +48,9 @@ def _decrypt_field(ciphertext: str) -> str:
         return "{}"
 
 
+decrypt_field = _decrypt_field
+
+
 def _jloads(s: str, default: Any) -> Any:
     try:
         return json.loads(s)
@@ -223,6 +226,28 @@ def init_db() -> None:
                 created_at   TEXT NOT NULL,
                 last_used_at TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS inventory_objects (
+                obj_id    TEXT PRIMARY KEY,
+                obj_type  TEXT NOT NULL,
+                name      TEXT NOT NULL,
+                source    TEXT NOT NULL,
+                metadata  TEXT DEFAULT '{}'
+            );
+
+            CREATE TABLE IF NOT EXISTS inventory_relations (
+                rel_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id  TEXT NOT NULL,
+                target_id  TEXT NOT NULL,
+                relation   TEXT NOT NULL,
+                metadata   TEXT DEFAULT '{}',
+                UNIQUE(source_id, target_id, relation)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_inventory_relations_source
+                ON inventory_relations(source_id);
+            CREATE INDEX IF NOT EXISTS idx_inventory_relations_target
+                ON inventory_relations(target_id);
         """)
         conn.commit()
         try:

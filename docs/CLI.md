@@ -76,7 +76,7 @@ Register + inspect + security scan in one call. Prompts for authorization before
 mcpsafetywarden onboard my-server --transport stdio --command python --args '["server.py"]'
 mcpsafetywarden onboard my-server --transport streamable_http --url https://mcp.example.com/mcp \
   --headers '{"Authorization": "Bearer TOKEN"}' \
-  --scan-provider anthropic --scan-model claude-opus-4-7 --scan-api-key sk-ant-... --yes
+  --scan-provider anthropic --scan-model claude-opus-4-5 --scan-api-key sk-ant-... --yes
 # Secret values in --headers and --env are automatically stored as encrypted cref_ references.
 # The real token is never written to model context or conversation history.
 mcpsafetywarden onboard my-server --transport stdio --command python --args '["server.py"]' \
@@ -108,7 +108,7 @@ Reconnect to a registered server, refresh tools, re-classify.
 
 ```bash
 mcpsafetywarden inspect my-server --provider anthropic
-mcpsafetywarden inspect my-server --provider anthropic --model claude-opus-4-7 --api-key sk-ant-...
+mcpsafetywarden inspect my-server --provider anthropic --model claude-opus-4-5 --api-key sk-ant-...
 ```
 
 **`scan <server_id>`**
@@ -141,7 +141,7 @@ Run the full 5-stage mcpsafety+ pipeline against every registered server (or a c
 
 ```bash
 mcpsafetywarden scan-all --provider anthropic
-mcpsafetywarden scan-all --provider anthropic --model claude-opus-4-7 --api-key sk-ant-...
+mcpsafetywarden scan-all --provider anthropic --model claude-opus-4-5 --api-key sk-ant-...
 mcpsafetywarden scan-all --provider ollama --servers my-server,other-server --yes
 mcpsafetywarden scan-all --provider openai --web-research --timeout 600 --json
 ```
@@ -159,16 +159,18 @@ mcpsafetywarden call my-server run_query --args '{"sql": "SELECT id FROM users"}
 
 | Flag | Effect |
 |---|---|
-| `--approved` | Bypass the risk gate for a high-risk tool you have reviewed |
+| `--approved` | Bypass the risk gate for a high-risk tool you have reviewed; also overrides `MCP_GRAPH_POLICY=block` |
 | `--args-scan-override` | Skip argument safety scanning (use only when you trust the args) |
 | `--provider` | LLM provider for alternatives and arg verification (`anthropic`\|`openai`\|`gemini`\|`ollama`) |
+
+When `MCP_GRAPH_POLICY=block` is set, tools with blast radius `critical` or `high` are blocked with `reason: graph_policy_block` even if risk-gate risk is low. Pass `--approved` to override. The default is `warn`, which attaches graph context to the response without blocking.
 
 **`preflight <server_id> <tool_name>`**
 Assess risk without executing.
 
 ```bash
 mcpsafetywarden preflight my-server delete_file
-mcpsafetywarden preflight my-server delete_file --provider anthropic --model claude-opus-4-7 --api-key sk-ant-...
+mcpsafetywarden preflight my-server delete_file --provider anthropic --model claude-opus-4-5 --api-key sk-ant-...
 ```
 
 **`profile <server_id> <tool_name>`**
@@ -183,7 +185,7 @@ Print retry and timeout recommendations.
 
 ```bash
 mcpsafetywarden retry-policy my-server call_api
-mcpsafetywarden retry-policy my-server call_api --provider anthropic --model claude-opus-4-7 --api-key sk-ant-...
+mcpsafetywarden retry-policy my-server call_api --provider anthropic --model claude-opus-4-5 --api-key sk-ant-...
 ```
 
 **`alternatives <server_id> <tool_name>`**
@@ -231,6 +233,52 @@ Print the latest stored security scan report.
 
 ```bash
 mcpsafetywarden get-scan my-server --json
+```
+
+**`graph [server_id] [--rebuild]`**
+Show the inventory risk graph: node counts by type and relation count. Pass `server_id` to scope to one server. Use `--rebuild` to repopulate from all stored data (auto-triggers on first call when the graph is empty).
+
+```bash
+mcpsafetywarden graph                         # full workspace graph
+mcpsafetywarden graph my-server               # scoped to one server
+mcpsafetywarden graph --rebuild               # force rebuild then show
+mcpsafetywarden graph my-server --json        # raw JSON output
+```
+
+**`explain-risk <server_id> <tool_name>`**
+Walk the risk graph for a specific tool and show blast radius, composite risk score, security findings, composition risks (read + external = exfiltration), MITRE technique tags, and interaction risks across agent clients.
+
+```bash
+mcpsafetywarden explain-risk my-server delete_file
+mcpsafetywarden explain-risk my-server upload_data --json
+```
+
+**`export-graph [server_id] [--format FORMAT]`**
+Export the risk graph as a Mermaid diagram (default) or structured JSON. The Mermaid output can be pasted into any Mermaid renderer (e.g. mermaid.live) for a color-coded visual.
+
+```bash
+mcpsafetywarden export-graph                          # Mermaid diagram, full workspace
+mcpsafetywarden export-graph my-server                # scoped to one server
+mcpsafetywarden export-graph --format json            # structured objects + relations
+mcpsafetywarden export-graph my-server --format json --json  # raw JSON response
+```
+
+**`discover [--client CLIENT] [--no-project] [--no-community]`**
+Scan the local filesystem for MCP client config files (Claude Desktop, VS Code, Cursor, Windsurf, etc.) and list all discovered server entries with their registration status.
+
+```bash
+mcpsafetywarden discover
+mcpsafetywarden discover --client cursor
+mcpsafetywarden discover --no-project --json
+```
+
+**`onboard-discovered [--ids ID1,ID2,...] [--client CLIENT] [--all] [--provider PROVIDER] [--model MODEL] [--no-inspect] [--github-url URL] [--yes]`**
+Register discovered servers into the Safety Warden pipeline. Requires one of `--ids`, `--client`, or `--all`. Each server is registered and inspected. Use `--no-inspect` to skip auto-inspect (e.g. when the server is not yet running locally).
+
+```bash
+mcpsafetywarden onboard-discovered --all --yes
+mcpsafetywarden onboard-discovered --ids disc_abc123,disc_def456 --provider anthropic --yes
+mcpsafetywarden onboard-discovered --client cursor --no-inspect --yes
 ```
 
 **Exit codes:**
