@@ -23,7 +23,7 @@ from .mcpsafety_scanner import run_mcpsafety_scan, run_mcpsafety_scan_multi, run
 from .arg_scanner import SSRF_RE, scan_args_for_threats
 from .aux_integrations import kali_recon, burp_proxy_evidence
 from .security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence, looks_like_secret as _looks_like_secret
-from .graph import store as _graph_store, builder as _graph_builder, explain as _graph_explain
+from .graph import store as _graph_store, builder as _graph_builder, explain as _graph_explain, provenance as _graph_provenance
 
 _log = logging.getLogger(__name__)
 
@@ -131,6 +131,13 @@ def _gh_on_scan_stored(server_id: str, findings: Dict[str, Any]) -> None:
         _graph_builder.on_scan_stored(server_id, findings)
     except Exception as _ge:
         _log.debug("graph hook on_scan_stored failed: %s", _ge)
+
+
+def _gh_on_provenance_detected(server_id: str, prov_info: Dict[str, Any]) -> None:
+    try:
+        _graph_builder.on_provenance_detected(server_id, prov_info)
+    except Exception as _ge:
+        _log.debug("graph hook on_provenance_detected failed: %s", _ge)
 
 
 def _gh_on_server_discovered(
@@ -418,6 +425,16 @@ async def _do_register(
     _gh_on_registered(server_id, transport, command, url)
     _gh_on_credentials_detected(server_id, cref_map)
 
+    try:
+        _prov = await asyncio.get_running_loop().run_in_executor(
+            None, lambda: _graph_provenance.build_provenance_info(
+                server_id, command, args or [], url=url, transport=transport
+            )
+        )
+        _gh_on_provenance_detected(server_id, _prov)
+    except Exception as _pe:
+        _log.debug("provenance detection skipped for %s: %s", server_id, _pe)
+
     # Delete previous crefs that are no longer referenced. Skip any that were
     # passed back in unchanged (user re-registered with an existing cref_ ref).
     still_in_use = set(safe_headers.values()) | set(safe_env.values())
@@ -561,6 +578,20 @@ async def inspect_server(
             llm_api_key=classify_api_key,
         )
         _gh_on_tools_inspected(server_id, tools)
+
+        try:
+            _srv = db.get_server(server_id)
+            if _srv:
+                _prov = await asyncio.get_running_loop().run_in_executor(
+                    None, lambda: _graph_provenance.build_provenance_info(
+                        server_id, _srv.get("command"), _srv.get("args") or [],
+                        url=_srv.get("url"), transport=_srv.get("transport"),
+                    )
+                )
+                _gh_on_provenance_detected(server_id, _prov)
+        except Exception as _pe:
+            _log.debug("provenance refresh skipped for %s: %s", server_id, _pe)
+
         result: Dict[str, Any] = {
             "server_id": server_id,
             "tools_discovered": len(tools),

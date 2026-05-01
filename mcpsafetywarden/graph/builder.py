@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .. import database as _db
 from ..inventory.models import InventoryObject, InventoryRelation
 from . import store
+from . import provenance as _provenance
 from ._constants import READ_EFFECTS as _READ_EFFECTS, EXFILTRATION_EFFECTS as _EXFILTRATION_EFFECTS
 
 _log = logging.getLogger(__name__)
@@ -93,6 +94,128 @@ def on_credentials_detected(
         _log.debug("graph on_credentials_detected failed for %s: %s", server_id, exc)
 
 
+def on_provenance_detected(server_id: str, prov_info: Dict[str, Any]) -> None:
+    try:
+        prov_id = f"provenance::{server_id}"
+        pkg_name = prov_info.get("package_name") or "unresolvable"
+        version = prov_info.get("version")
+        display_name = f"{pkg_name}@{version}" if version else pkg_name
+
+        existing_obj = store.get_object(prov_id)
+        if existing_obj:
+            old_meta = existing_obj.get("metadata", {})
+
+            old_cert = old_meta.get("tls_cert_fingerprint")
+            new_cert = prov_info.get("tls_cert_fingerprint")
+            if old_cert and new_cert and old_cert != new_cert:
+                cert_fid = f"finding::cert_changed::{server_id}"
+                store.upsert_object(InventoryObject(
+                    id=cert_fid,
+                    type="finding",
+                    name="tls_cert_changed",
+                    source="provenance_detection",
+                    metadata={
+                        "risk_level": "HIGH",
+                        "risk_tags": ["tool_poisoning", "supply_chain"],
+                        "old_fingerprint": old_cert[:16],
+                        "new_fingerprint": new_cert[:16],
+                        "remediation": (
+                            "TLS certificate changed since last inspection. "
+                            "Verify the server is still operated by a trusted party."
+                        ),
+                        "exploitation_scenario": (
+                            "Certificate change may indicate MITM, subdomain takeover, "
+                            "or unauthorized operator change."
+                        ),
+                    },
+                ))
+                store.upsert_relation(InventoryRelation(
+                    source_id=server_id,
+                    target_id=cert_fid,
+                    relation="affected_by",
+                    metadata={"risk_level": "HIGH", "auto_detected": True},
+                ))
+                _log.warning("tls_cert_changed for %s: %s -> %s", server_id, old_cert[:12], new_cert[:12])
+
+            old_ips = set(old_meta.get("resolved_ips") or [])
+            new_ips = set(prov_info.get("resolved_ips") or [])
+            if old_ips and new_ips and old_ips != new_ips:
+                dns_fid = f"finding::dns_changed::{server_id}"
+                store.upsert_object(InventoryObject(
+                    id=dns_fid,
+                    type="finding",
+                    name="dns_resolution_changed",
+                    source="provenance_detection",
+                    metadata={
+                        "risk_level": "HIGH",
+                        "risk_tags": ["supply_chain"],
+                        "old_ips": sorted(old_ips),
+                        "new_ips": sorted(new_ips),
+                        "added_ips": sorted(new_ips - old_ips),
+                        "removed_ips": sorted(old_ips - new_ips),
+                        "remediation": (
+                            "DNS resolution changed. Verify this is an expected "
+                            "infrastructure change."
+                        ),
+                        "exploitation_scenario": (
+                            "DNS hijacking or BGP reroute could redirect traffic "
+                            "to an attacker-controlled server."
+                        ),
+                    },
+                ))
+                store.upsert_relation(InventoryRelation(
+                    source_id=server_id,
+                    target_id=dns_fid,
+                    relation="affected_by",
+                    metadata={"risk_level": "HIGH", "auto_detected": True},
+                ))
+                _log.warning("dns_changed for %s: %s -> %s", server_id, sorted(old_ips), sorted(new_ips))
+
+        private_ips = prov_info.get("private_ips") or []
+        if private_ips:
+            priv_fid = f"finding::private_ip::{server_id}"
+            store.upsert_object(InventoryObject(
+                id=priv_fid,
+                type="finding",
+                name="private_ip_access",
+                source="provenance_detection",
+                metadata={
+                    "risk_level": "MEDIUM",
+                    "risk_tags": ["supply_chain"],
+                    "private_ips": private_ips,
+                    "remediation": (
+                        "Server resolves to private/internal IPs. "
+                        "Ensure this is expected before use in agent workflows."
+                    ),
+                    "exploitation_scenario": (
+                        "DNS rebinding: a public hostname resolving to internal IPs "
+                        "allows SSRF against internal services."
+                    ),
+                },
+            ))
+            store.upsert_relation(InventoryRelation(
+                source_id=server_id,
+                target_id=priv_fid,
+                relation="affected_by",
+                metadata={"risk_level": "MEDIUM", "auto_detected": True},
+            ))
+
+        store.upsert_object(InventoryObject(
+            id=prov_id,
+            type="package_provenance",
+            name=display_name,
+            source="provenance_detection",
+            metadata={k: v for k, v in prov_info.items() if k != "server_id"},
+        ))
+        store.upsert_relation(InventoryRelation(
+            source_id=server_id,
+            target_id=prov_id,
+            relation="has_provenance",
+        ))
+    except Exception as exc:
+        _log.debug("graph on_provenance_detected failed for %s: %s", server_id, exc)
+
+
 def on_tools_inspected(server_id: str, tools: List[Dict[str, Any]]) -> None:
     try:
         for t in tools:
@@ -100,6 +223,56 @@ def on_tools_inspected(server_id: str, tools: List[Dict[str, Any]]) -> None:
             if not tool_name:
                 continue
             tool_id = f"{server_id}::{tool_name}"
+
+            # Resolve inputSchema from whichever key is present
+            raw_schema = t.get("schema") or t.get("inputSchema") or {}
+            if isinstance(raw_schema, str):
+                try:
+                    raw_schema = json.loads(raw_schema)
+                except (json.JSONDecodeError, TypeError):
+                    raw_schema = {}
+
+            description = t.get("description") or ""
+            fingerprint = _provenance.compute_tool_fingerprint(tool_name, description, raw_schema)
+
+            # Tamper detection: compare new fingerprint against what was stored last inspect
+            existing = store.get_object(tool_id)
+            if existing:
+                old_fp = existing.get("metadata", {}).get("schema_fingerprint")
+                if old_fp and old_fp != fingerprint:
+                    tamper_id = f"finding::tamper::{server_id}::{tool_name}"
+                    store.upsert_object(InventoryObject(
+                        id=tamper_id,
+                        type="finding",
+                        name=f"schema_tampered: {tool_name}",
+                        source="tamper_detection",
+                        metadata={
+                            "risk_level": "HIGH",
+                            "risk_tags": ["tool_poisoning"],
+                            "old_fingerprint": old_fp,
+                            "new_fingerprint": fingerprint,
+                            "remediation": (
+                                f"Tool '{tool_name}' schema changed since last inspection. "
+                                "Re-run security_scan_server to audit the new definition."
+                            ),
+                            "exploitation_scenario": (
+                                "A compromised or silently-updated package changed this tool's "
+                                "name, description, or parameters. An attacker can use this to "
+                                "manipulate agent behavior without detection."
+                            ),
+                        },
+                    ))
+                    store.upsert_relation(InventoryRelation(
+                        source_id=tool_id,
+                        target_id=tamper_id,
+                        relation="affected_by",
+                        metadata={"risk_level": "HIGH", "auto_detected": True},
+                    ))
+                    _log.warning(
+                        "schema_tampered: %s::%s fingerprint %s -> %s",
+                        server_id, tool_name, old_fp[:12], fingerprint[:12],
+                    )
+
             store.upsert_object(InventoryObject(
                 id=tool_id,
                 type="tool",
@@ -110,7 +283,8 @@ def on_tools_inspected(server_id: str, tools: List[Dict[str, Any]]) -> None:
                     "effect_class": t.get("effect_class", "unknown"),
                     "destructiveness": t.get("destructiveness", "unknown"),
                     "open_world": bool(t.get("open_world", False)),
-                    "description": (t.get("description") or "")[:200],
+                    "description": description[:200],
+                    "schema_fingerprint": fingerprint,
                 },
             ))
             store.upsert_relation(InventoryRelation(
@@ -270,6 +444,10 @@ def cleanup_server_graph(server_id: str) -> None:
                 f"finding::{server_id}::{tid.split('::', 1)[1]}"
                 for tid in tool_ids if "::" in tid
             ]
+            tamper_ids = [
+                f"finding::tamper::{server_id}::{tid.split('::', 1)[1]}"
+                for tid in tool_ids if "::" in tid
+            ]
 
             cred_prefix = f"cred_surface::{server_id}::"
             cred_rows = conn.execute(
@@ -291,7 +469,22 @@ def cleanup_server_graph(server_id: str) -> None:
                 if total <= this_server_refs:
                     client_ids.append(client_id)
 
-            ids_to_delete = list({server_id} | set(tool_ids) | set(finding_ids) | set(cred_ids) | set(config_ids) | set(client_ids))
+            prov_id = f"provenance::{server_id}"
+            prov_finding_ids = [
+                f"finding::cert_changed::{server_id}",
+                f"finding::dns_changed::{server_id}",
+                f"finding::private_ip::{server_id}",
+            ]
+            ids_to_delete = list(
+                {server_id, prov_id}
+                | set(tool_ids)
+                | set(finding_ids)
+                | set(tamper_ids)
+                | set(prov_finding_ids)
+                | set(cred_ids)
+                | set(config_ids)
+                | set(client_ids)
+            )
             ph = ",".join("?" * len(ids_to_delete))
             conn.execute(
                 f"DELETE FROM inventory_relations WHERE source_id IN ({ph}) OR target_id IN ({ph})",
@@ -311,6 +504,12 @@ def rebuild_from_db() -> Dict[str, int]:
         sid = server["server_id"]
         on_server_registered(sid, server["transport"], server.get("command"), server.get("url"))
         counts["servers"] += 1
+
+        prov = _provenance.build_provenance_info(
+            sid, server.get("command"), server.get("args") or [],
+            url=server.get("url"), transport=server.get("transport"),
+        )
+        on_provenance_detected(sid, prov)
 
         env_cred_keys, header_cred_keys = _load_server_cred_keys(sid)
         if env_cred_keys or header_cred_keys:

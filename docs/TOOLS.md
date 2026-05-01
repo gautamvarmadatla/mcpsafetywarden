@@ -642,7 +642,7 @@ Build or query the inventory risk graph. The graph tracks relationships between 
 
 The `rebuilt` dict has keys `servers`, `tools`, `findings`, `discovered` with integer counts.
 
-Node types: `mcp_server`, `tool`, `finding`, `agent_client`, `mcp_config`, `credential_surface`. Relation types: `exposes`, `affected_by`, `can_exfiltrate`, `declares`, `uses_credential`.
+Node types: `mcp_server`, `tool`, `finding`, `agent_client`, `mcp_config`, `credential_surface`, `package_provenance`. Relation types: `exposes`, `affected_by`, `can_exfiltrate`, `declares`, `uses_credential`, `has_provenance`.
 
 ---
 
@@ -668,7 +668,10 @@ Walk the risk graph for a specific tool and return a full risk breakdown: blast 
 | `confidence` | 1.0 if a security scan exists; 0.7 if unscanned |
 | `scan_exists` | `true` if a security scan has been run for this server |
 | `effect_class` | Tool's classified effect class (e.g. `read_only`, `external_action`, `destructive`) |
-| `direct_findings` | Security scan findings with MITRE technique tags |
+| `schema_fingerprint` | First 16 hex chars of the tool's SHA-256 surface fingerprint (name + description + inputSchema). Changes between inspections indicate potential tool poisoning. |
+| `schema_tampered` | `true` if the tool's fingerprint changed since the last inspection. Triggers a HIGH-severity `tool_poisoning` finding automatically. |
+| `provenance` | Package provenance object (see below). `null` if provenance detection has not run yet. |
+| `direct_findings` | Security scan findings with MITRE technique tags. Includes auto-detected `schema_tampered` findings if fingerprint changed. |
 | `composition_risks` | `read + external_action` tool pairs that create exfiltration paths; each entry has `mitigated` flag. Populated for both the read tool (as source) and the external_action tool (as target). |
 | `live_composition_risks_count` | Count of unmitigated composition risks |
 | `mitigated_composition_risks_count` | Count of mitigated composition risks |
@@ -676,8 +679,33 @@ Walk the risk graph for a specific tool and return a full risk breakdown: blast 
 | `agent_clients` | AI client names that have this server configured |
 | `has_credential_surface` | `true` if server has env/header credential references |
 | `external_tool_count_on_server` | Number of external/destructive sibling tools on same server |
-| `interaction_risks` | Multi-agent risks: `shared_server`, `tool_overlap_execute`, `unscanned_credentials`, `scope_mismatch` |
+| `interaction_risks` | Multi-agent and supply chain risks: `shared_server`, `tool_overlap_execute`, `unscanned_credentials`, `scope_mismatch`, `cert_changed`, `dns_changed`, `private_ip_access`, `no_attestation`, `typosquatting_risk` |
 | `recommended_action` | `allow`, `warn`, `require_approval`, or `block` |
+
+**`provenance` object fields:**
+
+| Field | Description |
+|---|---|
+| `ecosystem` | `"pypi"`, `"npm"`, or `"unresolvable"` |
+| `package_name` | Detected package name, or `null` if unresolvable |
+| `detection_method` | `"cmdline_pattern"` (high confidence) or `"entrypoint_candidate"` (low confidence, binary name only) |
+| `detection_confidence` | `"high"` or `"low"` |
+| `status` | `"found"` (locally installed, verified), `"found_registry"` (npm registry only), `"not_found"`, `"unresolvable"`, or `"error"` |
+| `verified` | `true` only when `status = "found"` - package is installed and metadata confirmed |
+| `version` | Installed version string (present when `verified = true`) |
+| `home_page` | Package homepage URL |
+| `location` | Filesystem path where the package is installed |
+| `note` | Human-readable note when `detection_confidence = "low"` or when using registry fallback |
+| `attestation` | Registry provenance attestation result (see sub-fields below). Present for pypi and npm packages. |
+| `attestation.attestation_status` | `"present"` (PEP 740 / Sigstore attestation found), `"absent"` (no attestation), or `"not_on_registry"` (package not found on registry) |
+| `attestation.has_attestation` | `true` if a cryptographic provenance attestation was found on the registry |
+| `attestation.source_url` | Source repository URL extracted from the attestation (GitHub Actions workflow URL or similar) |
+| `attestation.registry_version` | Latest version published on the registry (pypi only; use to detect version drift) |
+| `version_drift` | Present when installed version differs from registry latest. Contains `installed`, `registry_latest`, and `behind: true`. |
+| `typosquatting_suspects` | List of well-known package names with high string similarity to this package name. Non-empty = possible typosquatting attack. |
+| `tls_cert_fingerprint` | SHA-256 of the server's leaf TLS certificate (HTTP servers only). Changes between inspections trigger a `cert_changed` HIGH-severity finding. |
+| `resolved_ips` | List of IP addresses the server's hostname resolved to at last inspection (HTTP servers only). |
+| `private_ips` | Subset of `resolved_ips` that are RFC-1918 / loopback / link-local. Non-empty = DNS rebinding risk. |
 
 ---
 

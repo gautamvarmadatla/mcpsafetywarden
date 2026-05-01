@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from .. import database as _db
 from . import store
 from ._constants import EXTERNAL_EFFECTS as _EXTERNAL_EFFECTS, READ_EFFECTS as _READ_EFFECTS
+from . import provenance as _provenance
 
 _log = logging.getLogger(__name__)
 
@@ -194,7 +195,16 @@ def explain_tool_risk(server_id: str, tool_name: str) -> Dict[str, Any]:
             "[UNSCANNED] Server has credential surfaces but no security scan has been run"
         )
 
-    interaction_risks = _detect_interaction_risks(server_id, agent_clients, scan_exists, sibling_tools, has_cred_surface)
+    interaction_risks = _detect_interaction_risks(server_id, agent_clients, scan_exists, sibling_tools, has_cred_surface, provenance_info)
+
+    prov_obj = store.get_object(f"provenance::{server_id}")
+    provenance_info: Optional[Dict[str, Any]] = prov_obj.get("metadata") if prov_obj else None
+
+    schema_tampered = any(
+        "tool_poisoning" in f.get("risk_tags", [])
+        and f.get("finding", "").startswith("schema_tampered")
+        for f in findings
+    )
 
     return {
         "server_id": server_id,
@@ -204,6 +214,9 @@ def explain_tool_risk(server_id: str, tool_name: str) -> Dict[str, Any]:
         "confidence": confidence,
         "scan_exists": scan_exists,
         "effect_class": effect_class,
+        "schema_fingerprint": (tool_meta.get("schema_fingerprint") or "")[:16] or None,
+        "schema_tampered": schema_tampered,
+        "provenance": provenance_info,
         "direct_findings": findings,
         "composition_risks": composition_risks,
         "live_composition_risks_count": len(live_risks),
@@ -272,6 +285,7 @@ def _detect_interaction_risks(
     scan_exists: bool,
     sibling_tools: List[Dict[str, Any]],
     has_cred_surface: bool = False,
+    prov_info: Optional[Dict[str, Any]] = None,
 ) -> List[InteractionRisk]:
     risks: List[InteractionRisk] = []
 
@@ -346,6 +360,75 @@ def _detect_interaction_risks(
                 mitigated=True,
             ))
 
+    if prov_info:
+        if store.get_object(f"finding::cert_changed::{server_id}"):
+            risks.append(InteractionRisk(
+                pattern="cert_changed",
+                agents=agent_clients,
+                risk_score=8.0,
+                description=(
+                    f"TLS certificate for '{server_id}' changed since last inspection. "
+                    f"Possible MITM, subdomain takeover, or unauthorized operator change."
+                ),
+                mitre_tags=["T1557", "T1195"],
+            ))
+
+        if store.get_object(f"finding::dns_changed::{server_id}"):
+            risks.append(InteractionRisk(
+                pattern="dns_changed",
+                agents=agent_clients,
+                risk_score=7.5,
+                description=(
+                    f"DNS resolution for '{server_id}' changed since last inspection. "
+                    f"Possible DNS hijacking or BGP reroute to attacker-controlled infrastructure."
+                ),
+                mitre_tags=["T1584", "T1195"],
+            ))
+
+        private_ips = prov_info.get("private_ips") or []
+        if private_ips:
+            risks.append(InteractionRisk(
+                pattern="private_ip_access",
+                agents=agent_clients,
+                risk_score=6.5,
+                description=(
+                    f"Server '{server_id}' resolves to private/internal IPs {private_ips[:3]}. "
+                    f"DNS rebinding could redirect agent traffic to internal services."
+                ),
+                mitre_tags=["T1090", "T1557"],
+            ))
+
+        attest = prov_info.get("attestation") or {}
+        ecosystem = prov_info.get("ecosystem", "unresolvable")
+        if (
+            ecosystem not in ("unresolvable", "")
+            and attest.get("attestation_status") == "absent"
+        ):
+            risks.append(InteractionRisk(
+                pattern="no_attestation",
+                agents=agent_clients,
+                risk_score=4.0,
+                description=(
+                    f"Package '{prov_info.get('package_name')}' ({ecosystem}) has no "
+                    f"cryptographic provenance attestation on the registry. "
+                    f"Supply chain tampering cannot be ruled out."
+                ),
+                mitre_tags=["T1195"],
+            ))
+
+        squats = prov_info.get("typosquatting_suspects") or []
+        if squats:
+            risks.append(InteractionRisk(
+                pattern="typosquatting_risk",
+                agents=agent_clients,
+                risk_score=7.0,
+                description=(
+                    f"Package name '{prov_info.get('package_name')}' is suspiciously similar "
+                    f"to known package(s): {squats[:3]}. Possible typosquatting attack."
+                ),
+                mitre_tags=["T1195", "T1036"],
+            ))
+
     risks.sort(key=lambda r: r.risk_score, reverse=True)
     return risks
 
@@ -376,6 +459,7 @@ def export_as_mermaid(server_id: Optional[str] = None) -> str:
         "agent_client": "fill:#9B59B6,color:#fff",
         "mcp_config": "fill:#F5A623,color:#fff",
         "credential_surface": "fill:#E74C3C,color:#fff",
+        "package_provenance": "fill:#27AE60,color:#fff",
     }
 
     rel_labels: Dict[str, str] = {
@@ -384,6 +468,7 @@ def export_as_mermaid(server_id: Optional[str] = None) -> str:
         "can_exfiltrate": "exfil risk",
         "declares": "declares",
         "uses_credential": "uses cred",
+        "has_provenance": "provenance",
         "depends_on": "depends on",
     }
 
