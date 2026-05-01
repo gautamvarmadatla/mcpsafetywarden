@@ -1148,10 +1148,30 @@ def cmd_explain_risk(
         f"Recommended action: [{ac}]{action}[/{ac}]",
         f"Effect class:       {result.get('effect_class', 'unknown')}",
     ]
+    if result.get("schema_tampered"):
+        lines.append("[bold red]! SCHEMA TAMPERED - tool definition changed since last inspect[/bold red]")
     if result.get("has_credential_surface"):
         lines.append("[red]! Credential surface exposed[/red]")
     if result.get("agent_clients"):
         lines.append(f"Agent clients:      {', '.join(result['agent_clients'])}")
+
+    prov = result.get("provenance")
+    if prov:
+        pkg = prov.get("package_name") or "unknown"
+        ver = prov.get("version")
+        eco = prov.get("ecosystem", "")
+        verified = prov.get("verified", False)
+        status = prov.get("status", "")
+        if verified:
+            prov_str = f"[green]{eco}:{pkg}@{ver}[/green] (verified)"
+        elif status == "unresolvable":
+            prov_str = f"[dim]unresolvable - manual verification recommended[/dim]"
+        elif status == "not_found":
+            prov_str = f"[yellow]{eco}:{pkg} - not found locally[/yellow]"
+        else:
+            prov_str = f"[dim]{eco}:{pkg}[/dim]"
+        lines.append(f"Provenance:         {prov_str}")
+
     console.print(Panel("\n".join(lines), title=f"Risk - {tool_name} @ {server_id}"))
 
     findings = result.get("direct_findings", [])

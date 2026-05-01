@@ -246,7 +246,11 @@ mcpsafetywarden graph my-server --json        # raw JSON output
 ```
 
 **`explain-risk <server_id> <tool_name>`**
-Walk the risk graph for a specific tool and show blast radius, composite risk score, security findings, composition risks (read + external = exfiltration), MITRE technique tags, and interaction risks across agent clients.
+Walk the risk graph for a specific tool and show blast radius, composite risk score, security findings, composition risks (read + external = exfiltration), MITRE technique tags, interaction risks across agent clients, and package provenance.
+
+The output panel includes:
+- `SCHEMA TAMPERED` warning if the tool's fingerprint changed since the last inspection (HIGH-severity tool_poisoning signal)
+- `Provenance` line showing the detected package, version, and whether it was verified locally (`pip show` / `npm list`)
 
 ```bash
 mcpsafetywarden explain-risk my-server delete_file

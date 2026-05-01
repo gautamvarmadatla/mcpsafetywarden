@@ -127,6 +127,10 @@ def get_full_graph(server_id: Optional[str] = None) -> Dict[str, Any]:
                 f"finding::{server_id}::{tid.split('::', 1)[1]}"
                 for tid in tool_ids if "::" in tid
             ]
+            tamper_ids = [
+                f"finding::tamper::{server_id}::{tid.split('::', 1)[1]}"
+                for tid in tool_ids if "::" in tid
+            ]
             disc_rows = conn.execute(
                 "SELECT discovery_id, client FROM discovered_servers WHERE registered_server_id = ?",
                 (server_id,),
@@ -136,9 +140,10 @@ def get_full_graph(server_id: Optional[str] = None) -> Dict[str, Any]:
                 "SELECT obj_id FROM inventory_objects WHERE obj_type = 'credential_surface'",
             ).fetchall()
             relevant_ids = list(
-                {server_id}
+                {server_id, f"provenance::{server_id}"}
                 | set(tool_ids)
                 | set(finding_ids)
+                | set(tamper_ids)
                 | {dr["discovery_id"] for dr in disc_rows}
                 | {dr["client"] for dr in disc_rows}
                 | {r["obj_id"] for r in all_cred_rows if r["obj_id"].startswith(cred_prefix)}
