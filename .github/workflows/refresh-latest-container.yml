@@ -37,6 +37,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Extract version from tag
         id: version
         run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
@@ -66,12 +72,14 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
 
-      - name: Push refreshed latest
+      - name: Push refreshed latest to GHCR and Docker Hub
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/mcpsafetywarden:latest
           build-args: PKG_SPEC=mcpsafetywarden[all]==${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

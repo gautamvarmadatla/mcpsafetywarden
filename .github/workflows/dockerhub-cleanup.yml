@@ -1,0 +1,77 @@
+name: Docker Hub Cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep_count:
+        description: "Number of recent version tags to keep (besides latest)"
+        required: false
+        default: "10"
+      dry_run:
+        description: "Dry run - list tags to delete without deleting"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    name: Clean up old Docker Hub tags
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Delete old tags
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          KEEP_COUNT: ${{ inputs.keep_count }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          REPO="${DOCKERHUB_USERNAME}/mcpsafetywarden"
+          TOKEN=$(curl -sf -X POST "https://hub.docker.com/v2/users/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"${DOCKERHUB_USERNAME}\",\"password\":\"${DOCKERHUB_TOKEN}\"}" \
+            | jq -r '.token')
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "::error::Docker Hub login failed"
+            exit 1
+          fi
+          ALL_TAGS=$(curl -sf "https://hub.docker.com/v2/repositories/${REPO}/tags/?page_size=100&ordering=-last_updated" \
+            -H "Authorization: Bearer $TOKEN" | jq -r '.results[].name')
+          SEMVER_TAGS=$(printf '%s\n' "$ALL_TAGS" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -Vr || true)
+          KEEP_SEMVER=$(printf '%s\n' "$SEMVER_TAGS" | head -n "${KEEP_COUNT}")
+          echo "=== Keeping ==="
+          echo "  latest (always)"
+          echo "$KEEP_SEMVER" | sed 's/^/  /'
+          DELETE_COUNT=0
+          echo ""
+          echo "=== $([ "$DRY_RUN" = "true" ] && echo "Would delete" || echo "Deleting") ==="
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            [ "$tag" = "latest" ] && continue
+            echo "$KEEP_SEMVER" | grep -qxF "$tag" && continue
+            echo "  $tag"
+            DELETE_COUNT=$((DELETE_COUNT + 1))
+            if [ "$DRY_RUN" = "false" ]; then
+              HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+                -X DELETE "https://hub.docker.com/v2/repositories/${REPO}/tags/${tag}" \
+                -H "Authorization: Bearer $TOKEN")
+              if [ "$HTTP_CODE" = "204" ]; then
+                echo "    deleted"
+              else
+                echo "    failed (HTTP $HTTP_CODE)"
+              fi
+            fi
+          done <<< "$ALL_TAGS"
+          echo ""
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "DRY RUN: would delete $DELETE_COUNT tags. Re-run with dry_run=false to execute."
+          else
+            echo "Deleted $DELETE_COUNT tags."
+          fi

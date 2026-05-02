@@ -9,7 +9,7 @@ permissions: {}
 
 jobs:
   rescan:
-    name: Rescan image
+    name: Rescan — ${{ matrix.registry }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -17,25 +17,43 @@ jobs:
       packages: read
       security-events: write
       issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - registry: ghcr
+            image: ghcr.io/${{ github.repository }}:latest
+            sarif_category: container-ghcr
+          - registry: dockerhub
+            image: ${{ secrets.DOCKERHUB_USERNAME }}/mcpsafetywarden:latest
+            sarif_category: container-dockerhub
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Log in to GHCR
+        if: matrix.registry == 'ghcr'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull latest image
-        run: docker pull ghcr.io/${{ github.repository }}:latest
+      - name: Log in to Docker Hub
+        if: matrix.registry == 'dockerhub'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Pull image
+        run: docker pull ${{ matrix.image }}
 
       - name: Trivy scan (table)
         id: scan_table
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ghcr.io/${{ github.repository }}:latest
+          image-ref: ${{ matrix.image }}
           format: table
           severity: MEDIUM,HIGH,CRITICAL,UNKNOWN
           ignore-unfixed: true
@@ -45,20 +63,20 @@ jobs:
       - name: Trivy scan (SARIF)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ghcr.io/${{ github.repository }}:latest
+          image-ref: ${{ matrix.image }}
           format: sarif
-          output: image-scan.sarif
+          output: image-scan-${{ matrix.sarif_category }}.sarif
           severity: MEDIUM,HIGH,CRITICAL,UNKNOWN
           ignore-unfixed: true
           exit-code: "0"
         continue-on-error: true
 
       - name: Upload SARIF to Security tab
-        if: always() && hashFiles('image-scan.sarif') != ''
+        if: always() && hashFiles(format('image-scan-{0}.sarif', matrix.sarif_category)) != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: image-scan.sarif
-          category: container
+          sarif_file: image-scan-${{ matrix.sarif_category }}.sarif
+          category: ${{ matrix.sarif_category }}
 
       - name: Open or close CVE issue
         if: always()
@@ -66,14 +84,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          TITLE="base-image-vulnerability: ghcr.io/${{ github.repository }}:latest has fixable CVEs"
+          TITLE="base-image-vulnerability: ${{ matrix.image }} has fixable CVEs"
           gh label create base-image-vulnerability --color B60205 --description "Fixable CVE in published Docker image" 2>/dev/null || true
           EXISTING=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number // empty')
           if [ "${{ steps.scan_table.outcome }}" = "failure" ]; then
             if [ -z "$EXISTING" ]; then
               gh issue create --title "$TITLE" \
                 --label base-image-vulnerability \
-                --body "The daily Trivy rescan found fixable MEDIUM+/UNKNOWN CVEs in \`ghcr.io/${{ github.repository }}:latest\`. Run the **Refresh Latest Container** workflow to rebuild from the current base image."
+                --body "The daily Trivy rescan found fixable MEDIUM+/UNKNOWN CVEs in \`${{ matrix.image }}\`. Run the **Refresh Latest Container** workflow to rebuild from the current base image."
             fi
           elif [ -n "$EXISTING" ]; then
             gh issue close "$EXISTING" --comment "Daily rescan is clean - closing automated CVE alert."
