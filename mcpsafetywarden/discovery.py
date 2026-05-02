@@ -250,7 +250,7 @@ def _parse_json(text: str) -> Any:
 
 def _parse_yaml(text: str) -> Any:
     try:
-        import yaml  # type: ignore
+        import yaml
         return yaml.safe_load(text) or {}
     except ImportError:
         _log.debug("discovery: PyYAML not installed, cannot parse YAML config")
@@ -263,10 +263,10 @@ def _parse_yaml(text: str) -> Any:
 def _parse_toml(path: Path) -> Any:
     try:
         try:
-            import tomllib  # type: ignore  # Python 3.11+
+            import tomllib
         except ImportError:
             try:
-                import tomli as tomllib  # type: ignore
+                import tomli as tomllib
             except ImportError:
                 _log.debug("discovery: no TOML library available (tomllib/tomli)")
                 return None
@@ -360,15 +360,17 @@ def _normalize_entry(
     if isinstance(command_raw, dict):
         command = command_raw.get("path") or command_raw.get("cmd")
         raw_args = command_raw.get("args")
-        args = [raw_args] if isinstance(raw_args, str) else list(raw_args or [])
-        env: Dict[str, str] = dict(command_raw.get("env") or {})
+        env_raw = command_raw.get("env")
+        env: Dict[str, str] = {str(k): str(v) for k, v in env_raw.items()} if isinstance(env_raw, dict) else {}
     else:
         command = str(command_raw) if command_raw is not None else None
         raw_args = raw.get("args")
-        args = [raw_args] if isinstance(raw_args, str) else list(raw_args or [])
-        env = dict(raw.get("env") or raw.get("envs") or {})
+        env_raw = raw.get("env") or raw.get("envs")
+        env = {str(k): str(v) for k, v in env_raw.items()} if isinstance(env_raw, dict) else {}
 
-    headers: Dict[str, str] = dict(raw.get("headers") or {})
+    args = [raw_args] if isinstance(raw_args, str) else (list(raw_args) if isinstance(raw_args, list) else [])
+    headers_raw = raw.get("headers")
+    headers: Dict[str, str] = {str(k): str(v) for k, v in headers_raw.items()} if isinstance(headers_raw, dict) else {}
 
     if not command and not url and not activation_state_only:
         return None
@@ -455,6 +457,7 @@ def _load_path(
             data = _parse_json(text)
 
         if data is None:
+            _log.debug("Config file %s yielded no parseable data; skipping.", f)
             continue
 
         servers_map = _extract_servers(data, key)

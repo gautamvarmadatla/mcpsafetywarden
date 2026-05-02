@@ -257,6 +257,23 @@ mcpsafetywarden explain-risk my-server delete_file
 mcpsafetywarden explain-risk my-server upload_data --json
 ```
 
+**`client-risk <client_id>`**
+Analyze cross-server risks for all servers registered under one agent client. Reports exfiltration paths, tool shadowing, and shared CVE blast radius across the full server set.
+
+```bash
+mcpsafetywarden client-risk claude-desktop
+mcpsafetywarden client-risk cursor --json
+```
+
+**`cve-blast [client_id] [--vuln ID]`**
+Report CVEs affecting multiple servers under the same client. Scoped to one client if `client_id` is given; otherwise spans all clients. Use `--vuln` to filter to a specific CVE or GHSA ID.
+
+```bash
+mcpsafetywarden cve-blast
+mcpsafetywarden cve-blast claude-desktop
+mcpsafetywarden cve-blast --vuln CVE-2024-12345 --json
+```
+
 **`export-graph [server_id] [--format FORMAT]`**
 Export the risk graph as a Mermaid diagram (default) or structured JSON. The Mermaid output can be pasted into any Mermaid renderer (e.g. mermaid.live) for a color-coded visual.
 

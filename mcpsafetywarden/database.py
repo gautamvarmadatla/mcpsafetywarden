@@ -219,6 +219,8 @@ def init_db() -> None:
                 ON tool_snapshots(server_id, snapshot_at);
             CREATE INDEX IF NOT EXISTS idx_discovered_servers_client
                 ON discovered_servers(client, last_seen_at);
+            CREATE INDEX IF NOT EXISTS idx_discovered_servers_registered
+                ON discovered_servers(registered_server_id);
 
             CREATE TABLE IF NOT EXISTS credential_refs (
                 ref_id       TEXT PRIMARY KEY,
@@ -316,9 +318,9 @@ def upsert_server(
 def delete_server(server_id: str) -> None:
     conn = get_connection()
     try:
-        conn.execute("DELETE FROM servers WHERE server_id=?", (server_id,))
         conn.execute("DELETE FROM tools WHERE server_id=?", (server_id,))
         conn.execute("DELETE FROM security_scans WHERE server_id=?", (server_id,))
+        conn.execute("DELETE FROM servers WHERE server_id=?", (server_id,))
         conn.commit()
     finally: conn.close()
 
@@ -330,8 +332,8 @@ def get_server(server_id: str) -> Optional[Dict[str, Any]]:
         if row is None: return None
         d = dict(row)
         d["args"] = _jloads(d.pop("args_json", "[]"), [])
-        d["env"] = _jloads(_decrypt_field(d.pop("env_json", "{}")), {})
-        d["headers"] = _jloads(_decrypt_field(d.pop("headers_json", "{}")), {})
+        d["env"] = _jloads(_decrypt_field(d.pop("env_json", None) or "{}"), {})
+        d["headers"] = _jloads(_decrypt_field(d.pop("headers_json", None) or "{}"), {})
         return d
     finally: conn.close()
 
@@ -353,8 +355,8 @@ def list_servers(include_credentials: bool = False) -> List[Dict[str, Any]]:
             d = dict(row)
             d["args"] = _jloads(d.pop("args_json", "[]"), [])
             if include_credentials:
-                d["env"] = _jloads(_decrypt_field(d.pop("env_json", "{}")), {})
-                d["headers"] = _jloads(_decrypt_field(d.pop("headers_json", "{}")), {})
+                d["env"] = _jloads(_decrypt_field(d.pop("env_json", None) or "{}"), {})
+                d["headers"] = _jloads(_decrypt_field(d.pop("headers_json", None) or "{}"), {})
             else:
                 d.pop("env_json", None)
                 d.pop("headers_json", None)
@@ -383,9 +385,6 @@ def upsert_tool(
         schema_json = "{}"
         schema_hash = "OVERSIZED"
 
-    # Stable ID - does NOT include schema_hash so that schema changes don't orphan
-    # historical behavior_profiles and tool_runs rows.  schema_hash is stored
-    # separately in the tools row for change-detection purposes.
     tool_id = f"{server_id}::{tool_name}"
     conn = get_connection()
     try:
@@ -611,7 +610,10 @@ def get_latest_security_scan(server_id: str) -> Optional[Dict[str, Any]]:
         d = dict(row)
         d["tool_findings"]      = _jloads(d.pop("tool_findings_json", "[]"), [])
         d["server_level_risks"] = _jloads(d.pop("server_risks_json", "[]"), [])
-        d.pop("raw_report_json", None)
+        raw = _jloads(d.pop("raw_report_json", None) or "{}", {})
+        for field in ("false_positives", "unconfirmed_findings", "audit_metadata", "coverage_gaps"):
+            if field in raw:
+                d.setdefault(field, raw[field])
         return d
     finally: conn.close()
 
@@ -740,6 +742,7 @@ def upsert_discovered_server(entry: Dict[str, Any]) -> None:
                 env_keys_json=excluded.env_keys_json,
                 headers_keys_json=excluded.headers_keys_json,
                 confidence=excluded.confidence,
+                client=excluded.client,
                 activation_state_only=excluded.activation_state_only,
                 last_seen_at=excluded.last_seen_at
             """,
@@ -811,6 +814,47 @@ def list_discovered_servers(client: Optional[str] = None) -> List[Dict[str, Any]
             d["headers_keys"] = _jloads(d.pop("headers_keys_json", "[]"), [])
             d["activation_state_only"] = bool(d.get("activation_state_only"))
             result.append(d)
+        return result
+    finally:
+        conn.close()
+
+
+def get_servers_for_client(client_id: str) -> List[str]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT registered_server_id FROM discovered_servers "
+            "WHERE client = ? AND registered_server_id IS NOT NULL",
+            (client_id,),
+        ).fetchall()
+        return [r["registered_server_id"] for r in rows]
+    finally:
+        conn.close()
+
+
+def list_tools_multi(server_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+    if not server_ids:
+        return {}
+    conn = get_connection()
+    try:
+        ph = ",".join("?" * len(server_ids))
+        rows = conn.execute(
+            f"""SELECT t.*, bp.effect_class, bp.destructiveness, bp.open_world
+                FROM tools t
+                LEFT JOIN behavior_profiles bp ON bp.tool_id = t.tool_id
+                WHERE t.server_id IN ({ph})
+                ORDER BY t.server_id, t.tool_name""",
+            server_ids,
+        ).fetchall()
+        result: Dict[str, List[Dict[str, Any]]] = {}
+        for row in rows:
+            d = dict(row)
+            sid = d["server_id"]
+            d["schema"] = _jloads(d.pop("schema_json", "{}"), {})
+            d["annotations"] = _jloads(d.pop("annotations_json", "{}"), {})
+            if d.get("open_world") is not None:
+                d["open_world"] = bool(d["open_world"])
+            result.setdefault(sid, []).append(d)
         return result
     finally:
         conn.close()

@@ -9,11 +9,11 @@ from typing import Any, Dict, List, Tuple
 from urllib.parse import unquote
 
 _ZERO_WIDTH_RE  = re.compile("[" + "".join(chr(c) for c in [
-    0x200b, 0x200c, 0x200d, 0x200e, 0x200f,  # zero-width space/joiners, LRM, RLM
-    *range(0x202a, 0x202f),                    # bidi embedding/override (LRE-RLO + PDF)
-    *range(0x2060, 0x2065),                    # word joiner + invisible math operators
-    0xfeff,                                    # zero-width no-break space (BOM)
-    0x00ad,                                    # soft hyphen
+    0x200b, 0x200c, 0x200d, 0x200e, 0x200f,
+    *range(0x202a, 0x202f),
+    *range(0x2060, 0x2065),
+    0xfeff,
+    0x00ad,
 ]) + "]")
 
 _MARKDOWN_RE    = re.compile(r"[*_`~\[\]|\\]")
@@ -93,20 +93,20 @@ _SENSITIVE_KEY_RE = re.compile(
 )
 
 _SECRET_VALUE_PATTERNS: List[re.Pattern] = [
-    re.compile(r"^eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]*$"),     # JWT
-    re.compile(r"^sk-ant-[A-Za-z0-9\-_]{20,}$"),                                  # Anthropic key
-    re.compile(r"^sk-[A-Za-z0-9]{20,}$"),                                          # OpenAI key
-    re.compile(r"^AKIA[0-9A-Z]{16}$"),                                             # AWS access key
-    re.compile(r"^ghp_[A-Za-z0-9]{36}$"),                                          # GitHub PAT
-    re.compile(r"^github_pat_[A-Za-z0-9_]{82}$"),                                  # GitHub fine-grained PAT
-    re.compile(r"^ghs_[A-Za-z0-9]{36}$"),                                          # GitHub server token
-    re.compile(r"^xox[bporas]-[A-Za-z0-9\-]{10,}$"),                              # Slack token
-    re.compile(r"^-----BEGIN\s+(RSA\s+|DSA\s+|EC\s+|OPENSSH\s+)?PRIVATE KEY-----"),  # PEM key
-    re.compile(r"^[0-9a-fA-F]{256,}$"),                                            # Long hex (≥256 chars; avoids SHA-256/SHA-512 hash false positives)
-    re.compile(r"^[A-Za-z0-9+/]{128,}={0,2}$"),                                   # Long base64 blob (128+ chars to skip hashes and short encoded values)
-    re.compile(r"^[A-Za-z0-9\-_]{200,}$"),                                         # Generic long token (200+ to avoid matching IDs/UUIDs/short tokens)
-    re.compile(r"(?i)bearer\s+[A-Za-z0-9\-._~+/]+=*"),                            # Bearer token in value
-    re.compile(r"(?i)(password|secret|token|key)\s*[=:]\s*\S{8,}"),               # key=value in string
+    re.compile(r"^eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]*$"),
+    re.compile(r"^sk-ant-[A-Za-z0-9\-_]{20,}$"),
+    re.compile(r"^sk-[A-Za-z0-9]{20,}$"),
+    re.compile(r"^AKIA[0-9A-Z]{16}$"),
+    re.compile(r"^ghp_[A-Za-z0-9]{36}$"),
+    re.compile(r"^github_pat_[A-Za-z0-9_]{82}$"),
+    re.compile(r"^ghs_[A-Za-z0-9]{36}$"),
+    re.compile(r"^xox[bporas]-[A-Za-z0-9\-]{10,}$"),
+    re.compile(r"^-----BEGIN\s+(RSA\s+|DSA\s+|EC\s+|OPENSSH\s+)?PRIVATE KEY-----"),
+    re.compile(r"^[0-9a-fA-F]{256,}$"),
+    re.compile(r"^[A-Za-z0-9+/]{128,}={0,2}$"),
+    re.compile(r"^[A-Za-z0-9\-_]{200,}$"),
+    re.compile(r"(?i)bearer\s+[A-Za-z0-9\-._~+/]+=*"),
+    re.compile(r"(?i)(password|secret|token|key)\s*[=:]\s*\S{8,}"),
 ]
 
 _CREDENTIAL_TEXT_RE = re.compile(
@@ -118,7 +118,7 @@ _CREDENTIAL_TEXT_RE = re.compile(
     r"|ghs_[A-Za-z0-9]{36}"
     r"|github_pat_[A-Za-z0-9_]{80,}"
     r"|xox[bporas]-[A-Za-z0-9\-]{10,}"
-    r"|-----BEGIN\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE KEY-----[^-]+"
+    r"|-----BEGIN\s+(?:RSA\s+|EC\s+|DSA\s+|OPENSSH\s+)?PRIVATE KEY-----[\s\S]*?-----END[^\n]*"
     r"|[0-9a-fA-F]{256,}"
     r"|[A-Za-z0-9+/]{200,}={0,2})",
 )

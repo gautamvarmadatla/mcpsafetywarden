@@ -399,7 +399,7 @@ Return ONLY valid JSON. No markdown. No text outside the JSON object.
 HACKER_CALL_TIMEOUT_S    = 30
 HACKER_MAX_RESULT_BYTES  = 8 * 1024
 HACKER_MAX_CALLS_PER_TURN = 5
-_MAX_HACKER_TURNS         = 20        # server-side cap; callers cannot exceed this
+_MAX_HACKER_TURNS         = 20
 
 _SAFE_HACKER_SYSTEM = """\
 You are executing a read-only penetration test of an MCP server.
@@ -861,7 +861,6 @@ async def _execute_mcp_tool(
             raw = raw.encode()[:HACKER_MAX_RESULT_BYTES].decode("utf-8", errors="ignore")
             raw += "\n[OUTPUT TRUNCATED]"
 
-        # Distinguish MCP tool-level errors from transport/call success
         is_tool_error = bool(getattr(result, "isError", False))
         success = not is_tool_error
         if is_tool_error:
@@ -881,12 +880,10 @@ async def _execute_mcp_tool(
 
     latency_ms = (time.monotonic() - start) * 1000
 
-    # injection scan before redaction - order matters
     injection_hit = await _scan_for_injection(content) if content else None
 
     redacted, had_creds = _redact_in_text(raw)
 
-    # audit record - always written (even on blocked/failed probes)
     run_id = None
     tool_row = db.get_tool(server_id, tool_name)
     if tool_row:
@@ -908,10 +905,8 @@ async def _execute_mcp_tool(
                 notes=" | ".join(notes_parts),
             )
         except Exception as db_exc:
-            import logging
-            logging.getLogger(__name__).warning("mcpsafety audit log write failed: %s", db_exc)
+            _log.warning("mcpsafety audit log write failed: %s", db_exc)
 
-    # Quarantine injected output - NEVER feed to agent
     if injection_hit:
         run_ref = f"run_id={run_id}" if run_id is not None else "DB write failed - check server logs"
         return (
@@ -975,8 +970,6 @@ async def _hacker_anthropic(
     loop = asyncio.get_running_loop()
 
     for _ in range(max_turns):
-        # Run sync LLM call in a thread so the event loop stays live and
-        # scan_timeout_s can fire even while the API call is in flight.
         snapshot = list(messages)
         response = await loop.run_in_executor(
             None,
@@ -1076,8 +1069,11 @@ async def _hacker_openai_compat(
                     "content": "[BLOCKED: per-turn call limit reached]",
                 })
                 continue
-            try: args = json.loads(tc.function.arguments)
-            except (json.JSONDecodeError, TypeError): args = {}
+            try:
+                args = json.loads(tc.function.arguments)
+            except (json.JSONDecodeError, TypeError) as _e:
+                _log.warning("malformed tool args from LLM: %s", _e)
+                args = {}
             result = await _execute_mcp_tool(
                 server_id, server_config, tc.function.name, args,
                 call_counter, allow_destructive_probes,
@@ -1248,7 +1244,6 @@ async def _hacker_gemini(
 
     try:
         import google.generativeai as genai_legacy
-        # Legacy path: no tool-use capability. Scan silently degrades to metadata-only text query.
         _log.warning(
             "google-genai not installed; falling back to google-generativeai for server %s. "
             "Live tool probing is unavailable - hacker stage will produce a description-only report.",
@@ -1327,7 +1322,8 @@ async def _web_research(query: str) -> List[str]:
         )
         for r in ddg_results:
             results.append(f"{r['title']}: {r['body'][:250]}")
-    except Exception: pass
+    except Exception as _e:
+        _log.debug("DuckDuckGo search failed: %s", _e)
 
     try:
         import httpx
@@ -1336,8 +1332,9 @@ async def _web_research(query: str) -> List[str]:
                 "https://hn.algolia.com/api/v1/search",
                 params={"query": query, "tags": "story", "hitsPerPage": 3},
             )
-            for h in resp.json().get("hits", []): results.append(f"HN: {h['title']} - {h.get('url', '')}")
-    except Exception: pass
+            for h in resp.json().get("hits", []): results.append(f"HN: {h.get('title', '')} - {h.get('url') or ''}")
+    except Exception as _e:
+        _log.debug("HackerNews search failed: %s", _e)
 
     try:
         import arxiv as _arxiv
@@ -1349,7 +1346,8 @@ async def _web_research(query: str) -> List[str]:
         papers = await loop.run_in_executor(None, _arxiv_search)
         for p in papers:
             results.append(f"Arxiv [{p.entry_id}]: {p.title} - {p.summary[:200]}")
-    except Exception: pass
+    except Exception as _e:
+        _log.debug("Arxiv search failed: %s", _e)
 
     return results
 
@@ -1446,6 +1444,10 @@ async def _run_supervisor(
             "summary": "Supervisor failed to produce a valid JSON report.",
             "tool_findings": [],
             "server_level_risks": [],
+            "false_positives": [],
+            "unconfirmed_findings": [],
+            "audit_metadata": {},
+            "coverage_gaps": [],
             "parse_error": True,
             "server_id": server_id,
         }
@@ -1453,6 +1455,10 @@ async def _run_supervisor(
     report.setdefault("summary", "")
     report.setdefault("tool_findings", [])
     report.setdefault("server_level_risks", [])
+    report.setdefault("false_positives", [])
+    report.setdefault("unconfirmed_findings", [])
+    report.setdefault("audit_metadata", {})
+    report.setdefault("coverage_gaps", [])
     report["server_id"] = server_id
     return report
 
@@ -1506,7 +1512,7 @@ async def _run_recon(
                     ),
                 }
                 for k, v in (
-                    (t.get("schema") or t.get("inputSchema") or {}).get("properties", {})
+                    (t.get("schema") or {}).get("properties", {})
                 ).items()
             },
         }
@@ -1627,6 +1633,7 @@ async def run_mcpsafety_scan(
     scan_timeout_s: int = 900,
     max_calls_per_turn: int = 5,
     github_url: Optional[str] = None,
+    local_source_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     5-stage MCPSafety penetration testing pipeline.
@@ -1683,6 +1690,7 @@ async def run_mcpsafety_scan(
                     server_id, server_config, tools,
                     github_url or server_config.get("github_url"),
                     llm_provider, model_id, api_key,
+                    local_source_path=local_source_path,
                 ),
                 timeout=150,
             )
@@ -1738,9 +1746,6 @@ async def run_mcpsafety_scan(
         )
         report["tool_findings"] = _redact_findings(report.get("tool_findings", []))
 
-        # Post-process coverage gaps: cross-reference attack plan vs what the hacker actually tested.
-        # The supervisor only sees hacker findings so it cannot know which planned hypotheses were
-        # never executed at all. We compute that here and merge into report["coverage_gaps"].
         plan_ids: set = set()
         plan_index: dict = {}
         for h in attack_plan.get("hypotheses", []) + attack_plan.get("chains", []):
@@ -1806,6 +1811,10 @@ async def run_mcpsafety_scan(
             "summary": f"Scan timed out after {scan_timeout_s}s.",
             "tool_findings": [],
             "server_level_risks": [{"risk": f"Scan did not complete - exceeded {scan_timeout_s}s timeout.", "risk_level": "UNKNOWN", "tools_involved": [], "basis": "timeout"}],
+            "false_positives": [],
+            "unconfirmed_findings": [],
+            "audit_metadata": {},
+            "coverage_gaps": [],
             "server_id": server_id,
         }
 
@@ -1969,9 +1978,9 @@ def run_deterministic_scan(
     worst = "NONE"
 
     for tool in tools:
-        name: str = tool.get("name") or ""
+        name: str = tool.get("name") or tool.get("tool_name") or ""
         desc: str = tool.get("description") or ""
-        schema: Dict = tool.get("input_schema") or tool.get("schema") or {}
+        schema: Dict = tool.get("schema") or {}
         params: List[str] = list((schema.get("properties") or {}).keys())
 
         issues: List[str] = []
@@ -2038,6 +2047,10 @@ def run_deterministic_scan(
         "summary": summary,
         "tool_findings": tool_findings,
         "server_level_risks": server_risks,
+        "false_positives": [],
+        "unconfirmed_findings": [],
+        "coverage_gaps": [],
+        "audit_metadata": {},
         "provider": "deterministic",
         "model": "pattern-match",
         "server_id": server_id,

@@ -164,7 +164,7 @@ Tools to analyze:
 
 
 _LLM_HTTP_TIMEOUT = 120.0
-_OLLAMA_BASE_URL  = "http://localhost:11434/v1"  # overridable via OLLAMA_BASE_URL env var
+_OLLAMA_BASE_URL  = "http://localhost:11434/v1"
 
 
 def _call_anthropic(model_id: str, api_key: Optional[str], prompt: str) -> str:
@@ -179,7 +179,7 @@ def _call_anthropic(model_id: str, api_key: Optional[str], prompt: str) -> str:
         max_tokens=16384,
         messages=[{"role": "user", "content": prompt}],
     )
-    return response.content[0].text
+    return response.content[0].text if response.content else ""
 
 
 def _call_openai(model_id: str, api_key: Optional[str], prompt: str) -> str:
@@ -198,7 +198,6 @@ def _call_openai(model_id: str, api_key: Optional[str], prompt: str) -> str:
 
 
 def _call_gemini(model_id: str, api_key: Optional[str], prompt: str) -> str:
-    # Support both google-genai (new) and google-generativeai (legacy)
     key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     try:
         from google import genai
@@ -264,14 +263,14 @@ def detect_llm_provider() -> Optional[str]:
         return "anthropic"
     if os.environ.get("OPENAI_API_KEY") and _pkg_importable("openai"):
         return "openai"
-    if (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")) and _pkg_importable("google.generativeai"):
+    if (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")) and (_pkg_importable("google.genai") or _pkg_importable("google.generativeai")):
         return "gemini"
     return None
 
 
 def _cisco_available() -> bool:
     try:
-        import mcpscanner  # noqa: F401
+        import mcpscanner
         return True
     except ImportError:
         return False
@@ -281,7 +280,7 @@ def _snyk_available() -> bool:
     if not os.environ.get("SNYK_TOKEN"):
         return False
     try:
-        import agent_scan  # noqa: F401
+        import agent_scan
         return True
     except ImportError:
         return bool(shutil.which("snyk-agent-scan") or shutil.which("uvx"))
@@ -318,7 +317,8 @@ def merge_findings(server_id: str, results: List[Dict[str, Any]]) -> Dict[str, A
         if _risk_order(r.get("overall_risk_level", "NONE")) > _risk_order(worst):
             worst = r["overall_risk_level"]
         for slr in r.get("server_level_risks", []):
-            tagged = f"[{prov}] {slr}"
+            slr_text = slr.get("risk", str(slr)) if isinstance(slr, dict) else slr
+            tagged = f"[{prov}] {slr_text}"
             if tagged not in server_level_risks:
                 server_level_risks.append(tagged)
         for tf in r.get("tool_findings", []):
@@ -475,7 +475,7 @@ def _normalize_cisco_results(server_id: str, results: list) -> Dict[str, Any]:
             "risk_level": tool_risk,
             "risk_tags": list(dict.fromkeys(risk_tags)),
             "finding": " | ".join(finding_lines) or "No issues found",
-            "exploitation_scenario": "",   # Cisco reports findings, not exploit narratives
+            "exploitation_scenario": "",
             "remediation": "",
             "is_safe": getattr(result, "is_safe", tool_risk == "NONE"),
             "analyzer_status": getattr(result, "status", ""),
@@ -505,7 +505,6 @@ def _select_cisco_analyzers(cisco_api_key: Optional[str]) -> list:
     """Choose which Cisco engines to run based on available credentials."""
     from mcpscanner.core.models import AnalyzerEnum
 
-    # YARA + Readiness always work offline with no API keys
     analyzers = [AnalyzerEnum.YARA, AnalyzerEnum.READINESS]
 
     llm_key = os.environ.get("MCP_SCANNER_LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
@@ -650,7 +649,7 @@ def _normalize_snyk_results(
     for issue in issues:
         code      = issue.get("code", "")
         message   = issue.get("message", "")
-        reference = issue.get("reference") or []  # [server_idx, tool_idx]
+        reference = issue.get("reference") or []
 
         severity = _snyk_severity(code)
         tag      = _snyk_tag(code)

@@ -36,7 +36,7 @@ class DriftDetectedError(Exception):
 _RATE_LIMIT_MAX_CALLS  = 20
 _RATE_LIMIT_WINDOW_S   = 60
 _INSPECT_TIMEOUT_S     = 30
-_MAX_B64_DECODES       = 50   # cap base64 decode iterations to prevent CPU exhaustion on dense payloads
+_MAX_B64_DECODES       = 50
 _CALL_TIMES_MAX_ENTRIES = 10_000
 _call_times: Dict[str, collections.deque] = {}
 _tool_call_counters: Dict[str, int] = {}
@@ -306,9 +306,6 @@ def _try_decode_b64(text: str) -> List[str]:
         try:
             candidate = base64.b64decode(match.group() + "==").decode("utf-8", errors="ignore")
             if len(candidate) > 10:
-                # Accept if ≥70% of chars are text (printable + common whitespace).
-                # Plain isprintable() rejects \n/\r/\t, causing false negatives on
-                # multi-line injection payloads.
                 text_chars = sum(1 for c in candidate if c.isprintable() or c in "\n\r\t")
                 if text_chars / len(candidate) >= 0.70: decoded.append(candidate)
         except Exception: pass
@@ -438,7 +435,7 @@ def _resolve_crefs(d: Dict[str, str]) -> Dict[str, str]:
                     "connection will likely fail auth",
                     v, k,
                 )
-            out[k] = real if real is not None else v
+            out[k] = real if real is not None else ""
         else:
             out[k] = v
     return out
@@ -471,8 +468,6 @@ def _scrub_content(content: list) -> list:
                 try:
                     item = item.model_copy(update={"text": clean})
                 except Exception:
-                    # Non-Pydantic item: wrap in a plain object that downstream
-                    # serialisers can handle via the hasattr(c, "text") path.
                     _item_type = getattr(item, "type", "text")
                     class _Scrubbed:
                         type = _item_type
@@ -490,7 +485,10 @@ async def open_streams(server: Dict[str, Any]) -> AsyncGenerator[Tuple[Any, Any]
     - sse            -> legacy SSE (2-tuple)
     - streamable_http -> modern HTTP (3-tuple from SDK; session-id callback dropped)
     """
-    transport = server["transport"]
+    transport = server.get("transport")
+    if not transport:
+        raise ValueError(f"Server config missing 'transport' for '{server.get('server_id', '?')}'")
+
     headers: Dict[str, str] = _resolve_crefs(server.get("headers") or {})
 
     if transport == "stdio":
@@ -653,6 +651,7 @@ async def call_tool_with_telemetry(
     server_id: str,
     tool_name: str,
     args: Dict[str, Any],
+    _record: bool = True,
 ) -> Tuple[list, Dict[str, Any]]:
     server = db.get_server(server_id)
     if not server: raise ValueError(f"Server '{server_id}' is not registered")
@@ -743,18 +742,20 @@ async def call_tool_with_telemetry(
         latency_ms    = (time.monotonic() - start) * 1000
         is_tool_error = bool(getattr(result, "isError", False))
         success       = not is_tool_error
-        content       = result.content if hasattr(result, "content") else []
+        content       = (result.content if hasattr(result, "content") and result.content is not None else [])
         content       = _scrub_content(content)
 
         result_str = _serialise_content(content)
         output_size = len(result_str.encode())
-        output_hash = hashlib.sha256(result_str.encode()).hexdigest()[:16]
 
         if output_size > MAX_OUTPUT_BYTES:
             output_truncated = True
             raw_bytes = result_str.encode()[:MAX_OUTPUT_BYTES]
             result_str = raw_bytes.decode("utf-8", errors="ignore")
             content = [{"type": "text", "text": result_str}]
+            output_size = len(result_str.encode())
+
+        output_hash = hashlib.sha256(result_str.encode()).hexdigest()[:16]
 
         output_preview = _redact_text(result_str[:500])[0]
 
@@ -767,30 +768,36 @@ async def call_tool_with_telemetry(
         latency_ms = (time.monotonic() - start) * 1000
         error_msg  = _redact_text(str(exc))[0]
 
-    injection_warning = await scan_for_injection(content) if content else None
+    injection_warning = None
+    if content:
+        try:
+            injection_warning = await scan_for_injection(content)
+        except Exception as _inj_exc:
+            _log.warning("injection scan failed for tool %s: %s", tool_name, _inj_exc)
 
     run_id = None
-    try:
-        notes_parts = [error_msg[:500]] if error_msg else []
-        if injection_warning:
-            notes_parts.append(f"injection_warning: {injection_warning[:200]}")
-        run_id = db.record_run(
-            tool_id=tool_id,
-            args=_redact_args(args),
-            success=success,
-            is_tool_error=is_tool_error,
-            latency_ms=latency_ms,
-            output_size=output_size,
-            output_schema_hash=output_hash,
-            output_preview=output_preview,
-            notes=" | ".join(notes_parts),
-        )
-        stored_prior = db.get_profile(tool_id)
-        if stored_prior:
-            _tool_call_counters[tool_id] = _tool_call_counters.get(tool_id, 0) + 1
-            maybe_update_tool_profile(tool_id, stored_prior, _tool_call_counters[tool_id])
-    except Exception as db_exc:
-        logging.getLogger(__name__).warning("telemetry write failed for tool %s: %s", tool_id, db_exc)
+    if _record:
+        try:
+            notes_parts = [error_msg[:500]] if error_msg else []
+            if injection_warning:
+                notes_parts.append(f"injection_warning: {injection_warning[:200]}")
+            run_id = db.record_run(
+                tool_id=tool_id,
+                args=_redact_args(args),
+                success=success,
+                is_tool_error=is_tool_error,
+                latency_ms=latency_ms,
+                output_size=output_size,
+                output_schema_hash=output_hash,
+                output_preview=output_preview,
+                notes=" | ".join(notes_parts),
+            )
+            stored_prior = db.get_profile(tool_id)
+            if stored_prior:
+                _tool_call_counters[tool_id] = _tool_call_counters.get(tool_id, 0) + 1
+                maybe_update_tool_profile(tool_id, stored_prior, _tool_call_counters[tool_id])
+        except Exception as db_exc:
+            logging.getLogger(__name__).warning("telemetry write failed for tool %s: %s", tool_id, db_exc)
 
     telemetry = {
         "run_id": run_id,
@@ -832,11 +839,11 @@ async def run_replay_test(
     args: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Call the tool twice with identical args and compare results to estimate idempotency."""
-    content1, tel1 = await call_tool_with_telemetry(server_id, tool_name, args)
+    content1, tel1 = await call_tool_with_telemetry(server_id, tool_name, args, _record=False)
     if tel1.get("injection_warning"):
         raise RuntimeError(f"Replay aborted: injection detected in call 1. {tel1['injection_warning']}")
     await asyncio.sleep(0.5)
-    content2, tel2 = await call_tool_with_telemetry(server_id, tool_name, args)
+    content2, tel2 = await call_tool_with_telemetry(server_id, tool_name, args, _record=False)
     if tel2.get("injection_warning"):
         raise RuntimeError(f"Replay aborted: injection detected in call 2. {tel2['injection_warning']}")
 

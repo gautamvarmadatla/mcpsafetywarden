@@ -249,10 +249,10 @@ async def _detect_github_url_from_pypi(server_config: Dict[str, Any]) -> Optiona
                 info = resp.json().get("info", {})
                 for url in (info.get("project_urls") or {}).values():
                     if "github.com" in (url or ""):
-                        return url
+                        return re.sub(r"^git\+", "", url).rstrip(".git").split("#")[0]
                 home = info.get("home_page") or ""
                 if "github.com" in home:
-                    return home
+                    return re.sub(r"^git\+", "", home).rstrip(".git").split("#")[0]
             except Exception:
                 pass
     return None
@@ -273,6 +273,49 @@ def _file_priority(path: str, size: int) -> tuple:
     name = os.path.basename(path)
     name_tier = -1 if name in _PRIORITY_NAMES else (1 if name in _DEPRIORITY_NAMES else 0)
     return (depth, name_tier, -size)
+
+
+def _fetch_local_source_files(install_path: str) -> Dict[str, str]:
+    """
+    Read source files from a locally installed package directory.
+
+    Applies the same filters, size limits, and priority ordering as the GitHub fetcher.
+    Returns {relative_path: content} for up to _MAX_FILES files.
+    """
+    result: Dict[str, str] = {}
+    candidates: List[Tuple[Any, str]] = []
+    src_exts = _PY_EXTS | _TS_EXTS
+
+    for dirpath, _dirs, filenames in os.walk(install_path):
+        rel_dir = os.path.relpath(dirpath, install_path).replace("\\", "/")
+        if rel_dir == ".":
+            rel_dir = ""
+        for fname in filenames:
+            ext = os.path.splitext(fname)[1].lower()
+            if ext not in src_exts:
+                continue
+            rel_path = f"{rel_dir}/{fname}".lstrip("/")
+            if _EXCLUDE_PATH_RE.search(rel_path):
+                continue
+            if ext in _TS_EXTS and _TS_EXCLUDE_PATH_RE.search(rel_path):
+                continue
+            full_path = os.path.join(dirpath, fname)
+            try:
+                size = os.path.getsize(full_path)
+            except OSError:
+                continue
+            candidates.append((_file_priority(rel_path, size), rel_path, full_path))
+
+    candidates.sort(key=lambda x: x[0])
+    for _, rel_path, full_path in candidates[:_MAX_FILES]:
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                content = fh.read(_MAX_FILE_BYTES)
+            result[rel_path] = content
+        except OSError:
+            pass
+
+    return result
 
 
 async def _fetch_source_files(owner: str, repo: str) -> Dict[str, str]:
@@ -339,6 +382,7 @@ def _entropy_secret_scan(source_files: Dict[str, str]) -> List[Dict[str, Any]]:
         try:
             tree = ast.parse(content, filename=path)
         except SyntaxError:
+            _log.debug("entropy scan: skipping %s (SyntaxError)", path)
             continue
 
         parent_map: Dict[int, ast.AST] = {}
@@ -1006,6 +1050,7 @@ async def run_source_recon(
     llm_provider: Optional[str] = None,
     model_id: Optional[str] = None,
     api_key: Optional[str] = None,
+    local_source_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Stage 0b: source code reconnaissance for an MCP server.
@@ -1034,32 +1079,40 @@ async def run_source_recon(
         except Exception:
             pass
 
-    if not url:
-        _log.debug("source_recon: no GitHub URL for server=%s", server_id)
-        return result
-
-    parsed = _parse_github_owner_repo(url)
-    if not parsed:
-        _log.debug("source_recon: cannot parse GitHub URL: %s", url)
-        return result
-
-    owner, repo = parsed
-    result["github_url"] = f"https://github.com/{owner}/{repo}"
-
-    try:
-        source_files = await asyncio.wait_for(
-            _fetch_source_files(owner, repo),
-            timeout=_GITHUB_FETCH_TIMEOUT,
-        )
-    except asyncio.TimeoutError:
-        _log.debug("source_recon: fetch timed out for %s/%s", owner, repo)
-        return result
-    except Exception as exc:
-        _log.debug("source_recon: fetch failed: %s", exc)
-        return result
-
-    if not source_files:
-        _log.debug("source_recon: no source files found for %s/%s", owner, repo)
+    if url:
+        parsed = _parse_github_owner_repo(url)
+        if not parsed:
+            _log.debug("source_recon: cannot parse GitHub URL: %s", url)
+            return result
+        owner, repo = parsed
+        result["github_url"] = f"https://github.com/{owner}/{repo}"
+        try:
+            source_files = await asyncio.wait_for(
+                _fetch_source_files(owner, repo),
+                timeout=_GITHUB_FETCH_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            _log.debug("source_recon: fetch timed out for %s/%s", owner, repo)
+            return result
+        except Exception as exc:
+            _log.debug("source_recon: fetch failed: %s", exc)
+            return result
+        if not source_files:
+            _log.debug("source_recon: no source files found for %s/%s", owner, repo)
+            return result
+    elif local_source_path and os.path.isdir(local_source_path):
+        _log.debug("source_recon: using local install path %s for server=%s", local_source_path, server_id)
+        result["github_url"] = f"local://{local_source_path}"
+        try:
+            source_files = _fetch_local_source_files(local_source_path)
+        except Exception as exc:
+            _log.debug("source_recon: local fetch failed: %s", exc)
+            return result
+        if not source_files:
+            _log.debug("source_recon: no source files found at %s", local_source_path)
+            return result
+    else:
+        _log.debug("source_recon: no GitHub URL or local path for server=%s", server_id)
         return result
 
     py_files = {k: v for k, v in source_files.items() if k.endswith(".py")}

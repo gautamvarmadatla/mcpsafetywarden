@@ -18,8 +18,10 @@ from rich.table import Table
 
 from . import database as _db
 from .server import (
+    analyze_cve_blast_radius as _analyze_cve_blast_radius,
     check_server_drift as _check_server_drift,
     discover_servers as _discover_servers,
+    explain_client_risk as _explain_client_risk,
     explain_tool_risk as _explain_tool_risk,
     export_graph as _export_graph,
     get_risk_graph as _get_risk_graph,
@@ -223,19 +225,19 @@ def cmd_onboard(
 
     reg = result.get("register", {})
     tools_found = reg.get("tools_discovered", 0)
-    console.print(f"[green]✓[/green] Registered [cyan]{server_id}[/cyan] - {tools_found} tool(s) discovered")
+    console.print(f"[green]+[/green] Registered [cyan]{server_id}[/cyan] - {tools_found} tool(s) discovered")
     if reg.get("credential_refs"):
         n = sum(len(v) for v in reg["credential_refs"].values())
         console.print(f"[yellow]~[/yellow] {n} secret(s) detected in headers/env and stored securely as cref_ refs (run with --json to see mappings)")
 
     scan = result.get("security_scan") or {}
     if scan.get("skipped"):
-        console.print(f"[yellow]⚠[/yellow]  Scan skipped: {scan['skipped']}")
+        console.print(f"[yellow]![/yellow]  Scan skipped: {scan['skipped']}")
     elif scan.get("error"):
-        console.print(f"[red]✗[/red]  Scan failed: {scan['error']}")
+        console.print(f"[red]x[/red]  Scan failed: {scan['error']}")
     elif scan:
         risk = (scan.get("overall_risk_level") or "unknown").lower()
-        console.print(f"[green]✓[/green] Scan complete - overall risk: {_risk_badge(risk)}")
+        console.print(f"[green]+[/green] Scan complete - overall risk: {_risk_badge(risk)}")
 
 
 @app.command("register")
@@ -272,7 +274,7 @@ def cmd_register(
     if json_output:
         console.print_json(json.dumps(result))
         return
-    console.print(f"[green]✓[/green] Registered [cyan]{server_id}[/cyan] - {result.get('tools_discovered', 0)} tool(s)")
+    console.print(f"[green]+[/green] Registered [cyan]{server_id}[/cyan] - {result.get('tools_discovered', 0)} tool(s)")
     if result.get("credential_refs"):
         n = sum(len(v) for v in result["credential_refs"].values())
         console.print(f"[yellow]~[/yellow] {n} secret(s) detected in headers/env and stored securely as cref_ refs (run with --json to see mappings)")
@@ -296,7 +298,7 @@ def cmd_inspect(
     if json_output:
         console.print_json(json.dumps(result))
         return
-    console.print(f"[green]✓[/green] Inspected [cyan]{server_id}[/cyan] - {result.get('tools_discovered', 0)} tool(s)")
+    console.print(f"[green]+[/green] Inspected [cyan]{server_id}[/cyan] - {result.get('tools_discovered', 0)} tool(s)")
     if result.get("drift"):
         drift = result["drift"]
         sev = drift.get("overall_severity", "")
@@ -322,7 +324,7 @@ def cmd_drift(
     _SEV_COLOR = {"CRITICAL": "bold red", "HIGH": "red", "MEDIUM": "yellow", "LOW": "cyan"}
 
     if not result.get("drift_detected"):
-        console.print(f"[green]✓[/green] No drift for [cyan]{server_id}[/cyan]")
+        console.print(f"[green]+[/green] No drift for [cyan]{server_id}[/cyan]")
         if result.get("baseline_snapshot_at"):
             console.print(f"  Baseline: {result['baseline_snapshot_at'][:19]}")
         return
@@ -463,12 +465,12 @@ def cmd_call(
         return
 
     if result.get("reason") == "policy_blocked":
-        err.print(f"[red]✗ Blocked by policy:[/red] {result.get('message', '')}")
+        err.print(f"[red]x Blocked by policy:[/red] {result.get('message', '')}")
         raise typer.Exit(1)
 
     if result.get("reason") == "arg_scan_blocked":
         console.print(Panel(
-            f"[red]✗ Arg scan blocked[/red]\n"
+            f"[red]x Arg scan blocked[/red]\n"
             f"  Arg:        [yellow]{result.get('flagged_arg', '?')}[/yellow]\n"
             f"  Value:      [yellow]{result.get('flagged_value', '')[:120]}[/yellow]\n"
             f"  Categories: {', '.join(result.get('categories', []))}\n"
@@ -494,16 +496,16 @@ def cmd_call(
     alternatives = result.get("alternatives", [])
     risk = result.get("risk_level", "unknown")
     console.print(Panel(
-        f"[yellow]⚠ Blocked[/yellow]  risk: {_risk_badge(risk)}",
+        f"[yellow]! Blocked[/yellow]  risk: {_risk_badge(risk)}",
         title=f"{tool_name}",
     ))
     for alt in alternatives:
         name = alt.get("tool", "")
         if name == "More options":
-            console.print(f"  [dim]{alt['option']}.[/dim]  More options")
+            console.print(f"  [dim]{alt.get('option', '')}.[/dim]  More options")
         else:
             console.print(
-                f"  [cyan]{alt['option']}.[/cyan]  [bold]{name}[/bold]"
+                f"  [cyan]{alt.get('option', '')}.[/cyan]  [bold]{name}[/bold]"
                 f"  - reduction: {alt.get('risk_reduction', '?')}"
                 f"  coverage: {alt.get('functional_coverage', '?')}"
             )
@@ -518,7 +520,7 @@ def cmd_call(
             llm_provider=provider, llm_model=model, llm_api_key=api_key,
         )))
         for opt in more.get("options", []):
-            console.print(f"  [cyan]{opt['choice']}.[/cyan]  {opt['action']}")
+            console.print(f"  [cyan]{opt.get('choice', '')}.[/cyan]  {opt.get('action', '')}")
 
         sub = Prompt.ask("Pick", choices=["B", "b", "C", "c"]).upper()
         if sub == "C":
@@ -542,18 +544,18 @@ def cmd_call(
 
     result = _load(_run(_safe_tool_call(
         server_id=server_id, tool_name=tool_name,
-        args=parsed_args, use_alternative=chosen["tool"],
+        args=parsed_args, use_alternative=chosen.get("tool", ""),
         args_scan_override=args_scan_override,
         llm_provider=provider, llm_model=model, llm_api_key=api_key,
     )))
 
     if result.get("blocked"):
         if result.get("reason") == "alternative_also_requires_approval":
-            console.print(f"'{chosen['tool']}' also requires approval.")
+            console.print(f"'{chosen.get('tool', '')}' also requires approval.")
             if Confirm.ask("Proceed anyway?"):
                 result = _load(_run(_safe_tool_call(
                     server_id=server_id, tool_name=tool_name,
-                    args=parsed_args, use_alternative=chosen["tool"],
+                    args=parsed_args, use_alternative=chosen.get("tool", ""),
                     approved=True, args_scan_override=args_scan_override,
                     llm_provider=provider, llm_model=model, llm_api_key=api_key,
                 )))
@@ -576,7 +578,7 @@ def _print_call_result(result: dict, json_output: bool):
         return
     if result.get("quarantined"):
         console.print(Panel(
-            f"[red]⚠ Output quarantined - possible injection attack[/red]\n{result.get('message', '')}",
+            f"[red]! Output quarantined - possible injection attack[/red]\n{result.get('message', '')}",
             title="Security Warning",
         ))
         return
@@ -587,14 +589,14 @@ def _print_call_result(result: dict, json_output: bool):
         for i in items
     )
     executed_with = result.get("executed_with") or result.get("executed_tool")
-    title = f"✓  {tel.get('latency_ms', '?')}ms"
+    title = f"+  {tel.get('latency_ms', '?')}ms"
     if executed_with:
         title += f"  [{executed_with}]"
     console.print(Panel(text[:4000] or "(empty response)", title=title))
     if result.get("warning"):
-        console.print(f"[yellow]⚠[/yellow]  {result['warning']}")
+        console.print(f"[yellow]![/yellow]  {result['warning']}")
     if tel.get("args_secret_warning"):
-        console.print(f"[yellow]⚠[/yellow]  {tel['args_secret_warning']}")
+        console.print(f"[yellow]![/yellow]  {tel['args_secret_warning']}")
 
 
 @app.command("preflight")
@@ -636,7 +638,7 @@ def cmd_preflight(
             f"[red]Security:[/red] {sec.get('risk_level')} - {(sec.get('finding') or '')[:100]}"
         )
     if result.get("warning"):
-        console.print(f"[yellow]⚠[/yellow]  {result['warning']}")
+        console.print(f"[yellow]![/yellow]  {result['warning']}")
 
 
 @app.command("profile")
@@ -808,7 +810,7 @@ def cmd_history(
     t.add_column("Output", justify="right")
     t.add_column("Notes")
     for r in runs:
-        ok = "[green]✓[/green]" if r.get("success") else "[red]✗[/red]"
+        ok = "[green]+[/green]" if r.get("success") else "[red]x[/red]"
         t.add_row(
             str(r.get("run_id", "")),
             (r.get("timestamp") or "")[:19],
@@ -834,12 +836,12 @@ def cmd_ping(
     status = result.get("status", "unknown")
     latency = result.get("latency_ms")
     if status == "reachable":
-        console.print(f"[green]✓[/green]  {server_id}  -  reachable ({latency}ms)")
+        console.print(f"[green]+[/green]  {server_id}  -  reachable ({latency}ms)")
     elif status == "timeout":
-        console.print(f"[yellow]⚠[/yellow]  {server_id}  -  timeout after {latency}ms")
+        console.print(f"[yellow]![/yellow]  {server_id}  -  timeout after {latency}ms")
         raise typer.Exit(1)
     else:
-        console.print(f"[red]✗[/red]  {server_id}  -  unreachable: {result.get('error', '')}")
+        console.print(f"[red]x[/red]  {server_id}  -  unreachable: {result.get('error', '')}")
         raise typer.Exit(1)
 
     ns = result.get("network_scan")
@@ -942,7 +944,7 @@ def cmd_scan_all(
 
     skipped = result.get("skipped_servers", [])
     for s in skipped:
-        console.print(f"[yellow]⚠[/yellow]  {s['server_id']} skipped: {s['reason']}")
+        console.print(f"[yellow]![/yellow]  {s.get('server_id', '?')} skipped: {s.get('reason', '?')}")
 
 
 @app.command("discover")
@@ -1053,14 +1055,14 @@ def cmd_onboard_discovered(
     registered = result.get("registered", 0)
     attempted = result.get("attempted", 0)
     total = result.get("total", attempted)
-    console.print(f"[green]✓[/green] Registered {registered}/{attempted} server(s) ({total} total found)")
+    console.print(f"[green]+[/green] Registered {registered}/{attempted} server(s) ({total} total found)")
 
     for r in results:
         status = r.get("status", "")
         name = r.get("server_name", r.get("discovery_id", ""))
         if status == "registered":
             tools = r.get("tools_discovered", 0)
-            console.print(f"  [green]✓[/green] {name} -> [cyan]{r.get('server_id')}[/cyan] ({tools} tool(s))")
+            console.print(f"  [green]+[/green] {name} -> [cyan]{r.get('server_id')}[/cyan] ({tools} tool(s))")
             if r.get("credential_refs"):
                 n = sum(len(v) for v in r["credential_refs"].values())
                 console.print(f"    [yellow]~[/yellow] {n} secret(s) stored as cref_ refs (run with --json to see mappings)")
@@ -1070,9 +1072,9 @@ def cmd_onboard_discovered(
             console.print(f"  [yellow]-[/yellow] {name} skipped: {r.get('reason', '')}")
         elif status == "failed":
             hint = f" ({r['hint']})" if r.get("hint") else ""
-            console.print(f"  [red]✗[/red] {name} failed: {r.get('error', '')}{hint}")
+            console.print(f"  [red]x[/red] {name} failed: {r.get('error', '')}{hint}")
         elif status == "rate_limited":
-            console.print(f"  [yellow]⚠[/yellow] {name} rate limited: {r.get('reason', '')}")
+            console.print(f"  [yellow]![/yellow] {name} rate limited: {r.get('reason', '')}")
 
 
 @app.command("graph")
@@ -1150,6 +1152,9 @@ def cmd_explain_risk(
     ]
     if result.get("schema_tampered"):
         lines.append("[bold red]! SCHEMA TAMPERED - tool definition changed since last inspect[/bold red]")
+    if result.get("cve_impacted"):
+        cve_ids = ", ".join(result.get("impacting_cves", [])[:5])
+        lines.append(f"[bold red]! CVE IMPACTED - {cve_ids}[/bold red]")
     if result.get("has_credential_surface"):
         lines.append("[red]! Credential surface exposed[/red]")
     if result.get("agent_clients"):
@@ -1212,6 +1217,76 @@ def cmd_explain_risk(
 
     if result.get("note"):
         console.print(f"[dim]{result['note']}[/dim]")
+
+
+@app.command("client-risk")
+def cmd_client_risk(
+    client_id: str = typer.Argument(..., help="Agent client ID (e.g. claude-desktop, cursor, vscode)"),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Analyze cross-server risks for all servers under one agent client."""
+    result = _load(_explain_client_risk(client_id=client_id))
+    _die(result)
+    if json_output:
+        console.print_json(json.dumps(result))
+        return
+
+    composite = result.get("composite_risk", "unknown").lower()
+    risk_colors = {"critical": "bold red", "high": "red", "medium": "yellow", "low": "green"}
+    rc = risk_colors.get(composite, "white")
+    lines = [
+        f"Composite risk:  [{rc}]{composite.upper()}[/{rc}]",
+        f"Servers analyzed: {result.get('server_count', 0)}",
+    ]
+    exfil = result.get("cross_server_exfiltration_paths", [])
+    shadows = result.get("tool_shadowing", [])
+    cves = result.get("cve_blast_radius", [])
+    if exfil:
+        lines.append(f"[red]Exfil paths:     {len(exfil)}[/red]")
+    if shadows:
+        lines.append(f"[yellow]Tool shadows:    {len(shadows)}[/yellow]")
+    if cves:
+        lines.append(f"[red]Shared CVEs:     {len(cves)}[/red]")
+    summary = result.get("summary", "")
+    if summary:
+        lines.append(f"\n{summary}")
+    console.print(Panel("\n".join(lines), title=f"Client Risk - {client_id}"))
+
+
+@app.command("cve-blast")
+def cmd_cve_blast(
+    client_id: Optional[str] = typer.Argument(None, help="Scope to one client; omit for all"),
+    vuln_id: Optional[str] = typer.Option(None, "--vuln", "-v", help="Filter to a specific CVE / GHSA ID"),
+    json_output: bool = typer.Option(False, "--json"),
+):
+    """Report CVEs affecting multiple servers under the same client (blast radius)."""
+    result = _load(_analyze_cve_blast_radius(client_id=client_id, vuln_id=vuln_id))
+    _die(result)
+    if json_output:
+        console.print_json(json.dumps(result))
+        return
+    entries = result.get("cve_blast_radius", [])
+    if not entries:
+        console.print(f"[green]No shared CVEs found.[/green]")
+        hint = result.get("hint", "")
+        if hint:
+            console.print(f"[dim]{hint}[/dim]")
+        return
+    t = Table(title="CVE Blast Radius", box=box.SIMPLE_HEAD)
+    t.add_column("CVE / GHSA")
+    t.add_column("Severity")
+    t.add_column("Blast Radius")
+    t.add_column("Affected Servers")
+    for entry in entries:
+        sev = (entry.get("severity") or "UNKNOWN").upper()
+        sev_color = "red" if sev in ("CRITICAL", "HIGH") else "yellow"
+        t.add_row(
+            entry.get("vuln_id", ""),
+            f"[{sev_color}]{sev}[/{sev_color}]",
+            str(entry.get("blast_radius", 0)),
+            ", ".join(entry.get("affected_servers", [])),
+        )
+    console.print(t)
 
 
 @app.command("export-graph")

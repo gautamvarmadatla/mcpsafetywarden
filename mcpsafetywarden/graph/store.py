@@ -52,6 +52,25 @@ def upsert_relation(rel: InventoryRelation) -> None:
         conn.close()
 
 
+def patch_object_metadata(obj_id: str, updates: Dict[str, Any]) -> None:
+    conn = _db.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT metadata FROM inventory_objects WHERE obj_id = ?", (obj_id,)
+        ).fetchone()
+        if row is None:
+            return
+        meta = _jl(row["metadata"], {})
+        meta.update(updates)
+        conn.execute(
+            "UPDATE inventory_objects SET metadata = ? WHERE obj_id = ?",
+            (json.dumps(meta), obj_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def get_object(obj_id: str) -> Optional[Dict[str, Any]]:
     conn = _db.get_connection()
     try:
@@ -123,30 +142,29 @@ def get_full_graph(server_id: Optional[str] = None) -> Dict[str, Any]:
                 "SELECT tool_id FROM tools WHERE server_id = ?", (server_id,)
             ).fetchall()
             tool_ids = [r["tool_id"] for r in tool_ids_raw]
-            finding_ids = [
-                f"finding::{server_id}::{tid.split('::', 1)[1]}"
-                for tid in tool_ids if "::" in tid
-            ]
-            tamper_ids = [
-                f"finding::tamper::{server_id}::{tid.split('::', 1)[1]}"
-                for tid in tool_ids if "::" in tid
-            ]
+            finding_prefix = f"finding::{server_id}::"
+            tamper_prefix = f"finding::tamper::{server_id}::"
+            finding_rows_raw = conn.execute(
+                "SELECT obj_id FROM inventory_objects WHERE obj_id LIKE ? OR obj_id LIKE ?",
+                (finding_prefix + "%", tamper_prefix + "%"),
+            ).fetchall()
+            finding_ids = [r["obj_id"] for r in finding_rows_raw]
             disc_rows = conn.execute(
                 "SELECT discovery_id, client FROM discovered_servers WHERE registered_server_id = ?",
                 (server_id,),
             ).fetchall()
             cred_prefix = f"cred_surface::{server_id}::"
-            all_cred_rows = conn.execute(
-                "SELECT obj_id FROM inventory_objects WHERE obj_type = 'credential_surface'",
+            cred_rows = conn.execute(
+                "SELECT obj_id FROM inventory_objects WHERE obj_id LIKE ?",
+                (cred_prefix + "%",),
             ).fetchall()
             relevant_ids = list(
                 {server_id, f"provenance::{server_id}"}
                 | set(tool_ids)
                 | set(finding_ids)
-                | set(tamper_ids)
                 | {dr["discovery_id"] for dr in disc_rows}
                 | {dr["client"] for dr in disc_rows}
-                | {r["obj_id"] for r in all_cred_rows if r["obj_id"].startswith(cred_prefix)}
+                | {r["obj_id"] for r in cred_rows}
             )
             ph = ",".join("?" * len(relevant_ids))
             obj_rows = conn.execute(
@@ -157,6 +175,14 @@ def get_full_graph(server_id: Optional[str] = None) -> Dict[str, Any]:
                 f"SELECT * FROM inventory_relations WHERE source_id IN ({ph}) OR target_id IN ({ph})",
                 relevant_ids * 2,
             ).fetchall()
+            technique_ids = list({r["target_id"] for r in rel_rows if r["relation"] == "maps_to"})
+            if technique_ids:
+                tph = ",".join("?" * len(technique_ids))
+                tech_rows = conn.execute(
+                    f"SELECT * FROM inventory_objects WHERE obj_id IN ({tph})",
+                    technique_ids,
+                ).fetchall()
+                obj_rows = list(obj_rows) + list(tech_rows)
         else:
             obj_rows = conn.execute("SELECT * FROM inventory_objects").fetchall()
             rel_rows = conn.execute("SELECT * FROM inventory_relations").fetchall()
@@ -176,3 +202,38 @@ def get_full_graph(server_id: Optional[str] = None) -> Dict[str, Any]:
         return {"objects": objects, "relations": relations}
     finally:
         conn.close()
+
+
+def get_servers_by_client(client_id: str) -> List[str]:
+    """Return server_ids reachable from an agent_client via the declares chain."""
+    server_ids: List[str] = []
+    for rel in get_relations_from(client_id):
+        if rel["relation"] != "declares":
+            continue
+        config_obj = get_object(rel["target_id"])
+        if not config_obj or config_obj["obj_type"] != "mcp_config":
+            continue
+        for rel2 in get_relations_from(config_obj["obj_id"]):
+            if rel2["relation"] != "declares":
+                continue
+            srv_obj = get_object(rel2["target_id"])
+            if srv_obj and srv_obj["obj_type"] == "mcp_server":
+                sid = rel2["target_id"]
+                if sid not in server_ids:
+                    server_ids.append(sid)
+    return server_ids
+
+
+def get_tools_for_servers(server_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+    """Return tool metadata dicts grouped by server_id."""
+    result: Dict[str, List[Dict[str, Any]]] = {}
+    for sid in server_ids:
+        tools = []
+        for rel in get_relations_from(sid):
+            if rel["relation"] != "exposes":
+                continue
+            tobj = get_object(rel["target_id"])
+            if tobj and tobj["obj_type"] == "tool":
+                tools.append({**tobj.get("metadata", {}), "name": tobj["name"], "obj_id": tobj["obj_id"]})
+        result[sid] = tools
+    return result

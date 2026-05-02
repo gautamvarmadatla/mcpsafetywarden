@@ -14,6 +14,8 @@ ObjectType = Literal[
     "finding",
     "cve",
     "runtime_call",
+    "mitre_technique",
+    "cve_blast_radius",
 ]
 
 RelationType = Literal[
@@ -29,6 +31,9 @@ RelationType = Literal[
     "can_exfiltrate",
     "invoked",
     "blocked_by",
+    "maps_to",
+    "cross_server_exfil",
+    "affected_by_cve",
 ]
 
 

@@ -19,18 +19,14 @@ from .security_utils import strip_json_fence as _strip_json_fence
 
 _log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Regex patterns
-# ---------------------------------------------------------------------------
-
 _PATH_TRAVERSAL_RE = re.compile(
-    r"(\.\.[/\\]"                       # ../  ..\
-    r"|\.\.%[25][fF0cC]"               # URL-encoded slashes after ..
-    r"|\.\.[;,]"                        # ..;  ..,  (bypass tricks)
-    r"|%c0%af|%c1%9c"                   # Overlong UTF-8 / (CVE-2002-0661)
-    r"|\.\.[\x00-\x1f]"                # .. + control char
-    r"|[/\\]{2,}[a-z.]*\.\."           # //..  \\..
-    r"|\.+[/\\]\.+"                     # ../ variants with extra dots
+    r"(\.\.[/\\]"
+    r"|\.\.%[25][fF0cC]"
+    r"|\.\.[;,]"
+    r"|%c0%af|%c1%9c"
+    r"|\.\.[\x00-\x1f]"
+    r"|[/\\]{2,}[a-z.]*\.\."
+    r"|\.+[/\\]\.+"
     r")",
     re.IGNORECASE,
 )
@@ -41,7 +37,7 @@ _SENSITIVE_ABS_PATHS_RE = re.compile(
     r"|/sys/(kernel|class|bus|firmware)"
     r"|/dev/(mem|kmem|port|null|zero|random|urandom)"
     r"|/boot/(grub|efi|vmlinuz|initrd)"
-    r"|/var/run/secrets/"              # k8s secrets mount
+    r"|/var/run/secrets/"
     r"|/run/secrets/"
     r")",
     re.IGNORECASE,
@@ -55,7 +51,7 @@ _CREDENTIAL_PATH_RE = re.compile(
     r"|\.pfx(\b|$)"
     r"|\.jks(\b|$)"
     r"|\.keystore(\b|$)"
-    r"|(^|[/\\])\.env($|[/\\.])"      # .env  .env.local  .env.production
+    r"|(^|[/\\])\.env($|[/\\.])"
     r"|\.envrc"
     r"|credentials\.json"
     r"|service.?account.*\.json"
@@ -79,16 +75,16 @@ _CREDENTIAL_PATH_RE = re.compile(
 )
 
 _COMMAND_INJECTION_RE = re.compile(
-    r"(\$\([^)]{1,200}\)"              # $(command)
-    r"|`[^`]{1,200}`"                  # `command`
-    r"|\$\{IFS\}"                      # ${IFS} - common bash bypass
-    r"|\$\{[a-z_][a-z0-9_]*\}"       # ${VAR} expansion
+    r"(\$\([^)]{1,200}\)"
+    r"|`[^`]{1,200}`"
+    r"|\$\{IFS\}"
+    r"|\$\{[a-z_][a-z0-9_]*\}"
     r"|;\s*(rm|cat|ls|wget|curl|nc|ncat|netcat|bash|sh|dash|zsh|ksh|"
     r"python[23]?|perl|ruby|php|node|lua|tclsh|awk|sed)\b"
     r"|[|&]\s*(rm|cat|ls|wget|curl|nc|ncat|netcat|bash|sh|dash|zsh|"
     r"python[23]?|perl|ruby|php|node)\b"
-    r"|>[>\s]*/[a-z]"                  # redirect to absolute path
-    r"|<\s*/[a-z]"                     # read from absolute path
+    r"|>[>\s]*/[a-z]"
+    r"|<\s*/[a-z]"
     r"|__import__\s*\("
     r"|\bsubprocess\b"
     r"|\bos\.(system|popen|execv|execvp|spawnl|popen2)\b"
@@ -106,26 +102,26 @@ _COMMAND_INJECTION_RE = re.compile(
 )
 
 SSRF_RE = re.compile(
-    r"(169\.254\.169\.254"             # AWS EC2 metadata
-    r"|fd00:ec2::254"                  # AWS IPv6 metadata
-    r"|metadata\.google\.internal"    # GCP metadata
-    r"|169\.254\.170\.2"              # ECS task metadata
-    r"|100\.100\.100\.200"            # Alibaba Cloud metadata
-    r"|192\.0\.0\.192"                # Azure IMDS fallback
-    r"|168\.63\.129\.16"              # Azure IMDS
-    r"|127\.[0-9]+\.[0-9]+\.[0-9]+"  # 127.x.x.x loopback range
+    r"(169\.254\.169\.254"
+    r"|fd00:ec2::254"
+    r"|metadata\.google\.internal"
+    r"|169\.254\.170\.2"
+    r"|100\.100\.100\.200"
+    r"|192\.0\.0\.192"
+    r"|168\.63\.129\.16"
+    r"|127\.[0-9]+\.[0-9]+\.[0-9]+"
     r"|(?<![a-zA-Z0-9\-])localhost(?![a-zA-Z0-9\-\.])"
     r"|(?<![0-9\.])0\.0\.0\.0(?![0-9\.])"
     r"|::1(\b|])"
     r"|\[::1\]"
-    r"|\[::ffff:[0-9a-f:]+\]"         # IPv4-mapped IPv6
-    r"|fe80:"                          # IPv6 link-local (fe80::/10)
-    r"|0177\."                         # Octal-encoded loopback (0177.0.0.1 = 127.0.0.1)
-    r"|0x7f"                           # Hex-encoded loopback prefix (0x7f000001)
-    r"|0x[0-9a-f]{8}\b"               # Full hex-encoded IPv4 address
-    r"|10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}"  # RFC1918 10.x
-    r"|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}"  # RFC1918 172.16-31
-    r"|192\.168\.[0-9]{1,3}\.[0-9]{1,3}"         # RFC1918 192.168
+    r"|\[::ffff:[0-9a-f:]+\]"
+    r"|fe80:"
+    r"|0177\."
+    r"|0x7f"
+    r"|0x[0-9a-f]{8}\b"
+    r"|10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}"
+    r"|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}"
+    r"|192\.168\.[0-9]{1,3}\.[0-9]{1,3}"
     r"|file://"
     r"|gopher://"
     r"|dict://"
@@ -142,20 +138,20 @@ _NULL_BYTE_RE = re.compile(
     r"|%00"
     r"|\\x00"
     r"|\\u0000"
-    r"|\\0(?!\d)"                      # \0 not followed by digit
-    r"|%2500"                          # double-encoded null
+    r"|\\0(?!\d)"
+    r"|%2500"
     r")",
 )
 
 _TEMPLATE_INJECTION_RE = re.compile(
-    r"(\{\{[^}]{1,500}\}\}"           # Jinja2 / Handlebars / Twig
-    r"|\$\{[^}]{1,500}\}"            # Spring EL / Groovy / Kotlin
-    r"|<%[=@-]?[^%]{1,500}%>"        # JSP / ERB / ASP
-    r"|#\{[^}]{1,500}\}"             # Ruby string interpolation
-    r"|\*\{[^}]{1,500}\}"            # Thymeleaf
-    r"|@\{[^}]{1,500}\}"             # Thymeleaf URL
-    r"|\[#[^\]]{1,500}\]"            # FreeMarker
-    r"|<#[^>]{1,500}>"               # FreeMarker directive
+    r"(\{\{[^}]{1,500}\}\}"
+    r"|\$\{[^}]{1,500}\}"
+    r"|<%[=@-]?[^%]{1,500}%>"
+    r"|#\{[^}]{1,500}\}"
+    r"|\*\{[^}]{1,500}\}"
+    r"|@\{[^}]{1,500}\}"
+    r"|\[#[^\]]{1,500}\]"
+    r"|<#[^>]{1,500}>"
     r")",
     re.IGNORECASE,
 )
@@ -172,83 +168,83 @@ _CRLF_RE = re.compile(
 )
 
 _SQL_INJECTION_RE = re.compile(
-    r"('\s*(or|and)\s*'?[0-9a-z]"       # ' OR '1'='1, ' AND 1=1
-    r"|\bUNION\s+(ALL\s+)?SELECT\b"      # UNION SELECT
-    r"|\bSELECT\b.{1,100}\bFROM\b"      # SELECT ... FROM
+    r"('\s*(or|and)\s*'?[0-9a-z]"
+    r"|\bUNION\s+(ALL\s+)?SELECT\b"
+    r"|\bSELECT\b.{1,100}\bFROM\b"
     r"|\bDROP\s+(TABLE|DATABASE|SCHEMA|INDEX|VIEW)\b"
     r"|\bINSERT\s+INTO\b"
     r"|\bDELETE\s+FROM\b"
     r"|\bUPDATE\b.{1,100}\bSET\b"
-    r"|;\s*--"                            # ; -- (statement terminator + comment)
-    r"|'\s*;\s*"                          # '; (statement terminator after quote)
-    r"|\bEXEC\s*\("                       # EXEC()
-    r"|\bEXECUTE\s+\w"                   # EXECUTE proc
-    r"|\bxp_cmdshell\b"                  # MSSQL xp_cmdshell
-    r"|\bSLEEP\s*\([0-9]"               # MySQL SLEEP()
-    r"|\bWAITFOR\s+DELAY\b"             # MSSQL WAITFOR DELAY
-    r"|\bpg_sleep\s*\("                 # PostgreSQL pg_sleep
-    r"|\bBENCHMARK\s*\("               # MySQL BENCHMARK timing attack
+    r"|;\s*--"
+    r"|'\s*;\s*"
+    r"|\bEXEC\s*\("
+    r"|\bEXECUTE\s+\w"
+    r"|\bxp_cmdshell\b"
+    r"|\bSLEEP\s*\([0-9]"
+    r"|\bWAITFOR\s+DELAY\b"
+    r"|\bpg_sleep\s*\("
+    r"|\bBENCHMARK\s*\("
     r"|\bINFORMATION_SCHEMA\b"
     r"|\bSYS(COLUMNS|TABLES|OBJECTS|PROCESSES)\b"
-    r"|0x[0-9a-f]{4,}\s*--"             # hex-encoded payload + SQL comment
-    r"|\bLOAD_FILE\s*\("               # MySQL LOAD_FILE
-    r"|\bOUTFILE\b"                     # MySQL INTO OUTFILE
-    r"|\bDATABASELINK\b"               # Oracle database link
-    r"|\bEXTRACTVALUE\s*\("           # MySQL XPath injection via SQL
-    r"|\bUPDATEXML\s*\("              # MySQL XPath injection via SQL
+    r"|0x[0-9a-f]{4,}\s*--"
+    r"|\bLOAD_FILE\s*\("
+    r"|\bOUTFILE\b"
+    r"|\bDATABASELINK\b"
+    r"|\bEXTRACTVALUE\s*\("
+    r"|\bUPDATEXML\s*\("
     r")",
     re.IGNORECASE,
 )
 
 _NOSQL_INJECTION_RE = re.compile(
     r'(\$\s*(where|gt|lt|gte|lte|ne|in|nin|regex|or|and|not|nor|exists|type|mod|all|size|elemMatch)\b'
-    r'|\{\s*"\$'                         # {"$gt": ...
-    r"|;\s*return\s+true\b"             # ; return true  (MongoDB $where injection)
-    r"|this\.[a-zA-Z_]\w*\.length"      # this.field.length (MongoDB $where)
-    r'|"\$ne"\s*:'                      # "$ne": value
-    r'|"\$regex"\s*:'                   # "$regex": ".*"
+    r'|\{\s*"\$'
+    r"|;\s*return\s+true\b"
+    r"|this\.[a-zA-Z_]\w*\.length"
+    r'|"\$ne"\s*:'
+    r'|"\$regex"\s*:'
     r")",
     re.IGNORECASE,
 )
 
 _LDAP_INJECTION_RE = re.compile(
-    r"(\)\s*\("                          # )( - LDAP filter closure
-    r"|\*\s*\)\s*\|"                    # *)|
-    r"|\*\)\s*\("                       # *)(
-    r"|\(\s*\|"                         # (|  - OR filter
-    r"|\(\s*&"                          # (&  - AND filter with injection context
-    r"|\(\s*!"                          # (!  - NOT filter injection
-    r"|[)(|&!*\\]{3,}"                  # clusters of LDAP meta-characters
-    r"|\\\([0-9a-f]{2}"                 # LDAP escape sequence abuse
+    r"(\)\s*\("
+    r"|\*\s*\)\s*\|"
+    r"|\*\)\s*\("
+    r"|\(\s*\|"
+    r"|\(\s*&"
+    r"|\(\s*!"
+    r"|[)(|&!*\\]{3,}"
+    r"|\\\([0-9a-f]{2}"
     r")",
     re.IGNORECASE,
 )
 
 _XPATH_INJECTION_RE = re.compile(
     r"("
-    r"'\s+or\s+'"                        # ' or '
-    r"|'\s+and\s+'"                      # ' and '
-    r"|\]\s*\|\s*//"                     # ] | //  - XPath union
-    r"|//\*\["                           # //*[  - wildcard predicate
-    r"|\bposition\s*\(\s*\)"            # position()
-    r"|\bstring-length\s*\("            # string-length()  - blind XPath exfil
-    r"|\bsubstring\s*\(.{1,50},\s*[0-9]+\s*,\s*1\s*\)"  # char-by-char extraction
-    r"|\bdoc\s*\(\s*['\"]file://"       # doc('file://...')  - XXE via XPath
-    r"|\bcount\s*\(\s*//"               # count(//*) - enumeration
+    r"'\s+or\s+'"
+    r"|'\s+and\s+'"
+    r"|\]\s*\|\s*//"
+    r"|//\*\["
+    r"|\bposition\s*\(\s*\)"
+    r"|\bstring-length\s*\("
+    r"|\bsubstring\s*\(.{1,50},\s*[0-9]+\s*,\s*1\s*\)"
+    r"|\bdoc\s*\(\s*['\"]file://"
+    r"|\bcount\s*\(\s*//"
     r")",
     re.IGNORECASE,
 )
 
 _XXE_RE = re.compile(
     r"("
-    r"<!DOCTYPE\b"                       # DOCTYPE declaration
-    r"|<!ENTITY\b"                       # ENTITY declaration
-    r"|SYSTEM\s+['\"]file://"           # SYSTEM entity -> local file
-    r"|SYSTEM\s+['\"]http://"           # SYSTEM entity -> remote DTD
+    r"<!DOCTYPE\b"
+    r"|<!ENTITY\b"
+    r"|SYSTEM\s+['\"]file://"
+    r"|SYSTEM\s+['\"]http://"
     r"|SYSTEM\s+['\"]https://"
-    r"|PUBLIC\s+['\"][^'\"]*['\"]"      # PUBLIC entity identifier
-    r"|\[<!ENTITY"                       # inline DTD entity block
-    r"|%[a-zA-Z][a-zA-Z0-9_-]*;"       # parameter entity reference %xxe;
+    r"|PUBLIC\s+['\"][^'\"]*['\"]"
+    r"|\[<!ENTITY"
+    r"|%[a-zA-Z][a-zA-Z0-9_-]*;"
     r")",
     re.IGNORECASE,
 )
@@ -282,25 +278,25 @@ _PROMPT_INJECTION_RE = re.compile(
 
 _WINDOWS_SPECIFIC_RE = re.compile(
     r"("
-    r"\\\\[a-zA-Z0-9_.\-]{1,100}\\"    # UNC path \\server\share
-    r"|%5c%5c[a-zA-Z0-9_.\-]"          # URL-encoded UNC
-    r"|\b(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(\.|$|\s)"  # Windows device names
-    r"|::[$\$]DATA"                      # Alternate Data Stream ::$DATA
-    r"|%3a%3a%24DATA"                   # URL-encoded ADS
+    r"\\\\[a-zA-Z0-9_.\-]{1,100}\\"
+    r"|%5c%5c[a-zA-Z0-9_.\-]"
+    r"|\b(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(\.|$|\s)"
+    r"|::[$\$]DATA"
+    r"|%3a%3a%24DATA"
     r")",
     re.IGNORECASE,
 )
 
 _DESERIALIZE_RE = re.compile(
     r"("
-    r"rO0AB"                             # Java serialized object (base64 header)
-    r"|aced0005"                         # Java serialized object (hex)
-    r"|\\x80\\x04\\x95"                # Python pickle protocol 4 (escaped)
-    r"|%80%04%95"                        # Python pickle (URL-encoded)
-    r"|O:[0-9]+:\"[a-zA-Z]"            # PHP serialize O:4:"User"
-    r"|a:[0-9]+:\{i:[0-9]"             # PHP serialize array
-    r"|AAEAAAD"                          # .NET BinaryFormatter (base64)
-    r"|YIId"                             # .NET BinaryFormatter (alternate base64)
+    r"rO0AB"
+    r"|aced0005"
+    r"|\\x80\\x04\\x95"
+    r"|%80%04%95"
+    r"|O:[0-9]+:\"[a-zA-Z]"
+    r"|a:[0-9]+:\{i:[0-9]"
+    r"|AAEAAAD"
+    r"|YIId"
     r")",
     re.IGNORECASE,
 )
@@ -309,10 +305,6 @@ _B64_CANDIDATE_RE = re.compile(r"[A-Za-z0-9+/]{24,}={0,2}")
 
 _MAX_ARG_VALUE_LEN = 50_000
 _MAX_PRODUCTION_SCAN_DEPTH = 20
-
-# ---------------------------------------------------------------------------
-# JSON parse helpers (shared with mcpsafety_scanner pipeline)
-# ---------------------------------------------------------------------------
 
 def _extract_json_fence(raw: str, open_ch: str, close_ch: str):
     start = raw.find(open_ch)
@@ -376,10 +368,6 @@ def _safe_json_dict(raw: str) -> Dict[str, Any]:
                 pass
         return {}
 
-
-# ---------------------------------------------------------------------------
-# Internal probe-time scanning (used by hacker stage)
-# ---------------------------------------------------------------------------
 
 def _scan_single_str(value: str, allow_destructive: bool) -> List[str]:
     issues: List[str] = []
@@ -506,10 +494,6 @@ def _scan_production_args(
 
     return results
 
-
-# ---------------------------------------------------------------------------
-# LLM verification prompt
-# ---------------------------------------------------------------------------
 
 _ARG_THREAT_VERIFY_PROMPT = """\
 You are a senior application-security engineer performing a second-pass review of a flagged tool argument.
@@ -661,10 +645,6 @@ Rules:
 - never refuse to produce the JSON; always give a verdict"""
 
 
-# ---------------------------------------------------------------------------
-# LLM verification
-# ---------------------------------------------------------------------------
-
 async def _llm_verify_arg_threat(
     flagged_value: str,
     arg_path: str,
@@ -695,10 +675,6 @@ async def _llm_verify_arg_threat(
         _log.warning("LLM arg threat verification failed: %s", exc)
         return {"is_attack": True, "confidence": 0.5, "reason": "LLM verification unavailable"}
 
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 async def scan_args_for_threats(
     tool_name: str,

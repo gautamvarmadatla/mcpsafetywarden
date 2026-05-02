@@ -1,6 +1,6 @@
 # Tool Reference
 
-Complete reference for all 23 MCP tools exposed by mcpsafetywarden.
+Complete reference for all 25 MCP tools exposed by mcpsafetywarden.
 
 ## Quick reference
 
@@ -28,6 +28,8 @@ Complete reference for all 23 MCP tools exposed by mcpsafetywarden.
 | [`ping_server`](#ping_server) | Diagnostics | Reachability check with latency |
 | [`get_risk_graph`](#get_risk_graph) | Graph | Build or query the inventory risk graph |
 | [`explain_tool_risk`](#explain_tool_risk) | Graph | Walk risk paths for a tool: blast radius, MITRE tags, recommended action |
+| [`explain_client_risk`](#explain_client_risk) | Graph | Cross-server risk analysis for all servers under one agent client |
+| [`analyze_cve_blast_radius`](#analyze_cve_blast_radius) | Graph | Report CVEs affecting multiple servers under the same client |
 | [`export_graph`](#export_graph) | Graph | Export risk graph as JSON or Mermaid diagram |
 
 ## Setup
@@ -444,6 +446,9 @@ Test idempotency by calling a tool twice with identical args and comparing outpu
 | `tool_name` | string | Yes | |
 | `args` | object | No | Arguments to pass on both calls |
 | `approved` | bool | No | Required for non-read-only or flagged tools (default `false`) |
+| `llm_provider` | string | No | LLM provider for semantic diff analysis (`"anthropic"`, `"openai"`, etc.) |
+| `llm_model` | string | No | Model override for the semantic diff step |
+| `llm_api_key` | string | No | API key override |
 
 **Returns (executed)**
 
@@ -505,7 +510,7 @@ Run a live security audit on a registered server's tools. Results are stored and
 | `background` | bool | No | Run scan in background and return immediately (default `true`) |
 | `model_id` | string | No | Model override (mcpsafety+ providers only) |
 | `api_key` | string | No | API key override |
-| `confirm_authorized` | bool | Yes | Must be `true`; confirms you own and are authorized to test this server. Required for all providers including `cisco` and `snyk`. |
+| `confirm_authorized` | bool | No | Must be `true` when using any LLM or active-probe provider (`anthropic`, `openai`, `gemini`, `cisco`, `snyk`). Not required for deterministic-only scans. Confirms you own and are authorized to test this server. |
 | `github_url` | string | No | GitHub URL of the server's source repository; enables entropy, AST taint flow, and rug-pull detection layers |
 | `allow_destructive_probes` | bool | No | Enable path traversal, command injection, credential file probes (default `false`; safe edge-case inputs only) |
 | `skip_web_research` | bool | No | Skip DuckDuckGo/HackerNews/Arxiv CVE research (default `true`) |
@@ -642,7 +647,7 @@ Build or query the inventory risk graph. The graph tracks relationships between 
 
 The `rebuilt` dict has keys `servers`, `tools`, `findings`, `discovered` with integer counts.
 
-Node types: `mcp_server`, `tool`, `finding`, `agent_client`, `mcp_config`, `credential_surface`, `package_provenance`. Relation types: `exposes`, `affected_by`, `can_exfiltrate`, `declares`, `uses_credential`, `has_provenance`.
+Node types: `mcp_server`, `tool`, `finding`, `agent_client`, `mcp_config`, `credential_surface`, `package_provenance`, `mitre_technique`, `cve_blast_radius`. Relation types: `exposes`, `affected_by`, `can_exfiltrate`, `declares`, `uses_credential`, `has_provenance`, `maps_to`, `cross_server_exfil`, `affected_by_cve`.
 
 ---
 
@@ -679,7 +684,7 @@ Walk the risk graph for a specific tool and return a full risk breakdown: blast 
 | `agent_clients` | AI client names that have this server configured |
 | `has_credential_surface` | `true` if server has env/header credential references |
 | `external_tool_count_on_server` | Number of external/destructive sibling tools on same server |
-| `interaction_risks` | Multi-agent and supply chain risks: `shared_server`, `tool_overlap_execute`, `unscanned_credentials`, `scope_mismatch`, `cert_changed`, `dns_changed`, `private_ip_access`, `no_attestation`, `typosquatting_risk` |
+| `interaction_risks` | Multi-agent and supply chain risks: `shared_server`, `tool_overlap_execute`, `unscanned_credentials`, `scope_mismatch`, `cert_changed`, `dns_changed`, `private_ip_access`, `no_attestation`, `typosquatting_risk`, `dependency_typosquatting`, `known_cves` |
 | `recommended_action` | `allow`, `warn`, `require_approval`, or `block` |
 
 **`provenance` object fields:**
@@ -706,6 +711,59 @@ Walk the risk graph for a specific tool and return a full risk breakdown: blast 
 | `tls_cert_fingerprint` | SHA-256 of the server's leaf TLS certificate (HTTP servers only). Changes between inspections trigger a `cert_changed` HIGH-severity finding. |
 | `resolved_ips` | List of IP addresses the server's hostname resolved to at last inspection (HTTP servers only). |
 | `private_ips` | Subset of `resolved_ips` that are RFC-1918 / loopback / link-local. Non-empty = DNS rebinding risk. |
+| `github_manifest` | Present when `github_url` was provided. Contains `manifest_type` (`package.json`, `pyproject.toml`, `requirements.txt`) and `dependency_count`. |
+| `dependency_typosquatting` | List of `{dependency, suspects}` for dependencies whose names are suspiciously similar to well-known packages. |
+| `dependency_cves` | List of `{package, version, vuln_id, severity, summary, aliases}` for HIGH/CRITICAL CVEs found in dependencies via OSV.dev. Only present when `github_url` is provided and versions are resolvable. |
+| `attestation_source_matches_github` | `true` if the package's registry attestation `source_url` points to the same GitHub repo as `github_url`. Mismatch = published package may not come from this repo. |
+
+---
+
+### `explain_client_risk`
+
+Analyze cross-server risks for all MCP servers registered under one agent client. Detects threats invisible when looking at servers individually.
+
+**Parameters**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `client_id` | string | Yes | Agent client identifier (e.g. `"claude-desktop"`, `"cursor"`, `"vscode"`). Run `discover_servers` first to populate client-server links. |
+
+**Returns**
+
+| Field | Description |
+|---|---|
+| `client_id` | Client queried |
+| `server_count` | Number of servers analyzed |
+| `cross_server_exfiltration_paths` | List of `{read_tool, exfil_tool, read_server, exfil_server}` pairs where a read tool on one server plus an external tool on another creates a data exfiltration path |
+| `tool_shadowing` | List of findings where the same (or similar) tool name appears on multiple servers - possible hijack or masquerading |
+| `cve_blast_radius` | List of CVEs affecting multiple servers simultaneously, each with `vuln_id`, `severity`, `affected_servers` |
+| `composite_risk` | `"critical"`, `"high"`, `"medium"`, or `"low"` |
+| `summary` | Human-readable summary of cross-server findings |
+
+BEFORE: `discover_servers` or `onboard_discovered_servers` to establish client-server links.
+AFTER: `set_tool_policy('block')` on external tools appearing in exfiltration paths.
+
+---
+
+### `analyze_cve_blast_radius`
+
+Report CVEs that affect multiple servers under the same client, showing blast radius across the workspace.
+
+**Parameters**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `client_id` | string | No | Scope to servers under one client; omit to query across all clients |
+| `vuln_id` | string | No | Filter to a specific CVE / GHSA identifier |
+
+**Returns**
+
+| Field | Description |
+|---|---|
+| `cve_blast_radius` | List of `{vuln_id, severity, affected_servers, client_id, blast_radius}` sorted by severity then blast radius |
+| `count` | Number of shared CVEs found |
+
+BEFORE: `inspect_server` for each server (provenance must be built to detect CVEs).
 
 ---
 

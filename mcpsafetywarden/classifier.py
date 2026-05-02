@@ -15,6 +15,9 @@ from typing import Any, Dict, List, Optional, Tuple
 _log = logging.getLogger(__name__)
 
 from .security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
+from .graph._constants import RISK_TAG_TO_MITRE as _RISK_TAG_TO_MITRE
+
+_VALID_RISK_TAGS: frozenset = frozenset(_RISK_TAG_TO_MITRE.keys())
 
 
 def _sanitise_annotations(annotations: Dict[str, Any]) -> Dict[str, Any]:
@@ -27,7 +30,6 @@ def _sanitise_annotations(annotations: Dict[str, Any]) -> Dict[str, Any]:
             out[k] = _sanitise_for_prompt(v, 200)
         elif isinstance(v, (bool, int, float)):
             out[k] = v
-        # drop nested dicts/lists - MCP annotations should be simple scalars
     return out
 
 
@@ -59,66 +61,104 @@ EFFECT_PATTERNS: List[Tuple[str, List[str]]] = [
         r"predict|evaluate|assess|review|trace|log|history|tail|head|cat|"
         r"ls|dir|tree|walk|glob|match|filter|sort|rank|score|measure|calc|"
         r"calculate|compute|hash|checksum|lint|format|render|convert|translate|"
-        r"encode|sign|verify|token|jwt|decode)",
+        r"encode|sign|verify|token|jwt|decode|browse|crawl|scrape|capture|"
+        r"grep|sample|snapshot_read|introspect|reflect|enumerate|discover|"
+        r"survey|poll|observe|watch|tail|stream_read|cursor|paginate)",
         r"_(get|list|read|search|find|fetch|retrieve|describe|show|view|check|"
         r"query|inspect|scan|count|stat|status|health|info|details|preview|"
         r"diff|compare|validate|verify|resolve|lookup|export|download|report|"
-        r"analyze|analyse|audit|estimate|evaluate|assess|trace|history)$",
+        r"analyze|analyse|audit|estimate|evaluate|assess|trace|history|"
+        r"browse|crawl|scrape|capture|grep|sample|introspect|enumerate|"
+        r"discover|survey|observe|paginate)$",
         r"^(is_|has_|can_|should_|was_|did_|does_|will_)",
     ]),
     ("additive_write", [
         r"^(create|add|insert|append|push|upload|new|make|build|generate|write|"
-        r"save|store|put|register|import|open|begin|start|init|initiate|launch|"
-        r"spawn|fork|clone|copy|duplicate|snapshot|backup|seed|provision|allocate|"
-        r"reserve|claim|acquire|lock|checkout|subscribe|enroll|join|enqueue|"
-        r"post|draft|compose|record|log|track|tag|label|annotate|bookmark|"
+        r"save|store|put|register|import|begin|start|init|initiate|"
+        r"spawn|fork|clone|copy|duplicate|snapshot|backup|seed|allocate|"
+        r"reserve|claim|acquire|checkout|subscribe|enroll|join|enqueue|"
+        r"draft|compose|record|track|tag|label|annotate|bookmark|"
         r"pin|star|follow|like|vote|comment|reply|submit|propose|request|"
-        r"apply|install|deploy|release|publish|promote|activate|enable)",
+        r"apply|install|activate|enable|provision_resource|open_ticket|"
+        r"create_issue|open_issue|file_bug|raise_pr|open_pr)",
         r"_(create|add|insert|append|push|upload|write|save|store|register|"
-        r"import|init|launch|spawn|clone|copy|duplicate|snapshot|backup|seed|"
-        r"provision|subscribe|enroll|join|enqueue|draft|record|log|track|"
-        r"tag|label|annotate|install|deploy|release|publish|activate|enable)$",
+        r"import|init|spawn|clone|copy|duplicate|snapshot|backup|seed|"
+        r"subscribe|enroll|join|enqueue|draft|record|track|"
+        r"tag|label|annotate|install|activate|enable|open_ticket)$",
     ]),
     ("mutating_write", [
         r"^(update|edit|set|modify|change|patch|rename|move|replace|alter|"
         r"transform|enable|disable|toggle|configure|assign|link|attach|merge|"
-        r"reorder|sort|mark|flag|archive|hide|show|pin|unpin|mute|unmute|"
+        r"reorder|sort|mark|flag|archive|hide|unpin|mute|unmute|"
         r"suspend|resume|pause|unpause|lock|unlock|block|unblock|approve|"
         r"reject|accept|decline|promote|demote|grant|revoke|rotate|refresh|"
         r"invalidate|expire|extend|resize|scale|migrate|sync|reconcile|"
         r"reindex|rebuild|reprocess|retry|requeue|replay|redo|repair|fix|"
         r"heal|recover|restore|rollback|revert|undo|reset|clear|flush|"
-        r"drain|prune|trim|compact|optimize|vacuum|rebalance|redistribute)",
+        r"drain|prune|trim|compact|optimize|vacuum|rebalance|redistribute|"
+        r"process|transform|normalize|denormalize|enrich|redact|mask|"
+        r"classify_and_update|tag_and_save|merge_and_update)",
         r"_(update|edit|set|modify|change|patch|rename|move|replace|alter|"
         r"configure|assign|toggle|lock|unlock|block|unblock|approve|reject|"
         r"grant|revoke|rotate|refresh|resize|scale|migrate|sync|restore|"
-        r"rollback|revert|reset|clear|flush|prune|trim|optimize)$",
+        r"rollback|revert|reset|clear|flush|prune|trim|optimize|process|"
+        r"normalize|enrich|redact|mask)$",
     ]),
     ("destructive", [
         r"^(delete|remove|drop|purge|erase|destroy|truncate|kill|terminate|"
         r"wipe|shred|nuke|obliterate|unlink|detach|uninstall|deregister|"
-        r"deactivate|deprecate|retire|decommission|evict|expel|ban|revoke|"
-        r"cancel|abort|stop|shutdown|poweroff|halt|suspend|freeze|"
-        r"close|disconnect|end|finish|complete|expire|invalidate|"
-        r"overwrite|clobber|squash|force|hard_reset|factory_reset)",
+        r"deactivate|deprecate|retire|decommission|evict|expel|ban|"
+        r"cancel|abort|shutdown|poweroff|halt|freeze|"
+        r"close|disconnect|expire|invalidate|"
+        r"overwrite|clobber|squash|hard_reset|factory_reset|"
+        r"bulk_delete|mass_delete|force_delete|cascade_delete|hard_delete|"
+        r"format_disk|wipe_disk|zero_fill|secure_erase)",
         r"_(delete|remove|drop|purge|erase|destroy|truncate|kill|terminate|"
         r"wipe|unlink|detach|uninstall|deregister|deactivate|retire|"
         r"evict|ban|cancel|abort|stop|shutdown|halt|close|disconnect|"
-        r"expire|invalidate|overwrite|force_delete|hard_delete|bulk_delete)$",
+        r"expire|invalidate|overwrite|force_delete|hard_delete|bulk_delete|"
+        r"cascade_delete|secure_erase)$",
     ]),
     ("external_action", [
-        r"^(send|post|publish|notify|emit|broadcast|submit|trigger|invoke|"
-        r"call|email|message|sms|mms|whatsapp|slack|teams|webhook|ping|"
-        r"alert|request|dispatch|relay|forward|share|transfer|pay|charge|"
-        r"book|schedule|enqueue|push_notification|pagerduty|opsgenie|"
+        r"^(send|notify|emit|broadcast|trigger|"
+        r"email|message|sms|mms|whatsapp|slack|teams|webhook|"
+        r"alert|dispatch|relay|forward|share|transfer|pay|charge|"
+        r"book|push_notification|pagerduty|opsgenie|"
         r"twilio|sendgrid|mailgun|ses|sns|pubsub|kafka|rabbitmq|"
-        r"execute|run|eval|exec|shell|bash|python|node|script|"
-        r"curl|http|fetch_url|open_browser|browse|navigate|click|"
-        r"login|authenticate|oauth|saml|ldap|ssh|rdp|telnet|ftp|sftp)",
-        r"_(send|post|publish|notify|emit|broadcast|submit|trigger|invoke|"
+        r"eval|exec|shell|bash|python|node|"
+        r"curl|http_request|fetch_url|open_browser|navigate|click|"
+        r"login|authenticate|oauth|saml|ldap|ssh|rdp|telnet|ftp|sftp|"
+        r"deploy|provision|terraform|kubectl|ansible|helm|"
+        r"invoke_lambda|invoke_function|call_webhook|call_api|"
+        r"release_deploy|rollout|rollback_deploy)",
+        r"_(send|notify|emit|broadcast|trigger|"
         r"email|message|sms|webhook|alert|dispatch|pay|charge|"
-        r"execute|run|eval|exec|shell|script|call|request|forward|relay)$",
+        r"eval|exec|shell|script|"
+        r"deploy|provision|terraform|invoke|rollout|"
+        r"forward|relay|push_notification)$",
     ]),
+]
+
+
+_DISAMBIGUATION_RULES: List[Tuple[re.Pattern, str, float, str]] = [
+    (re.compile(r"(execute|run|eval)_(sql|query|queries|statement|select|insert|update|dml|ddl|sp|stored_proc)", re.I), "mutating_write", 0.88, "disambiguation_db_execution"),
+    (re.compile(r"(sql|query|statement|select|dml)_(execute|run|eval|exec)", re.I), "mutating_write", 0.88, "disambiguation_db_execution"),
+    (re.compile(r"(run|execute|invoke)_(test|tests|spec|specs|suite|suites|check|checks|lint|benchmark|audit|scan|report)", re.I), "read_only", 0.85, "disambiguation_test_execution"),
+    (re.compile(r"(call|invoke)_(local|function|method|procedure|proc|rpc_local|internal)", re.I), "mutating_write", 0.78, "disambiguation_local_invocation"),
+    (re.compile(r"open_(file|document|doc|notebook|spreadsheet|csv|json|xml|pdf|log)", re.I), "read_only", 0.82, "disambiguation_open_file_read"),
+    (re.compile(r"open_(connection|socket|session|browser|tab|url|link|stream_remote)", re.I), "external_action", 0.82, "disambiguation_open_connection"),
+    (re.compile(r"(publish|release)_(file|report|artifact|result|results|output|local|doc|docs|asset|assets)", re.I), "additive_write", 0.80, "disambiguation_publish_local"),
+    (re.compile(r"^process_(data|record|records|event|events|item|items|entry|entries|payload|message|batch)", re.I), "mutating_write", 0.78, "disambiguation_process_data"),
+    (re.compile(r"(get|read|fetch)_(and_)?(send|post|email|notify|forward|relay|upload_to)", re.I), "external_action", 0.85, "disambiguation_read_then_send"),
+    (re.compile(r"(execute|run|eval|exec)_(command|cmd|shell|bash|sh|zsh|script|arbitrary|code|binary|program)", re.I), "external_action", 0.92, "disambiguation_shell_execution"),
+    (re.compile(r"^log_(event|entry|entries|metric|metrics|trace|error|warning|audit_event)", re.I), "additive_write", 0.78, "disambiguation_log_write"),
+    (re.compile(r"format_(disk|drive|partition|volume|storage)", re.I), "destructive", 0.92, "disambiguation_format_disk"),
+    (re.compile(r"(stop|kill|terminate|shutdown)_(server|service|process|container|instance|pod|vm|node)", re.I), "destructive", 0.85, "disambiguation_stop_service"),
+    (re.compile(r"(invoke|call)_(lambda|function_arn|api|endpoint|webhook|remote|external|http|url|service)", re.I), "external_action", 0.88, "disambiguation_remote_invocation"),
+    (re.compile(r"(post|publish|push)_(to_|message_to|event_to|data_to|update_to)", re.I), "external_action", 0.85, "disambiguation_post_to_external"),
+    (re.compile(r"(copy|move|rename)_(file|files|dir|directory|folder|path|item)", re.I), "mutating_write", 0.80, "disambiguation_local_file_op"),
+    (re.compile(r"deploy_(config|configuration|setting|settings|policy|policies|rule|rules)", re.I), "mutating_write", 0.75, "disambiguation_deploy_config"),
+    (re.compile(r"(bulk|batch|mass|cascade)_(delete|remove|purge|erase|wipe|destroy)", re.I), "destructive", 0.90, "disambiguation_bulk_delete"),
 ]
 
 _EFFECT_PATTERNS_COMPILED: List[Tuple[str, List[re.Pattern]]] = [
@@ -143,11 +183,11 @@ RETRY_UNSAFE_EFFECTS = {"external_action", "additive_write"}
 
 
 _DESC_EFFECT_SIGNALS: List[Tuple[re.Pattern, str, float]] = [
-    (re.compile(r"\b(read[s]?|retriev|fetch|list[s]?|search|query|queries|look.?up|find[s]?|get[s]?|show[s]?|view[s]?|describe[s]?|inspect[s]?|check[s]?|monitor[s]?|watch[es]?|scan[s]?|report[s]?|stat[s]?|count[s]?|summarize[s]?|display[s]?)\b", re.IGNORECASE), "read_only", 0.45),
-    (re.compile(r"\b(creat|add[s]?|insert[s]?|append[s]?|upload[s]?|generat|build[s]?|spawn[s]?|provision[s]?|register[s]?|save[s]?|store[s]?|record[s]?|log[s]?|track[s]?)\b", re.IGNORECASE), "additive_write", 0.45),
-    (re.compile(r"\b(updat|edit[s]?|modif|patch[es]?|replac|renam|mov[es]?|configur|toggl|assign[s]?|sync[s]?|migrat|restor|rollback|revert|reset[s]?|clear[s]?|flush[es]?|purge[s]?)\b", re.IGNORECASE), "mutating_write", 0.45),
-    (re.compile(r"\b(delet|remov|drop[s]?|purg[es]?|eras[es]?|destroy[s]?|terminat|kill[s]?|wip[es]?|unlink[s]?|shutdown[s]?|expir[es]?|invalidat)\b", re.IGNORECASE), "destructive", 0.50),
-    (re.compile(r"\b(send[s]?|email[s]?|notif|messag|sms|webhook[s]?|post[s]?|publish[es]?|broadcast[s]?|dispatch[es]?|trigger[s]?|execut|run[s]?|deploy[s]?|call[s]?|pay[s]?|charg[es]?|alert[s]?|ping[s]?)\b", re.IGNORECASE), "external_action", 0.50),
+    (re.compile(r"\b(read[s]?|retriev|fetch|list[s]?|search|query|queries|look.?up|find[s]?|get[s]?|show[s]?|view[s]?|describe[s]?|inspect[s]?|check[s]?|monitor[s]?|watch[es]?|scan[s]?|report[s]?|stat[s]?|count[s]?|summarize[s]?|display[s]?|return[s]?|output[s]?|enumerate[s]?|browse[s]?|crawl[s]?|scrape[s]?|capture[s]?|sample[s]?|introspect[s]?|poll[s]?|observe[s]?)\b", re.IGNORECASE), "read_only", 0.45),
+    (re.compile(r"\b(creat|add[s]?|insert[s]?|append[s]?|upload[s]?|generat|build[s]?|spawn[s]?|provision[s]?|register[s]?|save[s]?|store[s]?|record[s]?|log[s]?|track[s]?|open[s]? (a |an )?(ticket|issue|pr|pull request|bug))\b", re.IGNORECASE), "additive_write", 0.45),
+    (re.compile(r"\b(updat|edit[s]?|modif|patch[es]?|replac|renam|mov[es]?|configur|toggl|assign[s]?|sync[s]?|migrat|restor|rollback|revert|reset[s]?|clear[s]?|flush[es]?|purge[s]?|normaliz|enriche[s]?|redact[s]?|mask[s]?|process[es]?)\b", re.IGNORECASE), "mutating_write", 0.45),
+    (re.compile(r"\b(delet|remov|drop[s]?|purg[es]?|eras[es]?|destroy[s]?|terminat|kill[s]?|wip[es]?|unlink[s]?|shutdown[s]?|expir[es]?|invalidat|decommission[s]?|deregister[s]?|factory.?reset)\b", re.IGNORECASE), "destructive", 0.50),
+    (re.compile(r"\b(send[s]?|email[s]?|notif|messag|sms|webhook[s]?|broadcast[s]?|dispatch[es]?|trigger[s]?|deploy[s]?|provision[s]? (a |an )?(server|instance|resource|cloud)|pay[s]?|charg[es]?|alert[s]?|invoke[s]? (a |an )?(lambda|function|api|endpoint|remote)|ssh[es]?|execut[es]? (a |an )?(shell|command|script|binary))\b", re.IGNORECASE), "external_action", 0.50),
 ]
 
 _DESC_OPEN_WORLD_SIGNALS = re.compile(
@@ -208,6 +248,9 @@ _OUTPUT_RISK_SIGNALS: List[Tuple[re.Pattern, str, str]] = [
 
 def _classify_by_name(tool_name: str) -> Tuple[str, float, List[str]]:
     lower = tool_name.lower()
+    for rx, effect_class, conf, label in _DISAMBIGUATION_RULES:
+        if rx.search(lower):
+            return effect_class, conf, [label]
     if _EXEC_PREFIX_RE.match(lower):
         return "external_action", 0.70, ["name_has_privileged_exec_prefix"]
     if _DESTRUCTIVE_PREFIX_RE.match(lower):
@@ -247,18 +290,30 @@ def _classify_by_schema(schema: Dict[str, Any]) -> Tuple[str, float, List[str]]:
     for rx, effect, conf, label in _SCHEMA_SIGNALS:
         if any(rx.match(p) for p in param_names): hints.append((effect, conf, label))
 
-    # Compound boost: message body + recipient = strong external_action signal
     body_fields = {"body", "content", "message", "text", "payload", "html", "template"}
     recv_fields = {"recipient", "to", "email", "channel", "topic", "webhook_url", "slack_channel"}
     if body_fields & param_names and recv_fields & param_names: hints.append(("external_action", 0.90, "schema_body_plus_recipient_compound"))
 
-    # Execution compound: command/script + optional args = very high confidence
     exec_fields = {"command", "cmd", "shell", "script", "code", "eval", "executable"}
     if exec_fields & param_names: hints.append(("external_action", 0.92, "schema_execution_compound"))
 
-    # Destructive compound: target path + overwrite/force
     if {"path", "file_path", "filepath", "filename"} & param_names:
         if {"overwrite", "force", "truncate", "replace", "clobber"} & param_names: hints.append(("destructive", 0.78, "schema_path_plus_overwrite_compound"))
+
+    sql_fields = {"sql", "statement", "query_string", "sql_query", "dml", "ddl"}
+    if sql_fields & param_names and not ({"host", "url", "endpoint", "webhook_url"} & param_names):
+        hints.append(("mutating_write", 0.85, "schema_sql_no_network_target"))
+
+    test_fields = {"test_id", "test_name", "suite", "spec", "suite_id", "test_suite", "spec_file"}
+    if test_fields & param_names: hints.append(("read_only", 0.78, "schema_has_test_identifier"))
+
+    infra_target = {"region", "cluster", "namespace", "environment", "stack", "stage"}
+    infra_artifact = {"image", "image_tag", "service_name", "chart", "manifest", "terraform_plan"}
+    if infra_target & param_names and infra_artifact & param_names:
+        hints.append(("external_action", 0.88, "schema_infra_deploy_compound"))
+
+    if {"amount", "price", "cost"} & param_names and {"currency", "payment_method", "card", "stripe_token"} & param_names:
+        hints.append(("external_action", 0.92, "schema_financial_compound"))
 
     if not hints: return "unknown", 0.30, ["no_schema_pattern_matched"]
 
@@ -513,7 +568,6 @@ def _classify_with_llm(
     raw_conf.setdefault("risk_level",      0.75)
     raw_conf.setdefault("retry_safety",    0.75)
     raw_conf.setdefault("destructiveness", 0.75)
-    # H5: Clamp to [0.0, 1.0] - LLMs occasionally return out-of-range confidence values.
     raw_conf = {
         k: max(0.0, min(1.0, float(v))) if isinstance(v, (int, float)) else 0.0
         for k, v in raw_conf.items()
@@ -526,7 +580,7 @@ def _classify_with_llm(
         "open_world": bool(parsed.get("open_world", False)),
         "output_risk": parsed.get("output_risk",    "low"),
         "confidence": raw_conf,
-        "evidence": parsed.get("evidence",       ["llm_classified"]),
+        "evidence": parsed.get("evidence") if isinstance(parsed.get("evidence"), list) else ["llm_classified"],
         "run_count": 0,
     }
 
@@ -537,13 +591,11 @@ def _classify_with_llm(
 
     result["evidence"] = list(result["evidence"]) + [f"llm_provider={provider}"]
 
-    # Attach security finding as a side-channel output so inspect_server_tools
-    # can store it in security_scans without polluting the behavior profile.
     risk_level = parsed.get("risk_level", "LOW")
     result["_security_finding"] = {
         "name": tool_name,
         "risk_level": risk_level,
-        "risk_tags": parsed.get("risk_tags", []),
+        "risk_tags": [t for t in (parsed.get("risk_tags") if isinstance(parsed.get("risk_tags"), list) else ([parsed["risk_tags"]] if isinstance(parsed.get("risk_tags"), str) else [])) if t in _VALID_RISK_TAGS],
         "finding": "; ".join(parsed.get("evidence", [])),
         "exploitation_scenario": parsed.get("exploitation_scenario"),
         "remediation": parsed.get("remediation"),
@@ -626,7 +678,6 @@ def classify_tool(
         total_signal = sum(votes.values())
         final_conf = min(0.95, winner * (winner / total_signal))
 
-    # Annotations are authoritative on idempotency; effect class is the fallback.
     if retry_hint is True: retry_safety = "safe"
     elif retry_hint is False: retry_safety = "unsafe"
     elif final_effect in RETRY_SAFE_EFFECTS: retry_safety = "safe"
@@ -649,8 +700,10 @@ def classify_tool(
         output_risk, out_ev = _infer_output_risk(schema, description, final_effect)
         evidence.extend(out_ev)
 
-    extra_risks = _infer_extra_risks(description, schema)
-    if llm_result: extra_risks.update({k: v for k, v in llm_result.items() if k in _LLM_EXTRA_RISK_FIELDS})
+    if llm_result:
+        extra_risks = {k: v for k, v in llm_result.items() if k in _LLM_EXTRA_RISK_FIELDS}
+    else:
+        extra_risks = _infer_extra_risks(description, schema)
 
     result: Dict[str, Any] = {
         "effect_class": final_effect,

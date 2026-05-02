@@ -27,7 +27,6 @@ from .graph import store as _graph_store, builder as _graph_builder, explain as 
 
 _log = logging.getLogger(__name__)
 
-# Shell interpreters that, combined with an eval flag (-c, /c), enable arbitrary code execution.
 _SHELL_INTERPS = frozenset({
     "bash", "sh", "dash", "zsh", "ksh", "csh", "tcsh", "fish",
     "cmd", "powershell", "pwsh",
@@ -48,8 +47,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         auth = request.headers.get("Authorization", "")
         candidate = auth[7:].encode() if auth.startswith("Bearer ") else b""
         expected = self._token_bytes
-        padded = candidate.ljust(len(expected), b"\x00")[:len(expected)]
-        if not hmac.compare_digest(padded, expected) or len(candidate) != len(expected):
+        if len(candidate) != len(expected) or not hmac.compare_digest(candidate, expected):
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
         return await call_next(request)
 
@@ -89,7 +87,13 @@ def _gh_on_registered(server_id: str, transport: str, command: Optional[str], ur
         _log.debug("graph hook on_server_registered failed: %s", _ge)
 
 
-def _gh_on_tools_inspected(server_id: str, tools: List[Dict[str, Any]]) -> None:
+def _gh_on_tools_inspected(
+    server_id: str,
+    tools: List[Dict[str, Any]],
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    llm_api_key: Optional[str] = None,
+) -> None:
     try:
         tool_ids = [
             t.get("tool_id") or f"{server_id}::{t.get('tool_name') or t.get('name', '')}"
@@ -103,7 +107,10 @@ def _gh_on_tools_inspected(server_id: str, tools: List[Dict[str, Any]]) -> None:
             ) or {})}
             for t in tools
         ]
-        _graph_builder.on_tools_inspected(server_id, enriched)
+        _graph_builder.on_tools_inspected(
+            server_id, enriched,
+            llm_provider=llm_provider, llm_model=llm_model, llm_api_key=llm_api_key,
+        )
     except Exception as _ge:
         _log.debug("graph hook on_tools_inspected failed: %s", _ge)
 
@@ -150,10 +157,60 @@ def _gh_on_server_discovered(
         _log.debug("graph hook on_server_discovered failed: %s", _ge)
 
 
+def _try_link_stdio_to_client(server_id: str, command: Optional[str], args: Optional[list]) -> None:
+    """Match a manually registered stdio server against discovery configs and link it to its client."""
+    if not command:
+        return
+    try:
+        candidates = _discovery.discover_mcp_servers()
+        cmd_base = _os.path.basename(command).lower()
+        if cmd_base.endswith(".exe"):
+            cmd_base = cmd_base[:-4]
+        args_norm = [str(a) for a in (args or [])]
+        for entry in candidates:
+            if not entry.get("command"):
+                continue
+            e_base = _os.path.basename(entry["command"]).lower()
+            if e_base.endswith(".exe"):
+                e_base = e_base[:-4]
+            if e_base != cmd_base:
+                continue
+            if [str(a) for a in (entry.get("args") or [])] != args_norm:
+                continue
+            did = entry["discovery_id"]
+            db.upsert_discovered_server({
+                **entry,
+                "registered_server_id": server_id,
+            })
+            db.mark_discovered_registered(did, server_id)
+            _gh_on_server_discovered(
+                did, entry["client"], entry["client_name"], entry["server_name"], server_id,
+            )
+            _log.info("Linked server '%s' to client '%s' via stdio fingerprint match", server_id, entry["client"])
+    except Exception as exc:
+        _log.debug("_try_link_stdio_to_client failed for %s: %s", server_id, exc)
+
+
+def _gh_on_cross_server_analysis(server_id: str) -> None:
+    try:
+        conn = db.get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT client FROM discovered_servers WHERE registered_server_id = ?",
+                (server_id,),
+            ).fetchall()
+            client_ids = [r["client"] for r in rows]
+        finally:
+            conn.close()
+        for cid in client_ids:
+            _graph_builder.on_cross_server_analysis(cid)
+    except Exception as exc:
+        _log.debug("_gh_on_cross_server_analysis failed for %s: %s", server_id, exc)
+
+
 def _check_mgmt_rate_limit(key: str) -> Optional[str]:
     now = time.monotonic()
 
-    # Global limit - prevents server-ID rotation bypass
     while _global_call_times and now - _global_call_times[0] > _MGMT_RATE_LIMIT_WINDOW_S:
         _global_call_times.popleft()
     if len(_global_call_times) >= _GLOBAL_RATE_LIMIT_MAX:
@@ -264,10 +321,13 @@ def _preflight_assessment(profile: Dict, tool_name: str, server_id: str) -> dict
         gc = _graph_explain.explain_tool_risk(server_id, tool_name)
         if "error" not in gc:
             blast = gc.get("blast_radius", "none")
+            cve_impacted = gc.get("cve_impacted", False)
             if blast in ("critical", "high") and risk not in ("high",):
                 risk = "high"
             elif blast == "medium" and risk not in ("high", "medium"):
                 risk = "medium"
+            if cve_impacted and risk not in ("high",):
+                risk = "high"
             graph_context = {
                 "blast_radius": blast,
                 "composite_risk_score": gc.get("composite_risk_score"),
@@ -279,6 +339,8 @@ def _preflight_assessment(profile: Dict, tool_name: str, server_id: str) -> dict
                 "agent_clients": gc.get("agent_clients", []),
                 "interaction_risks": gc.get("interaction_risks", []),
                 "recommended_action": gc.get("recommended_action"),
+                "cve_impacted": cve_impacted,
+                "impacting_cves": gc.get("impacting_cves", []),
             }
         if graph_context is None:
             graph_note = "Graph not yet populated - call get_risk_graph(rebuild=True) for full risk context."
@@ -392,8 +454,6 @@ async def _do_register(
 
     _log.info("_do_register server_id=%s transport=%s auto_inspect=%s", server_id, transport, auto_inspect)
 
-    # Collect cref_ refs from any existing registration so we can delete them after
-    # the upsert - they will no longer be referenced once overwritten.
     old_cref_ids: List[str] = []
     existing = db.get_server(server_id)
     if existing:
@@ -424,19 +484,20 @@ async def _do_register(
     db.upsert_server(server_id, transport, command, args or [], url, safe_env, safe_headers, github_url)
     _gh_on_registered(server_id, transport, command, url)
     _gh_on_credentials_detected(server_id, cref_map)
+    if transport == "stdio":
+        _try_link_stdio_to_client(server_id, command, args)
 
     try:
         _prov = await asyncio.get_running_loop().run_in_executor(
             None, lambda: _graph_provenance.build_provenance_info(
-                server_id, command, args or [], url=url, transport=transport
+                server_id, command, args or [], url=url, transport=transport,
+                github_url=github_url,
             )
         )
         _gh_on_provenance_detected(server_id, _prov)
     except Exception as _pe:
         _log.debug("provenance detection skipped for %s: %s", server_id, _pe)
 
-    # Delete previous crefs that are no longer referenced. Skip any that were
-    # passed back in unchanged (user re-registered with an existing cref_ ref).
     still_in_use = set(safe_headers.values()) | set(safe_env.values())
     db.delete_credential_refs([c for c in old_cref_ids if c not in still_in_use])
 
@@ -461,7 +522,13 @@ async def _do_register(
                 llm_model=classify_model,
                 llm_api_key=classify_api_key,
             )
-            _gh_on_tools_inspected(server_id, tools)
+            _gh_on_tools_inspected(
+                server_id, tools,
+                llm_provider=classify_provider or _detect_llm_provider(),
+                llm_model=classify_model,
+                llm_api_key=classify_api_key,
+            )
+            _gh_on_cross_server_analysis(server_id)
             result["tools_discovered"] = len(tools)
             result["tools"] = [
                 {"name": t["name"], "effect_class": t["effect_class"], "confidence": t["confidence"]}
@@ -470,12 +537,11 @@ async def _do_register(
         except (ValueError, RuntimeError) as exc:
             db.delete_server(server_id)
             _gh_cleanup_server(server_id)
-            # Clean up every cref the failed registration was going to reference,
-            # including preserved old crefs (still_in_use) not just newly-created ones.
             _crefs_for_server = [v for v in still_in_use if isinstance(v, str) and v.startswith("cref_")]
             db.delete_credential_refs(_crefs_for_server)
             return {
                 "error": f"Registration aborted - inspection failed: {exc}",
+                "inspect_error": str(exc),
                 "hint": _stdio_hint if transport == "stdio" else "Fix the server and try again.",
             }
         except Exception as exc:
@@ -486,6 +552,7 @@ async def _do_register(
             db.delete_credential_refs(_crefs_for_server)
             return {
                 "error": "Registration aborted - inspection failed.",
+                "inspect_error": str(exc),
                 "hint": _stdio_hint if transport == "stdio" else "Fix the server and try again.",
             }
 
@@ -586,6 +653,7 @@ async def inspect_server(
                     None, lambda: _graph_provenance.build_provenance_info(
                         server_id, _srv.get("command"), _srv.get("args") or [],
                         url=_srv.get("url"), transport=_srv.get("transport"),
+                        github_url=_srv.get("github_url"),
                     )
                 )
                 _gh_on_provenance_detected(server_id, _prov)
@@ -647,6 +715,26 @@ async def check_server_drift(
         return json.dumps({"error": rl})
     try:
         result = await _check_drift(server_id, update_baseline=update_baseline)
+        if result.get("drift_detected"):
+            server_rec = db.get_server(server_id)
+            if server_rec:
+                try:
+                    loop = asyncio.get_running_loop()
+                    prov = await loop.run_in_executor(
+                        None,
+                        lambda: _graph_provenance.build_provenance_info(
+                            server_id,
+                            command=server_rec.get("command"),
+                            args=server_rec.get("args") or [],
+                            url=server_rec.get("url"),
+                            transport=server_rec.get("transport", "stdio"),
+                            github_url=server_rec.get("github_url"),
+                        ),
+                    )
+                    _gh_on_provenance_detected(server_id, prov)
+                    result["provenance_rechecked"] = True
+                except Exception as _pe:
+                    _log.debug("provenance re-check after drift failed for %s: %s", server_id, _pe)
         return json.dumps(result, indent=2)
     except ValueError as exc:
         return json.dumps({"error": str(exc)})
@@ -692,7 +780,7 @@ def list_server_tools(server_id: str) -> str:
     """
     tools = db.list_tools(server_id)
     if not tools:
-            return json.dumps({
+        return json.dumps({
             "error": f"No tools found for '{server_id}'.",
             "hint": "Run inspect_server first.",
         })
@@ -703,7 +791,9 @@ def list_server_tools(server_id: str) -> str:
         p = profiles.get(t["tool_id"])
         effect = p["effect_class"] if p else "unknown"
         destr  = p["destructiveness"] if p else "unknown"
-        rows.append({
+        tool_obj = _graph_store.get_object(t["tool_id"])
+        tool_meta = (tool_obj or {}).get("metadata", {})
+        row: Dict[str, Any] = {
             "tool_name": t["tool_name"],
             "description": (t["description"] or "")[:100],
             "effect_class": effect,
@@ -712,7 +802,11 @@ def list_server_tools(server_id: str) -> str:
             "risk_level": _risk_level(effect, destr),
             "run_count": p["run_count"] if p else 0,
             "confidence": p["confidence"].get("effect_class", 0) if p else 0,
-        })
+        }
+        if tool_meta.get("cve_impacted"):
+            row["cve_impacted"] = True
+            row["impacting_cves"] = tool_meta.get("impacting_cves", [])
+        rows.append(row)
 
     return json.dumps({"server_id": server_id, "tools": rows}, indent=2)
 
@@ -721,7 +815,7 @@ def list_server_tools(server_id: str) -> str:
 async def preflight_tool_call(
     server_id: str,
     tool_name: str,
-    args: Optional[dict] = None,  # noqa: ARG001 (reserved for future arg-aware analysis)
+    args: Optional[dict] = None,
     auto_scan_provider: Optional[str] = None,
     auto_scan_model: Optional[str] = None,
     auto_scan_api_key: Optional[str] = None,
@@ -766,6 +860,10 @@ async def preflight_tool_call(
             )
         else:
             if server_id not in _preflight_scan_locks:
+                if len(_preflight_scan_locks) > 1000:
+                    stale = [k for k, lk in list(_preflight_scan_locks.items()) if not lk.locked()]
+                    for k in stale:
+                        _preflight_scan_locks.pop(k, None)
                 _preflight_scan_locks[server_id] = asyncio.Lock()
             async with _preflight_scan_locks[server_id]:
                 if not db.get_latest_security_scan(server_id):
@@ -814,7 +912,7 @@ async def preflight_tool_call(
         )
         profile.pop("_security_finding", None)
         db.upsert_profile(tool["tool_id"], profile)
-    return json.dumps(_preflight_assessment(profile, tool_name, server_id), indent=2)  # type: ignore[arg-type]
+    return json.dumps(_preflight_assessment(profile, tool_name, server_id), indent=2)
 
 
 
@@ -1054,11 +1152,17 @@ def suggest_safer_alternative(
             continue
         p = db.get_profile(t["tool_id"])
         s = findings_map.get(t["tool_name"])
+        alt_obj = _graph_store.get_object(t["tool_id"])
+        alt_meta = (alt_obj or {}).get("metadata", {})
         candidates.append({
             **t,
             "_effect_class": (p or {}).get("effect_class", "unknown"),
             "_security_flag": s.get("risk_level") if s else None,
+            "_cve_impacted": alt_meta.get("cve_impacted", False),
+            "_impacting_cves": alt_meta.get("impacting_cves", []),
         })
+
+    cve_index = {c["tool_name"]: c for c in candidates if c.get("_cve_impacted")}
 
     if effective_llm:
         llm_alts = _llm_suggest_alternatives(
@@ -1067,6 +1171,11 @@ def suggest_safer_alternative(
             effective_llm, llm_model, llm_api_key,
         )
         if llm_alts:
+            for alt in llm_alts:
+                cve_c = cve_index.get(alt.get("tool", ""))
+                if cve_c:
+                    alt["warning"] = "cve_impacted"
+                    alt["impacting_cves"] = cve_c.get("_impacting_cves", [])
             return json.dumps({
                 "tool": tool_name,
                 "current_effect": current_effect,
@@ -1078,15 +1187,22 @@ def suggest_safer_alternative(
     stem = tool_name.split("_", 1)[-1] if "_" in tool_name else tool_name
 
     def _candidate_is_secure_read_only(c: dict) -> bool:
-        return c.get("_effect_class") == "read_only" and c.get("_security_flag") != "HIGH"
+        return c.get("_effect_class") == "read_only" and c.get("_security_flag") != "HIGH" and not c.get("_cve_impacted")
 
-    alternatives = [
-        {
+    def _alt_entry(c: dict, why_safer: str) -> dict:
+        entry: Dict[str, Any] = {
             "tool": c["tool_name"],
             "description": (c["description"] or "")[:100],
-            "effect_class": "read_only",
-            "why_safer": "read-only, no security flags, similar name",
+            "effect_class": c.get("_effect_class", "unknown"),
+            "why_safer": why_safer,
         }
+        if c.get("_cve_impacted"):
+            entry["warning"] = "cve_impacted"
+            entry["impacting_cves"] = c.get("_impacting_cves", [])
+        return entry
+
+    alternatives = [
+        _alt_entry(c, "read-only, no security flags, similar name")
         for c in candidates
         if stem.lower() in c["tool_name"].lower()
         and _candidate_is_secure_read_only(c)
@@ -1171,12 +1287,11 @@ async def run_replay_test(
     )
 
     if needs_approval and not approved:
-            return json.dumps({
+        return json.dumps({
             "blocked": True,
             "reason": "approval_required",
             "risk_level": risk_level,
-"message":
-                (
+            "message": (
                 f"'{tool_name}' will be called TWICE (risk: {risk_level}, effect: {effect}). "
                 "Re-call with approved=True to proceed."
             ),
@@ -1198,6 +1313,50 @@ async def run_replay_test(
         return json.dumps({"error": "Internal error. Check server logs."})
 
 
+def _build_supply_chain_findings(server_id: str) -> Dict[str, Any]:
+    sc_findings = []
+    for fid in [
+        f"finding::dep_cve::{server_id}",
+        f"finding::dep_typosquat::{server_id}",
+        f"finding::cert_changed::{server_id}",
+        f"finding::dns_changed::{server_id}",
+        f"finding::private_ip::{server_id}",
+    ]:
+        obj = _graph_store.get_object(fid)
+        if obj:
+            meta = obj.get("metadata", {})
+            sc_findings.append({
+                "finding_type": obj["name"],
+                "risk_level": meta.get("risk_level", "UNKNOWN"),
+                "risk_tags": meta.get("risk_tags", []),
+                "remediation": meta.get("remediation", ""),
+                "exploitation_scenario": meta.get("exploitation_scenario", ""),
+                "details": {
+                    k: v for k, v in meta.items()
+                    if k not in ("risk_level", "risk_tags", "remediation", "exploitation_scenario")
+                },
+            })
+
+    prov_obj = _graph_store.get_object(f"provenance::{server_id}")
+    provenance_summary = None
+    if prov_obj:
+        pm = prov_obj.get("metadata", {})
+        provenance_summary = {
+            "package": prov_obj["name"],
+            "ecosystem": pm.get("ecosystem"),
+            "verified": pm.get("verified"),
+            "attestation_status": (pm.get("attestation") or {}).get("attestation_status"),
+            "version_drift": pm.get("version_drift"),
+            "local_environment": pm.get("local_environment"),
+        }
+
+    return {
+        "supply_chain_findings": sc_findings,
+        "supply_chain_risk_count": len(sc_findings),
+        "provenance_summary": provenance_summary,
+    }
+
+
 async def _execute_scan_core(
     server_id: str,
     server: Dict,
@@ -1212,6 +1371,13 @@ async def _execute_scan_core(
     github_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     effective_github_url = github_url or server.get("github_url")
+
+    prov_obj = _graph_store.get_object(f"provenance::{server_id}")
+    local_source_path: Optional[str] = None
+    if prov_obj:
+        loc = prov_obj.get("metadata", {}).get("location", "")
+        if loc and _os.path.isdir(loc):
+            local_source_path = loc
 
     async def _run_one(prov: str) -> Dict[str, Any]:
         try:
@@ -1228,6 +1394,7 @@ async def _execute_scan_core(
                 skip_web_research=skip_web_research,
                 scan_timeout_s=scan_timeout_s,
                 github_url=effective_github_url,
+                local_source_path=local_source_path,
             )
         except Exception as exc:
             _log.error("security_scan_server provider=%s failed: %s", prov, exc, exc_info=True)
@@ -1235,9 +1402,16 @@ async def _execute_scan_core(
 
     if len(providers_to_run) == 1:
         findings = await _run_one(providers_to_run[0])
+        if "error" in findings and "overall_risk_level" not in findings:
+            return json.dumps(findings, indent=2)
     else:
         results = await asyncio.gather(*[_run_one(p) for p in providers_to_run])
         findings = _merge_findings(server_id, list(results))
+
+    sc = _build_supply_chain_findings(server_id)
+    findings["supply_chain_findings"] = sc["supply_chain_findings"]
+    findings["supply_chain_risk_count"] = sc["supply_chain_risk_count"]
+    findings["provenance_summary"] = sc["provenance_summary"]
 
     scan_id = db.store_security_scan(server_id, findings)
     _gh_on_scan_stored(server_id, findings)
@@ -1330,6 +1504,9 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
                 "error": "server_id or github_url is required.",
                 "hint": "Pass github_url to run a standalone source-only scan without a registered server.",
             })
+        rl = _check_mgmt_rate_limit(f"scan:{github_url}")
+        if rl:
+            return json.dumps({"error": rl})
         server = {"server_id": github_url, "github_url": github_url}
         server_id = github_url
         tools = []
@@ -1406,6 +1583,10 @@ mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", au
                     "server_level_risks": [],
                 })
 
+        if len(_bg_scan_status) > 1000:
+            done = [k for k, v in list(_bg_scan_status.items()) if v != "running"]
+            for k in done:
+                _bg_scan_status.pop(k, None)
         _bg_scan_status[server_id] = "running"
         asyncio.create_task(_bg_task())
         return json.dumps({
@@ -1558,6 +1739,12 @@ async def scan_all_servers(
 
     for sid, result in combined.get("server_results", {}).items():
         try:
+            sc = _build_supply_chain_findings(sid)
+            if sc.get("supply_chain_findings"):
+                result.setdefault("findings", [])
+                result["findings"].extend(sc["supply_chain_findings"])
+                result["supply_chain_risk_count"] = sc.get("supply_chain_risk_count", 0)
+                result["provenance_summary"] = sc.get("provenance_summary")
             db.store_security_scan(sid, result)
             _gh_on_scan_stored(sid, result)
         except Exception as db_exc:
@@ -1776,16 +1963,19 @@ async def safe_tool_call(
     _graph_policy = _os.environ.get("MCP_GRAPH_POLICY", "warn").lower()
     _graph_ctx = assessment.get("graph_context") or {}
     _blast = _graph_ctx.get("blast_radius", "none")
+    _cve_impacted = _graph_ctx.get("cve_impacted", False)
+    _graph_ctx_out: Dict[str, Any] = {
+        "blast_radius": _blast,
+        "composite_risk_score": _graph_ctx.get("composite_risk_score"),
+        "risk_paths": (_graph_ctx.get("risk_paths") or [])[:3],
+        "recommended_action": _graph_ctx.get("recommended_action"),
+    }
+    if _cve_impacted:
+        _graph_ctx_out["cve_impacted"] = True
+        _graph_ctx_out["impacting_cves"] = _graph_ctx.get("impacting_cves", [])
     _graph_extra: Dict[str, Any] = (
-        {
-            "graph_context": {
-                "blast_radius": _blast,
-                "composite_risk_score": _graph_ctx.get("composite_risk_score"),
-                "risk_paths": (_graph_ctx.get("risk_paths") or [])[:3],
-                "recommended_action": _graph_ctx.get("recommended_action"),
-            }
-        }
-        if _graph_policy != "off" and _blast not in ("none", "")
+        {"graph_context": _graph_ctx_out}
+        if _graph_policy != "off" and (_blast not in ("none", "") or _cve_impacted)
         else {}
     )
 
@@ -1937,7 +2127,7 @@ async def onboard_server(
     reg_result = json.loads(reg_json)
     result: Dict[str, Any] = {"server_id": server_id, "register": reg_result, "security_scan": None}
 
-    if "error" in reg_result:
+    if "error" in reg_result and "inspect_error" not in reg_result:
         return json.dumps(result, indent=2)
 
     if "inspect_error" in reg_result:
@@ -2037,11 +2227,19 @@ def set_tool_policy(
     if policy is not None and policy not in ("allow", "block"):
         return json.dumps({"error": "policy must be 'allow', 'block', or null to clear."})
     db.set_tool_policy(server_id, tool_name, policy)
-    return json.dumps({
+    resp: Dict[str, Any] = {
         "server_id": server_id,
         "tool": tool_name,
         "policy": policy if policy is not None else "cleared",
-    }, indent=2)
+    }
+    if policy == "allow":
+        tool_obj = _graph_store.get_object(tool["tool_id"])
+        tool_meta = (tool_obj or {}).get("metadata", {})
+        if tool_meta.get("cve_impacted"):
+            resp["warning"] = "cve_impacted"
+            resp["impacting_cves"] = tool_meta.get("impacting_cves", [])
+            resp["note"] = "This tool has known CVEs. allow policy bypasses preflight - proceed with caution."
+    return json.dumps(resp, indent=2)
 
 
 @mcp.tool()
@@ -2122,11 +2320,15 @@ async def discover_servers(
     registered_ids = {s["server_id"] for s in db.list_servers()}
 
     try:
-        found = _discovery.discover_mcp_servers(
-            client_filter=client,
-            include_project=include_project,
-            include_community=include_community_paths,
-            registered_server_ids=registered_ids,
+        _loop = asyncio.get_running_loop()
+        found = await _loop.run_in_executor(
+            None,
+            lambda: _discovery.discover_mcp_servers(
+                client_filter=client,
+                include_project=include_project,
+                include_community=include_community_paths,
+                registered_server_ids=registered_ids,
+            ),
         )
     except Exception as exc:
         _log.error("discover_servers failed: %s", exc, exc_info=True)
@@ -2284,8 +2486,8 @@ def get_risk_graph(server_id: Optional[str] = None, rebuild: bool = False) -> st
     rebuild:   True = rebuild from existing Safety Warden tables before returning.
 
     Returns objects (nodes) and relations (edges). Node types: mcp_server, tool, finding,
-    agent_client, mcp_config, credential_surface. Relation types: exposes, affected_by,
-    can_exfiltrate, declares, uses_credential.
+    agent_client, mcp_config, credential_surface, mitre_technique. Relation types: exposes,
+    affected_by, can_exfiltrate, declares, uses_credential, maps_to.
 
     NEXT: explain_tool_risk(server_id, tool_name) to walk risk paths for a specific tool.
     NEXT: export_graph(format="mermaid") for a diagram.
@@ -2365,8 +2567,93 @@ def export_graph(format: str = "json", server_id: Optional[str] = None) -> str:
         if format == "mermaid":
             diagram = _graph_explain.export_as_mermaid(server_id)
             return json.dumps({"format": "mermaid", "diagram": diagram}, indent=2)
+        if format != "json":
+            return json.dumps({"error": f"Unsupported format {format!r}. Supported: 'json', 'mermaid'"}, indent=2)
         graph = _graph_store.get_full_graph(server_id)
         return json.dumps({"format": "json", **graph}, indent=2)
+    except Exception as exc:
+        return json.dumps({"error": str(exc)}, indent=2)
+
+
+@mcp.tool()
+def explain_client_risk(client_id: str) -> str:
+    """
+    Analyze cross-server risks for all MCP servers registered under one agent client.
+
+    Detects risks that are invisible when looking at servers individually:
+      cross_server_exfiltration: read tool on server-A + external tool on server-B - data can
+        leave the system even if each server individually looks safe.
+      tool_shadowing: same tool name on multiple servers - attacker controlling one can intercept
+        calls intended for another.
+      shared_cve_blast_radius: a single supply-chain CVE affects tools across multiple servers.
+
+    client_id: agent client identifier (e.g. "claude-desktop", "cursor", "vscode").
+      Run discover_servers first to populate the client-server linkage, or register_server
+      will auto-link stdio servers that match a known config file entry.
+
+    BEFORE: discover_servers or onboard_discovered_servers (to establish client-server links).
+    BEFORE: inspect_server for each server (tools must be known for exfil path analysis).
+    AFTER: set_tool_policy('block') on any external tools that appear in exfil paths.
+    AFTER: security_scan_server on servers with HIGH composite_risk.
+    """
+    try:
+        result = _graph_explain.explain_client_risk(client_id)
+        return json.dumps(result, indent=2)
+    except Exception as exc:
+        return json.dumps({"error": str(exc)}, indent=2)
+
+
+@mcp.tool()
+def analyze_cve_blast_radius(
+    client_id: Optional[str] = None,
+    vuln_id: Optional[str] = None,
+) -> str:
+    """
+    Report CVEs that affect multiple servers, showing the blast radius across the client's workspace.
+
+    A single supply-chain vulnerability (e.g. a CVE in the 'requests' library) may be present
+    in several MCP servers simultaneously. This tool surfaces those shared exposures so you can
+    prioritize patching by blast radius rather than server-by-server.
+
+    client_id: scope to servers under one client; omit to query across all clients.
+    vuln_id: filter to a specific CVE / GHSA / vulnerability ID.
+
+    BEFORE: inspect_server for each server (provenance must be built to detect CVEs).
+    AFTER: security_scan_server on the affected servers for deeper analysis.
+    """
+    try:
+        cve_nodes = _graph_store.get_objects_by_type("cve_blast_radius")
+        if client_id:
+            prefix = f"cve_blast::{client_id}::"
+            cve_nodes = [n for n in cve_nodes if n["obj_id"].startswith(prefix)]
+        if vuln_id:
+            cve_nodes = [n for n in cve_nodes if n["name"] == vuln_id or n.get("metadata", {}).get("vuln_id") == vuln_id]
+
+        results = []
+        for n in cve_nodes:
+            meta = n.get("metadata", {})
+            results.append({
+                "vuln_id": meta.get("vuln_id", n["name"]),
+                "severity": meta.get("severity", "UNKNOWN"),
+                "affected_servers": meta.get("affected_servers", []),
+                "client_id": meta.get("client_id", ""),
+                "blast_radius": len(meta.get("affected_servers", [])),
+            })
+        results.sort(
+            key=lambda x: ({"CRITICAL": 3, "HIGH": 2, "MEDIUM": 1}.get(x["severity"], 0), x["blast_radius"]),
+            reverse=True,
+        )
+
+        if not results:
+            hint = (
+                "No shared CVEs found. Ensure inspect_server has been run for each server "
+                "and provenance detection completed."
+            )
+            if client_id:
+                hint += f" Also confirm '{client_id}' has at least 2 linked servers via discover_servers."
+            return json.dumps({"cve_blast_radius": [], "count": 0, "hint": hint}, indent=2)
+
+        return json.dumps({"cve_blast_radius": results, "count": len(results)}, indent=2)
     except Exception as exc:
         return json.dumps({"error": str(exc)}, indent=2)
 

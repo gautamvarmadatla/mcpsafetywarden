@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from .. import database as _db
 from . import store
-from ._constants import EXTERNAL_EFFECTS as _EXTERNAL_EFFECTS, READ_EFFECTS as _READ_EFFECTS
+from ._constants import EXTERNAL_EFFECTS as _EXTERNAL_EFFECTS, READ_EFFECTS as _READ_EFFECTS, RISK_TAG_TO_MITRE as _RISK_TAG_TO_MITRE
 from . import provenance as _provenance
 
 _log = logging.getLogger(__name__)
@@ -26,17 +26,6 @@ _COMPOSITION_PAIR_BONUS = 1.5
 _MULTI_AGENT_AMPLIFIER = 0.4
 _NO_SCAN_CONFIDENCE = 0.7
 
-_RISK_TAG_TO_MITRE: Dict[str, str] = {
-    "credential_exposure": "T1078",
-    "arbitrary_exec": "T1059",
-    "data_exfiltration": "T1041",
-    "lateral_movement": "T1570",
-    "prompt_injection": "T1190",
-    "privilege_escalation": "T1068",
-    "tool_poisoning": "T1195",
-    "tool_shadowing": "T1036",
-    "filesystem_access": "T1005",
-}
 
 _OWASP_SHARED_RESOURCE = "ASI07"
 _OWASP_UNSCANNED = "ASI03"
@@ -77,14 +66,19 @@ def explain_tool_risk(server_id: str, tool_name: str) -> Dict[str, Any]:
             continue
         fmeta = fobj.get("metadata", {})
         risk_tags = fmeta.get("risk_tags", [])
-        findings.append({
+        entry: Dict[str, Any] = {
             "finding": fobj["name"],
             "risk_level": fmeta.get("risk_level"),
             "risk_tags": risk_tags,
             "mitre_techniques": _map_mitre(risk_tags),
             "remediation": fmeta.get("remediation", ""),
             "exploitation_scenario": fmeta.get("exploitation_scenario", ""),
-        })
+        }
+        if fmeta.get("confirmed_by"):
+            entry["confirmed_by"] = fmeta["confirmed_by"]
+        if fmeta.get("confidence") is not None:
+            entry["confidence"] = fmeta["confidence"]
+        findings.append(entry)
 
     has_cred_surface = any(
         r["relation"] == "uses_credential"
@@ -195,10 +189,10 @@ def explain_tool_risk(server_id: str, tool_name: str) -> Dict[str, Any]:
             "[UNSCANNED] Server has credential surfaces but no security scan has been run"
         )
 
-    interaction_risks = _detect_interaction_risks(server_id, agent_clients, scan_exists, sibling_tools, has_cred_surface, provenance_info)
-
     prov_obj = store.get_object(f"provenance::{server_id}")
     provenance_info: Optional[Dict[str, Any]] = prov_obj.get("metadata") if prov_obj else None
+
+    interaction_risks = _detect_interaction_risks(server_id, agent_clients, scan_exists, sibling_tools, has_cred_surface, provenance_info)
 
     schema_tampered = any(
         "tool_poisoning" in f.get("risk_tags", [])
@@ -216,6 +210,8 @@ def explain_tool_risk(server_id: str, tool_name: str) -> Dict[str, Any]:
         "effect_class": effect_class,
         "schema_fingerprint": (tool_meta.get("schema_fingerprint") or "")[:16] or None,
         "schema_tampered": schema_tampered,
+        "cve_impacted": tool_meta.get("cve_impacted", False),
+        "impacting_cves": tool_meta.get("impacting_cves", []),
         "provenance": provenance_info,
         "direct_findings": findings,
         "composition_risks": composition_risks,
@@ -429,6 +425,38 @@ def _detect_interaction_risks(
                 mitre_tags=["T1195", "T1036"],
             ))
 
+        dep_squats = prov_info.get("dependency_typosquatting") or []
+        if dep_squats:
+            examples = [d["dependency"] for d in dep_squats[:3]]
+            risks.append(InteractionRisk(
+                pattern="dependency_typosquatting",
+                agents=agent_clients,
+                risk_score=8.5,
+                description=(
+                    f"Server '{server_id}' has {len(dep_squats)} dependency name(s) "
+                    f"suspiciously similar to well-known packages: {examples}. "
+                    f"A typosquatted dependency executes attacker code on install or import."
+                ),
+                mitre_tags=["T1195", "T1036"],
+            ))
+
+        dep_cves = prov_info.get("dependency_cves") or []
+        if dep_cves:
+            critical = [c for c in dep_cves if c.get("severity") == "CRITICAL"]
+            high = [c for c in dep_cves if c.get("severity") == "HIGH"]
+            top_score = 9.5 if critical else 8.0
+            examples = [f"{c['package']} {c['vuln_id']}" for c in (critical or high)[:3]]
+            risks.append(InteractionRisk(
+                pattern="known_cves",
+                agents=agent_clients,
+                risk_score=top_score,
+                description=(
+                    f"Server '{server_id}' dependencies have {len(critical)} CRITICAL and "
+                    f"{len(high)} HIGH CVEs: {examples}. Update affected packages."
+                ),
+                mitre_tags=["T1190", "T1195"],
+            ))
+
     risks.sort(key=lambda r: r.risk_score, reverse=True)
     return risks
 
@@ -449,43 +477,232 @@ def _recommended_action(
     return "allow"
 
 
+def explain_client_risk(client_id: str) -> Dict[str, Any]:
+    """Return cross-server risk analysis for all servers registered under a client."""
+    server_ids = list(set(_db.get_servers_for_client(client_id)) | set(store.get_servers_by_client(client_id)))
+    if not server_ids:
+        client_obj = store.get_object(client_id)
+        if not client_obj:
+            return {"error": f"Client '{client_id}' not found. Run discover_servers or onboard_discovered_servers first."}
+        server_ids = []
+
+    if len(server_ids) < 2:
+        return {
+            "client_id": client_id,
+            "server_count": len(server_ids),
+            "servers": server_ids,
+            "note": (
+                "Cross-server analysis requires at least 2 servers under this client. "
+                "Single-server risks are in explain_tool_risk."
+            ),
+        }
+
+    cross_exfil = _find_cross_server_exfiltration(server_ids)
+    tool_shadows = _find_tool_shadowing(client_id)
+    cve_blast = _aggregate_cves(client_id)
+
+    per_server: Dict[str, Any] = {}
+    for sid in server_ids:
+        tools = _load_sibling_tools(sid)
+        per_server[sid] = {
+            "tool_count": len(tools),
+            "read_tools": [t["name"] for t in tools if t.get("effect_class") in _READ_EFFECTS],
+            "external_tools": [t["name"] for t in tools if t.get("effect_class") in _EXTERNAL_EFFECTS],
+        }
+
+    composite_risk = "none"
+    if cross_exfil:
+        composite_risk = "high"
+    if cve_blast:
+        composite_risk = "critical" if any(c.get("severity") == "CRITICAL" for c in cve_blast) else "high"
+    if tool_shadows:
+        if composite_risk == "none":
+            composite_risk = "medium"
+
+    return {
+        "client_id": client_id,
+        "server_count": len(server_ids),
+        "servers": per_server,
+        "cross_server_exfiltration_paths": cross_exfil,
+        "tool_shadowing": tool_shadows,
+        "cve_blast_radius": cve_blast,
+        "composite_risk": composite_risk,
+        "summary": _cross_server_summary(cross_exfil, tool_shadows, cve_blast, server_ids),
+    }
+
+
+def _find_cross_server_exfiltration(server_ids: List[str]) -> List[Dict[str, Any]]:
+    """Find cross_server_exfil relations and return as path dicts."""
+    paths: List[Dict[str, Any]] = []
+    seen: set = set()
+    server_id_set = set(server_ids)
+    tools_by_server = store.get_tools_for_servers(server_ids)
+    for sid, tools in tools_by_server.items():
+        for tool in tools:
+            tool_id = tool.get("obj_id", "")
+            if not tool_id:
+                continue
+            for rel in store.get_relations_from(tool_id):
+                if rel["relation"] != "cross_server_exfil":
+                    continue
+                key = (rel["source_id"], rel["target_id"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                meta = rel.get("metadata", {})
+                if meta.get("read_server") not in server_id_set:
+                    continue
+                paths.append({
+                    "read_tool": rel["source_id"],
+                    "exfil_tool": rel["target_id"],
+                    "read_server": meta.get("read_server", sid),
+                    "exfil_server": meta.get("exfil_server", ""),
+                    "client_id": meta.get("client_id", ""),
+                })
+    return paths
+
+
+def _find_tool_shadowing(client_id: str) -> List[Dict[str, Any]]:
+    """Return tool shadowing findings for this client."""
+    prefix = f"finding::tool_shadow::{client_id}::"
+    results: List[Dict[str, Any]] = []
+    for f in store.get_objects_by_type("finding"):
+        if not f["obj_id"].startswith(prefix):
+            continue
+        meta = f.get("metadata", {})
+        entry: Dict[str, Any] = {
+            "shadow_types": meta.get("shadow_types", ["exact"]),
+            "risk_level": meta.get("risk_level", "MEDIUM"),
+            "confidence": meta.get("confidence", 0.8),
+            "description": meta.get("description", ""),
+            "evidence": meta.get("evidence", {}),
+        }
+        if meta.get("tool_name"):
+            entry["tool_name"] = meta["tool_name"]
+            entry["shadowed_on_servers"] = meta.get("shadowed_by", [])
+        else:
+            entry["tool_a"] = meta.get("tool_a", "")
+            entry["tool_b"] = meta.get("tool_b", "")
+            entry["server_a"] = meta.get("server_a", "")
+            entry["server_b"] = meta.get("server_b", "")
+        results.append(entry)
+    return results
+
+
+def _aggregate_cves(client_id: str) -> List[Dict[str, Any]]:
+    """Return CVE blast-radius nodes affecting multiple servers under this client."""
+    prefix = f"cve_blast::{client_id}::"
+    results: List[Dict[str, Any]] = []
+    for n in store.get_objects_by_type("cve_blast_radius"):
+        if not n["obj_id"].startswith(prefix):
+            continue
+        meta = n.get("metadata", {})
+        results.append({
+            "vuln_id": meta.get("vuln_id", n["name"]),
+            "severity": meta.get("severity", "UNKNOWN"),
+            "affected_servers": meta.get("affected_servers", []),
+        })
+    results.sort(
+        key=lambda x: {"CRITICAL": 3, "HIGH": 2, "MEDIUM": 1}.get(x.get("severity", ""), 0),
+        reverse=True,
+    )
+    return results
+
+
+def _cross_server_summary(
+    cross_exfil: List[Dict[str, Any]],
+    shadows: List[Dict[str, Any]],
+    cves: List[Dict[str, Any]],
+    server_ids: List[str],
+) -> str:
+    parts = [f"{len(server_ids)} servers under same client."]
+    if cross_exfil:
+        parts.append(f"{len(cross_exfil)} cross-server exfiltration path(s) detected.")
+    if shadows:
+        parts.append(f"{len(shadows)} tool shadowing conflict(s).")
+    if cves:
+        critical = sum(1 for c in cves if c.get("severity") == "CRITICAL")
+        high = sum(1 for c in cves if c.get("severity") == "HIGH")
+        parts.append(f"Shared CVEs: {critical} CRITICAL, {high} HIGH affecting multiple servers.")
+    if not cross_exfil and not shadows and not cves:
+        parts.append("No cross-server risks detected.")
+    return " ".join(parts)
+
+
 def export_as_mermaid(server_id: Optional[str] = None) -> str:
     graph = store.get_full_graph(server_id)
 
+    _SERVER_RISK_STYLES: Dict[str, str] = {
+        "HIGH":     "fill:#D0021B,color:#fff",
+        "CRITICAL": "fill:#7B0000,color:#fff",
+        "MEDIUM":   "fill:#F5A623,color:#fff",
+        "LOW":      "fill:#4A90E2,color:#fff",
+        "NONE":     "fill:#4A90E2,color:#fff",
+    }
+
     type_styles: Dict[str, str] = {
-        "mcp_server": "fill:#4A90E2,color:#fff",
         "tool": "fill:#7ED321,color:#fff",
         "finding": "fill:#D0021B,color:#fff",
         "agent_client": "fill:#9B59B6,color:#fff",
         "mcp_config": "fill:#F5A623,color:#fff",
         "credential_surface": "fill:#E74C3C,color:#fff",
         "package_provenance": "fill:#27AE60,color:#fff",
+        "mitre_technique": "fill:#8E44AD,color:#fff",
+        "cve_blast_radius": "fill:#6C3483,color:#fff,stroke:#A569BD,stroke-width:2px",
     }
 
     rel_labels: Dict[str, str] = {
         "exposes": "exposes",
         "affected_by": "has finding",
         "can_exfiltrate": "exfil risk",
+        "cross_server_exfil": "cross-server exfil",
         "declares": "declares",
         "uses_credential": "uses cred",
         "has_provenance": "provenance",
         "depends_on": "depends on",
+        "maps_to": "maps to",
+        "affected_by_cve": "CVE",
     }
+
+    def _clean(s: str) -> str:
+        return s[:30].replace("\n", " ").replace("\r", "").replace('"', "'").replace("[", "(").replace("]", ")").replace("{", "(").replace("}", ")").replace("#", "-").replace("|", "-")
 
     lines = ["graph LR"]
     node_ids: Dict[str, str] = {}
     for i, obj in enumerate(graph["objects"]):
         nid = f"N{i}"
         node_ids[obj["obj_id"]] = nid
-        label = obj["name"][:30].replace("\n", " ").replace("\r", "").replace('"', "'").replace("[", "(").replace("]", ")").replace("#", "-").replace("|", "-")
+        meta = obj.get("metadata", {})
+        label = _clean(obj["name"])
+        if obj["obj_type"] == "mcp_server":
+            risk = (meta.get("overall_risk_level") or "").upper()
+            count = meta.get("finding_count")
+            if risk and risk != "NONE":
+                label = f"{label} | {risk}"
+            if count:
+                label = f"{label} | {count} findings"
+        elif obj["obj_type"] == "tool" and meta.get("cve_impacted"):
+            label = f"{label} impacted"
+        elif obj["obj_type"] == "finding":
+            confirmed_by = meta.get("confirmed_by")
+            confidence = meta.get("confidence")
+            if confirmed_by:
+                label = f"{label} | {confirmed_by}"
+            if confidence is not None:
+                label = f"{label} | {confidence:.0%}"
         lines.append(f'    {nid}["{label}"]')
 
     for obj in graph["objects"]:
-        style = type_styles.get(obj["obj_type"])
+        nid = node_ids.get(obj["obj_id"])
+        if not nid:
+            continue
+        if obj["obj_type"] == "mcp_server":
+            risk = (obj.get("metadata", {}).get("overall_risk_level") or "NONE").upper()
+            style = _SERVER_RISK_STYLES.get(risk, _SERVER_RISK_STYLES["NONE"])
+        else:
+            style = type_styles.get(obj["obj_type"])
         if style:
-            nid = node_ids.get(obj["obj_id"])
-            if nid:
-                lines.append(f"    style {nid} {style}")
+            lines.append(f"    style {nid} {style}")
 
     for rel in graph["relations"]:
         src = node_ids.get(rel["source_id"])

@@ -51,7 +51,7 @@ Use as a proxy to add safety gating to any MCP server, or point it at a server y
   <em>Fig 3. Safe execution pipeline: the five checks every proxied tool call passes through</em>
 </p>
 
-**CLI**: 19 subcommands, interactive risk menu, `--json` flag on every command, `--yes` for CI.
+**CLI**: 24 subcommands, interactive risk menu, `--json` flag on every command, `--yes` for CI.
 
 **What it detects**
 
@@ -134,7 +134,7 @@ All configuration is via environment variables.
 | `MCP_DB_ENCRYPTION_KEY` | (unset) | Fernet key to encrypt stored credentials at rest |
 | `ANTHROPIC_API_KEY` | (unset) | Enables Anthropic as LLM provider |
 | `OPENAI_API_KEY` | (unset) | Enables OpenAI as LLM provider |
-| `GEMINI_API_KEY` | (unset) | Enables Gemini as LLM provider |
+| `GEMINI_API_KEY` or `GOOGLE_API_KEY` | (unset) | Enables Gemini as LLM provider (`GEMINI_API_KEY` preferred) |
 | `OLLAMA_MODEL` | (unset) | Model name for Ollama (e.g. `llama3.1`) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434/v1` | Ollama API base URL |
 | `SNYK_TOKEN` | (unset) | Enables Snyk E001 prompt-injection detection |
@@ -210,12 +210,14 @@ See [docs/TOOLS.md](docs/TOOLS.md) for the full tool reference.
 | `onboard_discovered_servers` | Register discovered servers in bulk |
 | `get_risk_graph` | Build or query the inventory risk graph (servers, tools, findings, agent clients) |
 | `explain_tool_risk` | Walk risk paths for a tool: blast radius, composition risks, MITRE tags, recommended action |
+| `explain_client_risk` | Analyze cross-server risks for all servers under one agent client |
+| `analyze_cve_blast_radius` | Report CVEs affecting multiple servers under the same client |
 | `export_graph` | Export risk graph as JSON or Mermaid diagram |
 
 
 ## CLI Reference
 
-19 subcommands covering all 23 MCP tools. Every command supports `--json` for machine-readable output and `--yes` / `-y` to skip confirmation prompts.
+24 subcommands covering all 25 MCP tools. Every command supports `--json` for machine-readable output and `--yes` / `-y` to skip confirmation prompts.
 
 See [docs/CLI.md](docs/CLI.md) for the full reference with flags and examples.
 
@@ -257,7 +259,7 @@ Set an LLM API key to include LLM-assisted tests; without one they are skipped a
 
 | Doc | Contents |
 |---|---|
-| [docs/TOOLS.md](docs/TOOLS.md) | Full reference for all 23 MCP tools |
+| [docs/TOOLS.md](docs/TOOLS.md) | Full reference for all 25 MCP tools |
 | [docs/CLI.md](docs/CLI.md) | CLI subcommands, flags, and examples |
 | [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Kali, Burp Suite, and Snyk setup |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | stdio, HTTP, container, and gateway deployment |
