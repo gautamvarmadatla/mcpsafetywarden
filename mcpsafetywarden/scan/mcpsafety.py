@@ -1603,7 +1603,7 @@ async def _run_recon(
         raw = await loop.run_in_executor(None, lambda p=snapshot: call_llm(provider, model_id, api_key, p))
         result = _safe_json_dict(raw)
         if not result:
-            _log.warning("Recon agent returned unparseable JSON - proceeding without recon")
+            _log.warning("Recon agent returned unparsable JSON - proceeding without recon")
             return _RECON_EMPTY
         if network_scan:
             result["network_scan"] = network_scan
@@ -1681,7 +1681,7 @@ async def _run_planner(
         raw = await loop.run_in_executor(None, lambda p=snapshot: call_llm(provider, model_id, api_key, p))
         result = _safe_json_dict(raw)
         if not result:
-            _log.warning("Planner agent returned unparseable JSON - hacker will probe opportunistically")
+            _log.warning("Planner agent returned unparsable JSON - hacker will probe opportunistically")
             return _PLAN_EMPTY
         _log.info(
             "Attack plan ready: %d hypotheses, %d chains, estimated %d turns",

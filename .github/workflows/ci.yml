@@ -18,7 +18,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install lint tools
-        run: pip install ruff mypy
+        run: pip install ruff mypy codespell
 
       - name: Ruff check
         run: ruff check .
@@ -29,6 +29,9 @@ jobs:
       - name: Mypy
         run: mypy mcpsafetywarden --ignore-missing-imports --no-error-summary
         continue-on-error: true
+
+      - name: Codespell
+        run: codespell mcpsafetywarden tests docs README.md
 
   test:
     name: Test (Python ${{ matrix.python-version }})

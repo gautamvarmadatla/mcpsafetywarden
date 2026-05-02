@@ -857,7 +857,7 @@ def _classify_with_llm(
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
-        _log.warning("LLM classify returned unparseable JSON for '%s': %.200s", tool_name, raw)
+        _log.warning("LLM classify returned unparsable JSON for '%s': %.200s", tool_name, raw)
         return {}
 
     raw_conf = parsed.get("confidence", {})

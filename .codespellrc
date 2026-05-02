@@ -1,0 +1,4 @@
+[codespell]
+skip = .git,*.lock,*.png,*.jpg,*.svg,examples/,docs/
+ignore-words-list = taint,recon,exfil,idor,cve,cves,mitre,ssrf,ssti,sqli,nd,ags,ser,sur,nin,retriev,generat,updat,restor,delet,messag,execut,creat,modif,replac,renam,configur,toggl,migrat,normaliz,terminat,eras,invalidat,purg,notif,charg,deployd,astrix,covert
+quiet-level = 3

@@ -707,7 +707,7 @@ async def _llm_verify_arg_threat(
         )
         parsed = _safe_json_dict(raw)
         if "is_attack" not in parsed:
-            return {"is_attack": True, "confidence": 0.5, "reason": "Unparseable LLM response; defaulting to block"}
+            return {"is_attack": True, "confidence": 0.5, "reason": "unparsable LLM response; defaulting to block"}
         return parsed
     except Exception as exc:
         _log.warning("LLM arg threat verification failed: %s", exc)

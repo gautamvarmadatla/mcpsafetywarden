@@ -1,0 +1,41 @@
+feature:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'mcpsafetywarden/**/*.py'
+
+bug:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'tests/**'
+
+security:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'mcpsafetywarden/scan/**'
+      - 'mcpsafetywarden/graph/**'
+      - 'mcpsafetywarden/proxy/drift.py'
+
+documentation:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '**/*.md'
+      - 'docs/**'
+
+dependencies:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'pyproject.toml'
+      - 'requirements*.txt'
+
+ci:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.github/**'
+      - 'Dockerfile'
+
+chore:
+  - changed-files:
+    - any-glob-to-any-file:
+      - '.gitignore'
+      - '.codespellrc'
+      - 'pyproject.toml'
