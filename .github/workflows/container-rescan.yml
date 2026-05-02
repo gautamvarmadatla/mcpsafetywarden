@@ -1,4 +1,4 @@
-name: Container Re-Scan
+﻿name: Container Re-Scan
 
 on:
   schedule:
@@ -23,11 +23,11 @@ jobs:
         registry: [ghcr, dockerhub]
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Log in to GHCR
         if: matrix.registry == 'ghcr'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -35,7 +35,7 @@ jobs:
 
       - name: Log in to Docker Hub
         if: matrix.registry == 'dockerhub'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -54,7 +54,7 @@ jobs:
 
       - name: Trivy scan (table)
         id: scan_table
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # master
         with:
           image-ref: ${{ steps.image.outputs.ref }}
           format: table
@@ -64,7 +64,7 @@ jobs:
         continue-on-error: true
 
       - name: Trivy scan (SARIF)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # master
         with:
           image-ref: ${{ steps.image.outputs.ref }}
           format: sarif
@@ -76,7 +76,7 @@ jobs:
 
       - name: Upload SARIF to Security tab
         if: always() && hashFiles(format('image-scan-{0}.sarif', matrix.registry)) != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@ed410739ba306e4ebe5e123421a6bd694e494a2b # v4
         with:
           sarif_file: image-scan-${{ matrix.registry }}.sarif
           category: container-${{ matrix.registry }}

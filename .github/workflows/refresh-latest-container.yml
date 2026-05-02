@@ -1,4 +1,4 @@
-name: Refresh Latest Container
+﻿name: Refresh Latest Container
 
 on:
   schedule:
@@ -23,22 +23,22 @@ jobs:
           git ls-remote --tags --sort=-v:refname https://github.com/${{ github.repository }}.git 'refs/tags/v*' \
             | grep -v '\^{}' | head -1 | sed 's|.*refs/tags/||' | xargs -I{} echo "tag={}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: ${{ steps.tag.outputs.tag }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -50,7 +50,7 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
 
       - name: Build candidate image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: false
@@ -64,7 +64,7 @@ jobs:
         run: docker run --rm mcpsafetywarden:refresh-candidate mcpsafetywarden --version
 
       - name: Trivy vulnerability gate
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # master
         with:
           image-ref: mcpsafetywarden:refresh-candidate
           format: table
@@ -73,7 +73,7 @@ jobs:
           exit-code: "1"
 
       - name: Push refreshed latest to GHCR and Docker Hub
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: true
