@@ -4,6 +4,7 @@
 import asyncio
 import json
 import sys
+from importlib.metadata import version as _pkg_version
 from typing import Optional, Union
 
 if sys.platform == "win32":
@@ -49,6 +50,21 @@ from .server import (
 app = typer.Typer(name="mcp-wrapper", add_completion=False, no_args_is_help=True)
 console = Console(legacy_windows=False)
 err = Console(stderr=True, legacy_windows=False)
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"mcpsafetywarden {_pkg_version('mcpsafetywarden')}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _app_callback(
+    version: Optional[bool] = typer.Option(
+        None, "--version", callback=_version_callback, is_eager=True, help="Show version and exit."
+    ),
+) -> None:
+    pass
 
 
 def _run(coro):

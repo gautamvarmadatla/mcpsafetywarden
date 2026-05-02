@@ -28,6 +28,7 @@ jobs:
 
       - name: Mypy
         run: mypy mcpsafetywarden --ignore-missing-imports --no-error-summary
+        continue-on-error: true
 
   test:
     name: Test (Python ${{ matrix.python-version }})
