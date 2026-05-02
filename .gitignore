@@ -8,3 +8,7 @@ behavior_profiles.db
 dist/
 build/
 .claude/
+mcp-publisher
+mcp-publisher.exe
+*.png
+*.mmd
