@@ -12,3 +12,5 @@ mcp-publisher
 mcp-publisher.exe
 *.png
 *.mmd
+dashboard/node_modules/
+dashboard/dist/

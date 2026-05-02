@@ -38,6 +38,7 @@ dependencies = [
     "rich>=13.0.0",
     "httpx>=0.25.0",
     "uvicorn>=0.30.0",
+    "fastapi>=0.111.0",
 ]
 
 [project.urls]
@@ -75,6 +76,9 @@ mcpsafetywarden-server = "mcpsafetywarden.server:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["mcpsafetywarden*"]
+
+[tool.setuptools.package-data]
+mcpsafetywarden = ["static/**/*", "static/index.html"]
 
 [tool.ruff]
 line-length = 120

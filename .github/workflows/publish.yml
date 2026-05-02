@@ -20,6 +20,16 @@ jobs:
         with:
           python-version: "3.11"
 
+      - uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4
+        with:
+          node-version: "20"
+
+      - name: Build dashboard
+        working-directory: dashboard
+        run: |
+          npm ci
+          npm run build
+
       - name: Build
         run: |
           pip install build

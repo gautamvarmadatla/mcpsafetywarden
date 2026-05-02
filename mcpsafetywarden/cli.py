@@ -1486,5 +1486,17 @@ def cmd_export_graph(
         console.print_json(json.dumps(result))
 
 
+@app.command("dashboard")
+def cmd_dashboard(
+    port: int = typer.Option(7070, "--port", "-p", help="Port to listen on"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Do not open browser automatically"),
+) -> None:
+    """Launch the web dashboard."""
+    from .dashboard import launch
+    console.print(f"[cyan]Starting dashboard at http://{host}:{port}[/cyan]")
+    launch(host=host, port=port, open_browser=not no_browser)
+
+
 if __name__ == "__main__":
     app()
