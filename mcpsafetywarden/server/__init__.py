@@ -10,7 +10,7 @@ from ._hooks import (
     _gh_on_server_discovered,
     _gh_on_cross_server_analysis,
 )
-from ._registration import register_server, inspect_server, onboard_server, onboard_discovered_servers
+from ._registration import register_server, inspect_server, onboard_server, onboard_discovered_servers, discover_servers
 from ._execution import (
     safe_tool_call,
     preflight_tool_call,
@@ -62,6 +62,7 @@ __all__ = [
     "explain_client_risk",
     "analyze_cve_blast_radius",
     "check_server_drift",
+    "discover_servers",
 ]
 
 from ._registration import check_server_drift

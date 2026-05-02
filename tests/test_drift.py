@@ -5,8 +5,8 @@ import uuid
 
 import pytest
 
-from mcpsafetywarden.drift import _diff_input_schema, compare_db_snapshots
-from mcpsafetywarden import database as db
+from mcpsafetywarden.proxy.drift import _diff_input_schema, compare_db_snapshots
+from mcpsafetywarden.core import database as db
 
 _DRIFT_SERVER = str((
     __file__
@@ -41,7 +41,7 @@ def _switch_mode(server_id: str, mode: str) -> None:
 
 
 async def _inspect(server_id: str) -> None:
-    from mcpsafetywarden.client_manager import inspect_server_tools
+    from mcpsafetywarden.proxy.client import inspect_server_tools
     await inspect_server_tools(server_id)
 
 
@@ -159,7 +159,7 @@ class TestCompareDbSnapshots:
 class TestCheckServerDrift:
     pytestmark = pytest.mark.asyncio
     async def test_no_drift_when_unchanged(self):
-        from mcpsafetywarden.drift import check_server_drift
+        from mcpsafetywarden.proxy.drift import check_server_drift
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
@@ -167,7 +167,7 @@ class TestCheckServerDrift:
         assert result["drift_detected"] is False
 
     async def test_drift_on_description_change(self):
-        from mcpsafetywarden.drift import check_server_drift
+        from mcpsafetywarden.proxy.drift import check_server_drift
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
@@ -177,7 +177,7 @@ class TestCheckServerDrift:
         assert any(f["change_type"] == "description_changed" for f in result["findings"])
 
     async def test_drift_on_schema_change(self):
-        from mcpsafetywarden.drift import check_server_drift
+        from mcpsafetywarden.proxy.drift import check_server_drift
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
@@ -187,7 +187,7 @@ class TestCheckServerDrift:
         assert any(f["change_type"] == "schema_changed" for f in result["findings"])
 
     async def test_drift_on_tool_removed(self):
-        from mcpsafetywarden.drift import check_server_drift
+        from mcpsafetywarden.proxy.drift import check_server_drift
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
@@ -198,7 +198,7 @@ class TestCheckServerDrift:
         assert result["overall_severity"] == "CRITICAL"
 
     async def test_drift_on_tool_added(self):
-        from mcpsafetywarden.drift import check_server_drift
+        from mcpsafetywarden.proxy.drift import check_server_drift
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
@@ -208,7 +208,7 @@ class TestCheckServerDrift:
         assert "subtract_numbers" in result["tools_added"]
 
     async def test_update_baseline_clears_drift(self):
-        from mcpsafetywarden.drift import check_server_drift
+        from mcpsafetywarden.proxy.drift import check_server_drift
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
@@ -220,19 +220,19 @@ class TestCheckServerDrift:
         assert second["drift_detected"] is False
 
     async def test_raises_for_unregistered_server(self):
-        from mcpsafetywarden.drift import check_server_drift
+        from mcpsafetywarden.proxy.drift import check_server_drift
         with pytest.raises(ValueError, match="not registered"):
             await check_server_drift("no-such-server-xyz")
 
     async def test_raises_when_no_baseline(self):
-        from mcpsafetywarden.drift import check_server_drift
+        from mcpsafetywarden.proxy.drift import check_server_drift
         server_id = _unique_id()
         _register_server(server_id, "v1")
         with pytest.raises(ValueError, match="inspect_server"):
             await check_server_drift(server_id)
 
     async def test_result_has_required_keys(self):
-        from mcpsafetywarden.drift import check_server_drift
+        from mcpsafetywarden.proxy.drift import check_server_drift
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
