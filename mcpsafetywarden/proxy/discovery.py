@@ -1028,6 +1028,9 @@ def _discover_compose(cwd: Path, registered_server_ids: Optional[Set[str]]) -> L
             if not url and cmd_parts:
                 command = str(cmd_parts[0])
                 svc_args = [str(c) for c in cmd_parts[1:]]
+            elif not url and not cmd_parts and image:
+                command = "docker"
+                svc_args = ["run", "--rm", "-i", image]
             results.append(
                 _make_infra_entry(
                     "docker-compose",
