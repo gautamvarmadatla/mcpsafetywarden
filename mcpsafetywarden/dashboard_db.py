@@ -41,9 +41,7 @@ def get_overview() -> Dict[str, Any]:
         blocked_tools = conn.execute("SELECT COUNT(*) FROM tool_policies WHERE policy='block'").fetchone()[0]
 
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-        runs_24h = conn.execute(
-            "SELECT COUNT(*) FROM tool_runs WHERE timestamp > ?", (cutoff,)
-        ).fetchone()[0]
+        runs_24h = conn.execute("SELECT COUNT(*) FROM tool_runs WHERE timestamp > ?", (cutoff,)).fetchone()[0]
 
         rows = conn.execute(
             """
@@ -76,15 +74,17 @@ def get_overview() -> Dict[str, Any]:
         recent_activity = []
         for r in recent_fails:
             parts = r["tool_id"].split("::", 1)
-            recent_activity.append({
-                "run_id": r["run_id"],
-                "server_id": parts[0] if len(parts) == 2 else r["tool_id"],
-                "tool_name": parts[1] if len(parts) == 2 else "",
-                "timestamp": r["timestamp"],
-                "latency_ms": r["latency_ms"],
-                "notes": r["notes"],
-                "preview": r["output_preview"],
-            })
+            recent_activity.append(
+                {
+                    "run_id": r["run_id"],
+                    "server_id": parts[0] if len(parts) == 2 else r["tool_id"],
+                    "tool_name": parts[1] if len(parts) == 2 else "",
+                    "timestamp": r["timestamp"],
+                    "latency_ms": r["latency_ms"],
+                    "notes": r["notes"],
+                    "preview": r["output_preview"],
+                }
+            )
 
         recent_scans = conn.execute(
             "SELECT server_id, overall_risk_level, provider, scanned_at FROM security_scans ORDER BY scanned_at DESC LIMIT 5"
@@ -154,9 +154,7 @@ def get_server(server_id: str) -> Optional[Dict]:
         r = conn.execute("SELECT * FROM servers WHERE server_id=?", (server_id,)).fetchone()
         if not r:
             return None
-        snap = conn.execute(
-            "SELECT * FROM source_hashes WHERE server_id=?", (server_id,)
-        ).fetchone()
+        snap = conn.execute("SELECT * FROM source_hashes WHERE server_id=?", (server_id,)).fetchone()
         return {
             "server_id": r["server_id"],
             "transport": r["transport"],
@@ -216,23 +214,25 @@ def list_tools(
         for r in rows:
             if policy and r["policy"] != policy:
                 continue
-            items.append({
-                "tool_id": r["tool_id"],
-                "server_id": r["server_id"],
-                "tool_name": r["tool_name"],
-                "description": r["description"],
-                "discovered_at": r["discovered_at"],
-                "effect_class": r["effect_class"] or "unknown",
-                "retry_safety": r["retry_safety"] or "unknown",
-                "destructiveness": r["destructiveness"] or "unknown",
-                "latency_p50_ms": r["latency_p50_ms"],
-                "latency_p95_ms": r["latency_p95_ms"],
-                "failure_rate": r["failure_rate"],
-                "output_size_p95_bytes": r["output_size_p95_bytes"],
-                "run_count": r["run_count"] or 0,
-                "confidence": _j(r["confidence_json"], {}),
-                "policy": r["policy"],
-            })
+            items.append(
+                {
+                    "tool_id": r["tool_id"],
+                    "server_id": r["server_id"],
+                    "tool_name": r["tool_name"],
+                    "description": r["description"],
+                    "discovered_at": r["discovered_at"],
+                    "effect_class": r["effect_class"] or "unknown",
+                    "retry_safety": r["retry_safety"] or "unknown",
+                    "destructiveness": r["destructiveness"] or "unknown",
+                    "latency_p50_ms": r["latency_p50_ms"],
+                    "latency_p95_ms": r["latency_p95_ms"],
+                    "failure_rate": r["failure_rate"],
+                    "output_size_p95_bytes": r["output_size_p95_bytes"],
+                    "run_count": r["run_count"] or 0,
+                    "confidence": _j(r["confidence_json"], {}),
+                    "policy": r["policy"],
+                }
+            )
 
         return {"items": items, "total": total, "page": page, "limit": limit}
     finally:
@@ -242,9 +242,7 @@ def list_tools(
 def get_tool_detail(server_id: str, tool_name: str) -> Optional[Dict]:
     conn = get_connection()
     try:
-        r = conn.execute(
-            "SELECT * FROM tools WHERE server_id=? AND tool_name=?", (server_id, tool_name)
-        ).fetchone()
+        r = conn.execute("SELECT * FROM tools WHERE server_id=? AND tool_name=?", (server_id, tool_name)).fetchone()
         if not r:
             return None
         bp = conn.execute("SELECT * FROM behavior_profiles WHERE tool_id=?", (r["tool_id"],)).fetchone()
@@ -318,13 +316,15 @@ def list_snapshots(server_id: str) -> List[Dict]:
             drift = False
             if i < len(rows) - 1:
                 drift = r["tools_hash"] != rows[i + 1]["tools_hash"]
-            result.append({
-                "snapshot_id": r["snapshot_id"],
-                "snapshot_at": r["snapshot_at"],
-                "tool_names": _j(r["tool_names_json"], []),
-                "tools_hash": r["tools_hash"],
-                "drift_from_previous": drift,
-            })
+            result.append(
+                {
+                    "snapshot_id": r["snapshot_id"],
+                    "snapshot_at": r["snapshot_at"],
+                    "tool_names": _j(r["tool_names_json"], []),
+                    "tools_hash": r["tools_hash"],
+                    "drift_from_previous": drift,
+                }
+            )
         return result
     finally:
         conn.close()
@@ -356,7 +356,12 @@ def get_all_findings(
             if server_id and row["server_id"] != server_id:
                 continue
             for f in _j(row["tool_findings_json"], []):
-                entry = {**f, "server_id": row["server_id"], "scanned_at": row["scanned_at"], "provider": row["provider"]}
+                entry = {
+                    **f,
+                    "server_id": row["server_id"],
+                    "scanned_at": row["scanned_at"],
+                    "provider": row["provider"],
+                }
                 if risk_level and entry.get("risk_level") != risk_level:
                     continue
                 tool_findings.append(entry)
@@ -366,7 +371,7 @@ def get_all_findings(
         total = len(tool_findings)
         start = (page - 1) * limit
         return {
-            "items": tool_findings[start: start + limit],
+            "items": tool_findings[start : start + limit],
             "server_risks": server_risks,
             "total": total,
             "page": page,
@@ -465,13 +470,15 @@ def get_runs_stats(hours: int = 24) -> Dict[str, Any]:
         for hour, data in sorted(buckets.items()):
             latencies = sorted(data["latencies"])
             p95 = latencies[int(len(latencies) * 0.95)] if latencies else None
-            series.append({
-                "hour": hour,
-                "runs": data["runs"],
-                "failures": data["failures"],
-                "failure_rate": data["failures"] / data["runs"] if data["runs"] else 0,
-                "latency_p95": p95,
-            })
+            series.append(
+                {
+                    "hour": hour,
+                    "runs": data["runs"],
+                    "failures": data["failures"],
+                    "failure_rate": data["failures"] / data["runs"] if data["runs"] else 0,
+                    "latency_p95": p95,
+                }
+            )
 
         return {"series": series, "hours": hours}
     finally:
@@ -491,6 +498,7 @@ def get_policies() -> List[Dict]:
 
 def set_policy(server_id: str, tool_name: str, policy: Optional[str]) -> None:
     from .core.database import set_tool_policy as _set
+
     _set(server_id, tool_name, policy)
 
 
@@ -503,12 +511,16 @@ def get_graph(server_id: Optional[str] = None) -> Dict[str, Any]:
                 (f"%{server_id}%", f"%{server_id}%", f"%{server_id}%"),
             ).fetchall()
             obj_ids = {r["obj_id"] for r in obj_rows}
-            rel_rows = conn.execute(
-                "SELECT * FROM inventory_relations WHERE source_id IN ({}) OR target_id IN ({})".format(
-                    ",".join("?" * len(obj_ids)), ",".join("?" * len(obj_ids))
-                ),
-                list(obj_ids) + list(obj_ids),
-            ).fetchall() if obj_ids else []
+            rel_rows = (
+                conn.execute(
+                    "SELECT * FROM inventory_relations WHERE source_id IN ({}) OR target_id IN ({})".format(
+                        ",".join("?" * len(obj_ids)), ",".join("?" * len(obj_ids))
+                    ),
+                    list(obj_ids) + list(obj_ids),
+                ).fetchall()
+                if obj_ids
+                else []
+            )
         else:
             obj_rows = conn.execute("SELECT * FROM inventory_objects").fetchall()
             rel_rows = conn.execute("SELECT * FROM inventory_relations").fetchall()

@@ -1494,6 +1494,7 @@ def cmd_dashboard(
 ) -> None:
     """Launch the web dashboard."""
     from .dashboard import launch
+
     console.print(f"[cyan]Starting dashboard at http://{host}:{port}[/cyan]")
     launch(host=host, port=port, open_browser=not no_browser)
 

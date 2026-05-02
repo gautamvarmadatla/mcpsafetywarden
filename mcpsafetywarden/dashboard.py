@@ -25,6 +25,7 @@ api.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 # Health
 # ---------------------------------------------------------------------------
 
+
 @api.get("/api/health")
 def health():
     return _db.get_health()
@@ -34,6 +35,7 @@ def health():
 # Overview
 # ---------------------------------------------------------------------------
 
+
 @api.get("/api/overview")
 def overview():
     return _db.get_overview()
@@ -42,6 +44,7 @@ def overview():
 # ---------------------------------------------------------------------------
 # Servers
 # ---------------------------------------------------------------------------
+
 
 @api.get("/api/servers")
 def servers(
@@ -91,6 +94,7 @@ def server_snapshots(server_id: str):
 # Tools
 # ---------------------------------------------------------------------------
 
+
 @api.get("/api/tools")
 def tools(
     server_id: Optional[str] = Query(None),
@@ -114,6 +118,7 @@ def tool_detail(server_id: str, tool_name: str):
 # Findings
 # ---------------------------------------------------------------------------
 
+
 @api.get("/api/findings")
 def findings(
     risk_level: Optional[str] = Query(None),
@@ -127,6 +132,7 @@ def findings(
 # ---------------------------------------------------------------------------
 # Runs / History
 # ---------------------------------------------------------------------------
+
 
 @api.get("/api/runs")
 def runs(
@@ -158,6 +164,7 @@ def runs_stats(hours: int = Query(24, ge=1, le=168)):
 # Graph
 # ---------------------------------------------------------------------------
 
+
 @api.get("/api/graph")
 def graph(server_id: Optional[str] = Query(None)):
     return _db.get_graph(server_id=server_id)
@@ -167,6 +174,7 @@ def graph(server_id: Optional[str] = Query(None)):
 def graph_rebuild(server_id: Optional[str] = None):
     try:
         from .graph import builder as _builder
+
         _builder.rebuild_from_db(server_id=server_id)
         return {"rebuilt": True}
     except Exception as e:
@@ -177,6 +185,7 @@ def graph_rebuild(server_id: Optional[str] = None):
 # ---------------------------------------------------------------------------
 # Policies
 # ---------------------------------------------------------------------------
+
 
 @api.get("/api/policies")
 def policies():
@@ -221,6 +230,7 @@ def bulk_block_high():
 # Discovered servers
 # ---------------------------------------------------------------------------
 
+
 @api.get("/api/discovered")
 def discovered():
     return _db.get_discovered()
@@ -239,6 +249,7 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
     def spa(full_path: str):
         return FileResponse(str(STATIC_DIR / "index.html"))
 else:
+
     @api.get("/{full_path:path}", include_in_schema=False)
     def spa_not_built(full_path: str):
         return JSONResponse(
@@ -258,6 +269,7 @@ else:
 # ---------------------------------------------------------------------------
 # Launcher
 # ---------------------------------------------------------------------------
+
 
 def launch(host: str = "127.0.0.1", port: int = 7070, open_browser: bool = True) -> None:
     import uvicorn
