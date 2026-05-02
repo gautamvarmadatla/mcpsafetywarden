@@ -112,6 +112,18 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
+      - name: Wait for PyPI
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          for i in $(seq 1 24); do
+            if pip index versions mcpsafetywarden 2>/dev/null | grep -q "$VERSION"; then
+              echo "mcpsafetywarden==$VERSION available on PyPI"; exit 0
+            fi
+            echo "Attempt $i: not yet indexed, waiting 30s..."
+            sleep 30
+          done
+          echo "Timed out waiting for PyPI" && exit 1
+
       - name: Build and push to GHCR and Docker Hub
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
         with:
