@@ -149,22 +149,27 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
         for probe_name, raw_req in probes:
             _log.info("Burp Hacker: HTTP probe %s -> %s:%d", probe_name, host, port)
             out = await _call_aux_tool(
-                burp, "send_http1_request",
+                burp,
+                "send_http1_request",
                 {"content": raw_req, "targetHostname": host, "targetPort": port, "usesHttps": uses_https},
                 timeout=20.0,
             )
             if out and not out.startswith("[AUX") and "denied by Burp Suite" not in out:
-                findings.append({
-                    "tool": "send_http1_request",
-                    "finding": f"HTTP probe response: {probe_name}",
-                    "severity": "INFO",
-                    "evidence": out[:500],
-                    "source": "burp_suite",
-                })
+                findings.append(
+                    {
+                        "tool": "send_http1_request",
+                        "finding": f"HTTP probe response: {probe_name}",
+                        "severity": "INFO",
+                        "evidence": out[:500],
+                        "source": "burp_suite",
+                    }
+                )
 
     if _aux_tool_exists(sid, "generate_collaborator_payload"):
         _log.info("Burp Hacker: generating Collaborator payload")
-        collab_out = await _call_aux_tool(burp, "generate_collaborator_payload", {"customData": "mcp-scan"}, timeout=15.0)
+        collab_out = await _call_aux_tool(
+            burp, "generate_collaborator_payload", {"customData": "mcp-scan"}, timeout=15.0
+        )
         if collab_out and not collab_out.startswith("[AUX"):
             collab_host = None
             collab_payload_id = None
@@ -174,16 +179,21 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
                 elif line.startswith("Payload ID:"):
                     collab_payload_id = line.split(":", 1)[1].strip()
             if collab_host and _aux_tool_exists(sid, "send_http1_request"):
-                oob_body = json.dumps({
-                    "jsonrpc": "2.0", "method": "tools/list",
-                    "params": {"url": f"http://{collab_host}"}, "id": 99,
-                })
+                oob_body = json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "tools/list",
+                        "params": {"url": f"http://{collab_host}"},
+                        "id": 99,
+                    }
+                )
                 oob_req = (
                     f"POST {path} HTTP/1.1\r\nHost: {host}\r\n"
                     f"Content-Type: application/json\r\nContent-Length: {len(oob_body)}\r\n\r\n{oob_body}"
                 )
                 await _call_aux_tool(
-                    burp, "send_http1_request",
+                    burp,
+                    "send_http1_request",
                     {"content": oob_req, "targetHostname": host, "targetPort": port, "usesHttps": uses_https},
                     timeout=20.0,
                 )
@@ -191,7 +201,11 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
             if _aux_tool_exists(sid, "get_collaborator_interactions"):
                 interact_args = {"payloadId": collab_payload_id} if collab_payload_id else {}
                 interactions = await _call_aux_tool(burp, "get_collaborator_interactions", interact_args, timeout=15.0)
-                if interactions and not interactions.startswith("[AUX") and "No interactions detected" not in interactions:
+                if (
+                    interactions
+                    and not interactions.startswith("[AUX")
+                    and "No interactions detected" not in interactions
+                ):
                     _has_callbacks = False
                     for _chunk in interactions.split("\n\n"):
                         _chunk = _chunk.strip()
@@ -205,13 +219,15 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
                         except (json.JSONDecodeError, ValueError):
                             pass
                     if _has_callbacks:
-                        findings.append({
-                            "tool": "get_collaborator_interactions",
-                            "finding": "Out-of-band callback received - possible blind SSRF or injection",
-                            "severity": "HIGH",
-                            "evidence": interactions[:500],
-                            "source": "burp_collaborator",
-                        })
+                        findings.append(
+                            {
+                                "tool": "get_collaborator_interactions",
+                                "finding": "Out-of-band callback received - possible blind SSRF or injection",
+                                "severity": "HIGH",
+                                "evidence": interactions[:500],
+                                "source": "burp_collaborator",
+                            }
+                        )
 
     if _aux_tool_exists(sid, "get_scanner_issues"):
         _log.info("Burp Hacker: fetching scanner issues")
@@ -224,16 +240,18 @@ async def _burp_hacker(target_config: Dict[str, Any]) -> List[Dict[str, Any]]:
                 try:
                     issue = json.loads(chunk)
                     if isinstance(issue, dict):
-                        findings.append({
-                            "tool": "get_scanner_issues",
-                            "finding": issue.get("name") or issue.get("issueName") or "Scanner issue",
-                            "severity": {"INFORMATION": "LOW", "FALSE_POSITIVE": "LOW"}.get(
-                                str(issue.get("severity", "MEDIUM")).upper(),
-                                str(issue.get("severity", "MEDIUM")).upper(),
-                            ),
-                            "evidence": (issue.get("detail") or issue.get("issueDetail") or str(issue))[:300],
-                            "source": "burp_scanner",
-                        })
+                        findings.append(
+                            {
+                                "tool": "get_scanner_issues",
+                                "finding": issue.get("name") or issue.get("issueName") or "Scanner issue",
+                                "severity": {"INFORMATION": "LOW", "FALSE_POSITIVE": "LOW"}.get(
+                                    str(issue.get("severity", "MEDIUM")).upper(),
+                                    str(issue.get("severity", "MEDIUM")).upper(),
+                                ),
+                                "evidence": (issue.get("detail") or issue.get("issueDetail") or str(issue))[:300],
+                                "source": "burp_scanner",
+                            }
+                        )
                 except (json.JSONDecodeError, ValueError):
                     pass
 
@@ -257,10 +275,16 @@ async def burp_proxy_evidence(target_config: Dict[str, Any]) -> str:
         return ""
     _log.info("Burp Auditor: pulling proxy history for %s", host)
     raw = await _call_aux_tool(
-        burp, "get_proxy_http_history_regex",
+        burp,
+        "get_proxy_http_history_regex",
         {"regex": host, "count": 50, "offset": 0},
         timeout=20.0,
     )
-    if not raw or raw.startswith("[AUX") or "access denied by Burp Suite" in raw or "Reached end of items" == raw.strip():
+    if (
+        not raw
+        or raw.startswith("[AUX")
+        or "access denied by Burp Suite" in raw
+        or "Reached end of items" == raw.strip()
+    ):
         return ""
     return raw[:4096]

@@ -75,3 +75,22 @@ mcpsafetywarden-server = "mcpsafetywarden.server:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["mcpsafetywarden*"]
+
+[tool.ruff]
+line-length = 120
+exclude = ["examples/"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501", "E741", "W291", "W293", "E701", "E702", "E402"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_unused_ignores = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"

@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from ..core import database as db
 from .client import _list_tools_raw
@@ -34,37 +34,45 @@ def _diff_input_schema(
         changes.append({"field": f"properties.{prop}", "change": "removed", "severity": "HIGH"})
 
     for prop in sorted(set(new_props) - set(old_props)):
-        changes.append({
-            "field": f"properties.{prop}",
-            "change": "added",
-            "severity": "MEDIUM" if prop in new_req else "LOW",
-        })
+        changes.append(
+            {
+                "field": f"properties.{prop}",
+                "change": "added",
+                "severity": "MEDIUM" if prop in new_req else "LOW",
+            }
+        )
 
     for prop in sorted(set(old_props) & set(new_props)):
         old_type = (old_props[prop] or {}).get("type")
         new_type = (new_props[prop] or {}).get("type")
         if old_type != new_type:
-            changes.append({
-                "field": f"properties.{prop}.type",
-                "change": f"{old_type} -> {new_type}",
-                "severity": "HIGH",
-            })
+            changes.append(
+                {
+                    "field": f"properties.{prop}.type",
+                    "change": f"{old_type} -> {new_type}",
+                    "severity": "HIGH",
+                }
+            )
 
     for prop in sorted(old_req - new_req):
-        changes.append({
-            "field": "required",
-            "param": prop,
-            "change": "no_longer_required",
-            "severity": "MEDIUM",
-        })
-    for prop in sorted(new_req - old_req):
-        if prop in new_props:
-            changes.append({
+        changes.append(
+            {
                 "field": "required",
                 "param": prop,
-                "change": "now_required",
+                "change": "no_longer_required",
                 "severity": "MEDIUM",
-            })
+            }
+        )
+    for prop in sorted(new_req - old_req):
+        if prop in new_props:
+            changes.append(
+                {
+                    "field": "required",
+                    "param": prop,
+                    "change": "now_required",
+                    "severity": "MEDIUM",
+                }
+            )
 
     return changes
 
@@ -82,21 +90,25 @@ def compare_db_snapshots(
     findings: List[Dict[str, Any]] = []
 
     for name in sorted(set(old) - set(new)):
-        findings.append({
-            "tool_name": name,
-            "change_type": "tool_removed",
-            "severity": "CRITICAL",
-            "detail": "Tool present in baseline but no longer served",
-        })
+        findings.append(
+            {
+                "tool_name": name,
+                "change_type": "tool_removed",
+                "severity": "CRITICAL",
+                "detail": "Tool present in baseline but no longer served",
+            }
+        )
 
     for name in sorted(set(new) - set(old)):
-        findings.append({
-            "tool_name": name,
-            "change_type": "tool_added",
-            "severity": "LOW",
-            "detail": "New tool not present in baseline",
-            "description": (new[name].get("description") or "")[:200],
-        })
+        findings.append(
+            {
+                "tool_name": name,
+                "change_type": "tool_added",
+                "severity": "LOW",
+                "detail": "New tool not present in baseline",
+                "description": (new[name].get("description") or "")[:200],
+            }
+        )
 
     for name in sorted(set(old) & set(new)):
         o = old[name]
@@ -105,14 +117,16 @@ def compare_db_snapshots(
         old_desc = o.get("description") or ""
         new_desc = n.get("description") or ""
         if old_desc != new_desc:
-            findings.append({
-                "tool_name": name,
-                "change_type": "description_changed",
-                "severity": "MEDIUM",
-                "old_description": old_desc[:300],
-                "new_description": new_desc[:300],
-                "detail": "Description changed - possible prompt-injection swap",
-            })
+            findings.append(
+                {
+                    "tool_name": name,
+                    "change_type": "description_changed",
+                    "severity": "MEDIUM",
+                    "old_description": old_desc[:300],
+                    "new_description": new_desc[:300],
+                    "detail": "Description changed - possible prompt-injection swap",
+                }
+            )
 
         old_hash = o.get("schema_hash") or ""
         new_hash = n.get("schema_hash") or ""
@@ -121,17 +135,17 @@ def compare_db_snapshots(
             new_schema = n.get("schema") or {}
             schema_diffs = _diff_input_schema(old_schema, new_schema)
             sev = _max_severity(schema_diffs) if schema_diffs else "MEDIUM"
-            findings.append({
-                "tool_name": name,
-                "change_type": "schema_changed",
-                "severity": sev,
-                "schema_changes": schema_diffs,
-                "detail": (
-                    f"{len(schema_diffs)} field-level change(s) detected"
-                    if schema_diffs
-                    else "Schema hash changed"
-                ),
-            })
+            findings.append(
+                {
+                    "tool_name": name,
+                    "change_type": "schema_changed",
+                    "severity": sev,
+                    "schema_changes": schema_diffs,
+                    "detail": (
+                        f"{len(schema_diffs)} field-level change(s) detected" if schema_diffs else "Schema hash changed"
+                    ),
+                }
+            )
 
     overall = _max_severity(findings) if findings else "NONE"
     return {
@@ -143,8 +157,7 @@ def compare_db_snapshots(
         "tools_added": [f["tool_name"] for f in findings if f["change_type"] == "tool_added"],
         "tools_removed": [f["tool_name"] for f in findings if f["change_type"] == "tool_removed"],
         "tools_modified": [
-            f["tool_name"] for f in findings
-            if f["change_type"] in ("description_changed", "schema_changed")
+            f["tool_name"] for f in findings if f["change_type"] in ("description_changed", "schema_changed")
         ],
     }
 
@@ -166,9 +179,7 @@ async def check_server_drift(
 
     stored_list = db.list_tools(server_id)
     if not stored_list:
-        raise ValueError(
-            f"No tools stored for {server_id!r} - run inspect_server first to establish a baseline"
-        )
+        raise ValueError(f"No tools stored for {server_id!r} - run inspect_server first to establish a baseline")
 
     old = {t["tool_name"]: t for t in stored_list}
     live_raw = await asyncio.wait_for(_list_tools_raw(server), timeout=30)

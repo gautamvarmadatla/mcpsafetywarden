@@ -1,7 +1,7 @@
 """Scan known MCP client config files to discover locally installed MCP servers."""
+
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -36,168 +36,633 @@ def _u(*parts: str) -> Path:
 
 _REGISTRY: List[Dict[str, Any]] = [
     {
-        "id": "vscode", "name": "VS Code",
+        "id": "vscode",
+        "name": "VS Code",
         "paths": [
-            {"path": _w("Code", "User", "mcp.json"), "key": "servers", "scope": "user", "confidence": "verified", "os": "win"},
-            {"path": _m("Code", "User", "mcp.json"), "key": "servers", "scope": "user", "confidence": "verified", "os": "mac"},
-            {"path": _u(".config", "Code", "User", "mcp.json"), "key": "servers", "scope": "user", "confidence": "verified", "os": "linux"},
-            {"path": ".vscode/mcp.json", "key": "servers", "scope": "project", "confidence": "verified", "os": None, "relative": True},
+            {
+                "path": _w("Code", "User", "mcp.json"),
+                "key": "servers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": "win",
+            },
+            {
+                "path": _m("Code", "User", "mcp.json"),
+                "key": "servers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": "mac",
+            },
+            {
+                "path": _u(".config", "Code", "User", "mcp.json"),
+                "key": "servers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": "linux",
+            },
+            {
+                "path": ".vscode/mcp.json",
+                "key": "servers",
+                "scope": "project",
+                "confidence": "verified",
+                "os": None,
+                "relative": True,
+            },
         ],
     },
     {
-        "id": "claude-desktop", "name": "Claude Desktop",
+        "id": "claude-desktop",
+        "name": "Claude Desktop",
         "paths": [
-            {"path": _w("Claude", "claude_desktop_config.json"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": "win"},
-            {"path": _m("Claude", "claude_desktop_config.json"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": "mac"},
-            {"path": _u(".config", "Claude", "claude_desktop_config.json"), "key": "mcpServers", "scope": "user", "confidence": "community", "os": "linux"},
+            {
+                "path": _w("Claude", "claude_desktop_config.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": "win",
+            },
+            {
+                "path": _m("Claude", "claude_desktop_config.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": "mac",
+            },
+            {
+                "path": _u(".config", "Claude", "claude_desktop_config.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "community",
+                "os": "linux",
+            },
         ],
     },
     {
-        "id": "claude-code", "name": "Claude Code CLI",
+        "id": "claude-code",
+        "name": "Claude Code CLI",
         "paths": [
             {"path": _u(".claude.json"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": None},
-            {"path": ".mcp.json", "key": "mcpServers", "scope": "project", "confidence": "verified", "os": None, "relative": True},
-            {"path": _m("ClaudeCode", "managed-mcp.json"), "key": "mcpServers", "scope": "enterprise", "confidence": "verified", "os": "mac"},
-            {"path": "/etc/claude-code/managed-mcp.json", "key": "mcpServers", "scope": "enterprise", "confidence": "verified", "os": "linux"},
-            {"path": r"C:\Program Files\ClaudeCode\managed-mcp.json", "key": "mcpServers", "scope": "enterprise", "confidence": "verified", "os": "win"},
-            {"path": r"C:\ProgramData\ClaudeCode\managed-mcp.json", "key": "mcpServers", "scope": "enterprise", "confidence": "verified", "os": "win"},
+            {
+                "path": ".mcp.json",
+                "key": "mcpServers",
+                "scope": "project",
+                "confidence": "verified",
+                "os": None,
+                "relative": True,
+            },
+            {
+                "path": _m("ClaudeCode", "managed-mcp.json"),
+                "key": "mcpServers",
+                "scope": "enterprise",
+                "confidence": "verified",
+                "os": "mac",
+            },
+            {
+                "path": "/etc/claude-code/managed-mcp.json",
+                "key": "mcpServers",
+                "scope": "enterprise",
+                "confidence": "verified",
+                "os": "linux",
+            },
+            {
+                "path": r"C:\Program Files\ClaudeCode\managed-mcp.json",
+                "key": "mcpServers",
+                "scope": "enterprise",
+                "confidence": "verified",
+                "os": "win",
+            },
+            {
+                "path": r"C:\ProgramData\ClaudeCode\managed-mcp.json",
+                "key": "mcpServers",
+                "scope": "enterprise",
+                "confidence": "verified",
+                "os": "win",
+            },
         ],
     },
     {
-        "id": "cursor", "name": "Cursor",
+        "id": "cursor",
+        "name": "Cursor",
         "paths": [
-            {"path": _u(".cursor", "mcp.json"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": None},
-            {"path": ".cursor/mcp.json", "key": "mcpServers", "scope": "project", "confidence": "verified", "os": None, "relative": True},
+            {
+                "path": _u(".cursor", "mcp.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": None,
+            },
+            {
+                "path": ".cursor/mcp.json",
+                "key": "mcpServers",
+                "scope": "project",
+                "confidence": "verified",
+                "os": None,
+                "relative": True,
+            },
         ],
     },
     {
-        "id": "opencode", "name": "OpenCode",
+        "id": "opencode",
+        "name": "OpenCode",
         "paths": [
-            {"path": _u(".config", "opencode", "opencode.json"), "key": "mcp", "scope": "user", "confidence": "verified", "os": None},
-            {"path": "opencode.json", "key": "mcp", "scope": "project", "confidence": "verified", "os": None, "relative": True},
-            {"path": "opencode.jsonc", "key": "mcp", "scope": "project", "confidence": "verified", "os": None, "relative": True},
+            {
+                "path": _u(".config", "opencode", "opencode.json"),
+                "key": "mcp",
+                "scope": "user",
+                "confidence": "verified",
+                "os": None,
+            },
+            {
+                "path": "opencode.json",
+                "key": "mcp",
+                "scope": "project",
+                "confidence": "verified",
+                "os": None,
+                "relative": True,
+            },
+            {
+                "path": "opencode.jsonc",
+                "key": "mcp",
+                "scope": "project",
+                "confidence": "verified",
+                "os": None,
+                "relative": True,
+            },
         ],
     },
     {
-        "id": "gemini-cli", "name": "Gemini CLI",
+        "id": "gemini-cli",
+        "name": "Gemini CLI",
         "paths": [
-            {"path": _u(".gemini", "settings.json"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": None},
-            {"path": ".gemini/settings.json", "key": "mcpServers", "scope": "project", "confidence": "verified", "os": None, "relative": True},
+            {
+                "path": _u(".gemini", "settings.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": None,
+            },
+            {
+                "path": ".gemini/settings.json",
+                "key": "mcpServers",
+                "scope": "project",
+                "confidence": "verified",
+                "os": None,
+                "relative": True,
+            },
         ],
     },
     {
-        "id": "zed", "name": "Zed",
+        "id": "zed",
+        "name": "Zed",
         "paths": [
-            {"path": _w("Zed", "settings.json"), "key": "context_servers", "scope": "user", "confidence": "ecosystem_verified", "os": "win"},
-            {"path": _m("Zed", "settings.json"), "key": "context_servers", "scope": "user", "confidence": "verified", "os": "mac"},
-            {"path": _u(".config", "zed", "settings.json"), "key": "context_servers", "scope": "user", "confidence": "verified", "os": "linux"},
-            {"path": ".zed/settings.json", "key": "context_servers", "scope": "project", "confidence": "verified", "os": None, "relative": True},
+            {
+                "path": _w("Zed", "settings.json"),
+                "key": "context_servers",
+                "scope": "user",
+                "confidence": "ecosystem_verified",
+                "os": "win",
+            },
+            {
+                "path": _m("Zed", "settings.json"),
+                "key": "context_servers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": "mac",
+            },
+            {
+                "path": _u(".config", "zed", "settings.json"),
+                "key": "context_servers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": "linux",
+            },
+            {
+                "path": ".zed/settings.json",
+                "key": "context_servers",
+                "scope": "project",
+                "confidence": "verified",
+                "os": None,
+                "relative": True,
+            },
         ],
     },
     {
-        "id": "cline", "name": "Cline",
+        "id": "cline",
+        "name": "Cline",
         "paths": [
-            {"path": _w("Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"), "key": "mcpServers", "scope": "user", "confidence": "community", "os": "win"},
-            {"path": _m("Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"), "key": "mcpServers", "scope": "user", "confidence": "community", "os": "mac"},
-            {"path": _u(".config", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"), "key": "mcpServers", "scope": "user", "confidence": "community", "os": "linux"},
-            {"path": _u(".cline", "data", "settings", "cline_mcp_settings.json"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": None},
+            {
+                "path": _w(
+                    "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"
+                ),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "community",
+                "os": "win",
+            },
+            {
+                "path": _m(
+                    "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"
+                ),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "community",
+                "os": "mac",
+            },
+            {
+                "path": _u(
+                    ".config",
+                    "Code",
+                    "User",
+                    "globalStorage",
+                    "saoudrizwan.claude-dev",
+                    "settings",
+                    "cline_mcp_settings.json",
+                ),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "community",
+                "os": "linux",
+            },
+            {
+                "path": _u(".cline", "data", "settings", "cline_mcp_settings.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": None,
+            },
         ],
     },
     {
-        "id": "goose", "name": "Goose",
+        "id": "goose",
+        "name": "Goose",
         "paths": [
-            {"path": _w("Block", "goose", "config", "config.yaml"), "key": "extensions", "scope": "user", "confidence": "verified", "os": "win", "format": "yaml"},
-            {"path": _u(".config", "goose", "config.yaml"), "key": "extensions", "scope": "user", "confidence": "verified", "os": "mac", "format": "yaml"},
-            {"path": _u(".config", "goose", "config.yaml"), "key": "extensions", "scope": "user", "confidence": "verified", "os": "linux", "format": "yaml"},
+            {
+                "path": _w("Block", "goose", "config", "config.yaml"),
+                "key": "extensions",
+                "scope": "user",
+                "confidence": "verified",
+                "os": "win",
+                "format": "yaml",
+            },
+            {
+                "path": _u(".config", "goose", "config.yaml"),
+                "key": "extensions",
+                "scope": "user",
+                "confidence": "verified",
+                "os": "mac",
+                "format": "yaml",
+            },
+            {
+                "path": _u(".config", "goose", "config.yaml"),
+                "key": "extensions",
+                "scope": "user",
+                "confidence": "verified",
+                "os": "linux",
+                "format": "yaml",
+            },
         ],
     },
     {
-        "id": "continue", "name": "Continue.dev",
+        "id": "continue",
+        "name": "Continue.dev",
         "paths": [
-            {"path": _u(".continue", "config.yaml"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": None, "format": "yaml"},
-            {"path": _u(".continue", "config.json"), "key": "mcpServers", "scope": "user", "confidence": "verified_legacy", "os": None},
-            {"path": ".continue/mcpServers", "key": "__file__", "scope": "project", "confidence": "verified", "os": None, "relative": True, "glob": "*.yaml", "format": "yaml"},
+            {
+                "path": _u(".continue", "config.yaml"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": None,
+                "format": "yaml",
+            },
+            {
+                "path": _u(".continue", "config.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified_legacy",
+                "os": None,
+            },
+            {
+                "path": ".continue/mcpServers",
+                "key": "__file__",
+                "scope": "project",
+                "confidence": "verified",
+                "os": None,
+                "relative": True,
+                "glob": "*.yaml",
+                "format": "yaml",
+            },
         ],
     },
     {
-        "id": "roo-code", "name": "Roo Code",
+        "id": "roo-code",
+        "name": "Roo Code",
         "paths": [
-            {"path": _w("Code", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "mcp_settings.json"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": "win"},
-            {"path": _m("Code", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "mcp_settings.json"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": "mac"},
-            {"path": _u(".config", "Code", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "mcp_settings.json"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": "linux"},
-            {"path": _w("Code", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "cline_mcp_settings.json"), "key": "mcpServers", "scope": "user", "confidence": "community", "os": "win"},
-            {"path": _m("Code", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "cline_mcp_settings.json"), "key": "mcpServers", "scope": "user", "confidence": "community", "os": "mac"},
-            {"path": _u(".config", "Code", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "cline_mcp_settings.json"), "key": "mcpServers", "scope": "user", "confidence": "community", "os": "linux"},
-            {"path": ".roo/mcp.json", "key": "mcpServers", "scope": "project", "confidence": "verified", "os": None, "relative": True},
+            {
+                "path": _w(
+                    "Code", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "mcp_settings.json"
+                ),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": "win",
+            },
+            {
+                "path": _m(
+                    "Code", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "mcp_settings.json"
+                ),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": "mac",
+            },
+            {
+                "path": _u(
+                    ".config",
+                    "Code",
+                    "User",
+                    "globalStorage",
+                    "rooveterinaryinc.roo-cline",
+                    "settings",
+                    "mcp_settings.json",
+                ),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": "linux",
+            },
+            {
+                "path": _w(
+                    "Code", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "cline_mcp_settings.json"
+                ),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "community",
+                "os": "win",
+            },
+            {
+                "path": _m(
+                    "Code", "User", "globalStorage", "rooveterinaryinc.roo-cline", "settings", "cline_mcp_settings.json"
+                ),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "community",
+                "os": "mac",
+            },
+            {
+                "path": _u(
+                    ".config",
+                    "Code",
+                    "User",
+                    "globalStorage",
+                    "rooveterinaryinc.roo-cline",
+                    "settings",
+                    "cline_mcp_settings.json",
+                ),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "community",
+                "os": "linux",
+            },
+            {
+                "path": ".roo/mcp.json",
+                "key": "mcpServers",
+                "scope": "project",
+                "confidence": "verified",
+                "os": None,
+                "relative": True,
+            },
         ],
     },
     {
-        "id": "windsurf", "name": "Windsurf",
+        "id": "windsurf",
+        "name": "Windsurf",
         "paths": [
-            {"path": _u(".codeium", "windsurf", "mcp_config.json"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": None},
+            {
+                "path": _u(".codeium", "windsurf", "mcp_config.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": None,
+            },
         ],
     },
     {
-        "id": "amazon-q", "name": "Amazon Q",
+        "id": "amazon-q",
+        "name": "Amazon Q",
         "paths": [
-            {"path": _u(".aws", "amazonq", "mcp.json"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": None},
-            {"path": _u(".aws", "amazonq", "default.json"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": None},
-            {"path": _u(".aws", "amazonq", "agents", "default.json"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": None},
-            {"path": ".amazonq/mcp.json", "key": "mcpServers", "scope": "project", "confidence": "verified", "os": None, "relative": True},
-            {"path": ".amazonq/default.json", "key": "mcpServers", "scope": "project", "confidence": "verified", "os": None, "relative": True},
+            {
+                "path": _u(".aws", "amazonq", "mcp.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": None,
+            },
+            {
+                "path": _u(".aws", "amazonq", "default.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": None,
+            },
+            {
+                "path": _u(".aws", "amazonq", "agents", "default.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": None,
+            },
+            {
+                "path": ".amazonq/mcp.json",
+                "key": "mcpServers",
+                "scope": "project",
+                "confidence": "verified",
+                "os": None,
+                "relative": True,
+            },
+            {
+                "path": ".amazonq/default.json",
+                "key": "mcpServers",
+                "scope": "project",
+                "confidence": "verified",
+                "os": None,
+                "relative": True,
+            },
         ],
     },
     {
-        "id": "kiro", "name": "Kiro",
+        "id": "kiro",
+        "name": "Kiro",
         "paths": [
-            {"path": _u(".kiro", "settings", "mcp.json"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": None},
-            {"path": ".kiro/settings/mcp.json", "key": "mcpServers", "scope": "project", "confidence": "verified", "os": None, "relative": True},
+            {
+                "path": _u(".kiro", "settings", "mcp.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": None,
+            },
+            {
+                "path": ".kiro/settings/mcp.json",
+                "key": "mcpServers",
+                "scope": "project",
+                "confidence": "verified",
+                "os": None,
+                "relative": True,
+            },
         ],
     },
     {
-        "id": "github-copilot", "name": "GitHub Copilot",
+        "id": "github-copilot",
+        "name": "GitHub Copilot",
         "paths": [
-            {"path": _u(".copilot", "mcp-config.json"), "key": "mcpServers", "scope": "user", "confidence": "verified", "os": None},
+            {
+                "path": _u(".copilot", "mcp-config.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": None,
+            },
         ],
     },
     {
-        "id": "amp", "name": "Amp",
+        "id": "amp",
+        "name": "Amp",
         "paths": [
-            {"path": _u(".config", "amp", "settings.json"), "key": "amp.mcpServers", "scope": "user", "confidence": "verified", "os": None},
-            {"path": _u(".config", "amp", "settings.jsonc"), "key": "amp.mcpServers", "scope": "user", "confidence": "verified", "os": None},
-            {"path": ".amp/settings.json", "key": "amp.mcpServers", "scope": "project", "confidence": "verified", "os": None, "relative": True},
-            {"path": _m("ampcode", "managed-settings.json"), "key": "amp.mcpServers", "scope": "enterprise", "confidence": "verified", "os": "mac"},
-            {"path": "/etc/ampcode/managed-settings.json", "key": "amp.mcpServers", "scope": "enterprise", "confidence": "verified", "os": "linux"},
-            {"path": str(_PROGRAMDATA / "ampcode" / "managed-settings.json"), "key": "amp.mcpServers", "scope": "enterprise", "confidence": "verified", "os": "win"},
+            {
+                "path": _u(".config", "amp", "settings.json"),
+                "key": "amp.mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": None,
+            },
+            {
+                "path": _u(".config", "amp", "settings.jsonc"),
+                "key": "amp.mcpServers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": None,
+            },
+            {
+                "path": ".amp/settings.json",
+                "key": "amp.mcpServers",
+                "scope": "project",
+                "confidence": "verified",
+                "os": None,
+                "relative": True,
+            },
+            {
+                "path": _m("ampcode", "managed-settings.json"),
+                "key": "amp.mcpServers",
+                "scope": "enterprise",
+                "confidence": "verified",
+                "os": "mac",
+            },
+            {
+                "path": "/etc/ampcode/managed-settings.json",
+                "key": "amp.mcpServers",
+                "scope": "enterprise",
+                "confidence": "verified",
+                "os": "linux",
+            },
+            {
+                "path": str(_PROGRAMDATA / "ampcode" / "managed-settings.json"),
+                "key": "amp.mcpServers",
+                "scope": "enterprise",
+                "confidence": "verified",
+                "os": "win",
+            },
         ],
     },
     {
-        "id": "antigravity", "name": "Antigravity",
+        "id": "antigravity",
+        "name": "Antigravity",
         "paths": [
-            {"path": _u(".gemini", "antigravity", "mcp_config.json"), "key": "mcpServers", "scope": "user", "confidence": "community", "os": None},
+            {
+                "path": _u(".gemini", "antigravity", "mcp_config.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "community",
+                "os": None,
+            },
         ],
     },
     {
-        "id": "codex-cli", "name": "Codex CLI",
+        "id": "codex-cli",
+        "name": "Codex CLI",
         "paths": [
-            {"path": _u(".codex", "config.toml"), "key": "mcp_servers", "scope": "user", "confidence": "verified", "os": None, "format": "toml"},
-            {"path": ".codex/config.toml", "key": "mcp_servers", "scope": "project", "confidence": "verified", "os": None, "relative": True, "format": "toml"},
+            {
+                "path": _u(".codex", "config.toml"),
+                "key": "mcp_servers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": None,
+                "format": "toml",
+            },
+            {
+                "path": ".codex/config.toml",
+                "key": "mcp_servers",
+                "scope": "project",
+                "confidence": "verified",
+                "os": None,
+                "relative": True,
+                "format": "toml",
+            },
         ],
     },
     {
-        "id": "5ire", "name": "5ire",
+        "id": "5ire",
+        "name": "5ire",
         "paths": [
-            {"path": _w("5ire", "mcp.json"), "key": "mcpServers", "scope": "user", "confidence": "community", "os": "win", "activation_state_only": True},
-            {"path": _m("5ire", "mcp.json"), "key": "mcpServers", "scope": "user", "confidence": "community", "os": "mac", "activation_state_only": True},
-            {"path": _u(".config", "5ire", "mcp.json"), "key": "mcpServers", "scope": "user", "confidence": "community", "os": "linux", "activation_state_only": True},
+            {
+                "path": _w("5ire", "mcp.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "community",
+                "os": "win",
+                "activation_state_only": True,
+            },
+            {
+                "path": _m("5ire", "mcp.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "community",
+                "os": "mac",
+                "activation_state_only": True,
+            },
+            {
+                "path": _u(".config", "5ire", "mcp.json"),
+                "key": "mcpServers",
+                "scope": "user",
+                "confidence": "community",
+                "os": "linux",
+                "activation_state_only": True,
+            },
         ],
     },
     {
-        "id": "witsy", "name": "Witsy",
+        "id": "witsy",
+        "name": "Witsy",
         "paths": [
-            {"path": _w("Witsy", "settings.json"), "key": "witsy", "scope": "user", "confidence": "community", "os": "win"},
-            {"path": _m("Witsy", "settings.json"), "key": "witsy", "scope": "user", "confidence": "community", "os": "mac"},
-            {"path": _u(".config", "Witsy", "settings.json"), "key": "witsy", "scope": "user", "confidence": "community", "os": "linux"},
+            {
+                "path": _w("Witsy", "settings.json"),
+                "key": "witsy",
+                "scope": "user",
+                "confidence": "community",
+                "os": "win",
+            },
+            {
+                "path": _m("Witsy", "settings.json"),
+                "key": "witsy",
+                "scope": "user",
+                "confidence": "community",
+                "os": "mac",
+            },
+            {
+                "path": _u(".config", "Witsy", "settings.json"),
+                "key": "witsy",
+                "scope": "user",
+                "confidence": "community",
+                "os": "linux",
+            },
         ],
     },
 ]
@@ -215,24 +680,29 @@ def _strip_jsonc(text: str) -> str:
     i, n = 0, len(text)
     while i < n:
         if text[i] == '"':
-            result.append(text[i]); i += 1
+            result.append(text[i])
+            i += 1
             while i < n:
-                c = text[i]; result.append(c); i += 1
-                if c == '\\' and i < n:
-                    result.append(text[i]); i += 1
+                c = text[i]
+                result.append(c)
+                i += 1
+                if c == "\\" and i < n:
+                    result.append(text[i])
+                    i += 1
                 elif c == '"':
                     break
-        elif text[i:i+2] == '//':
-            while i < n and text[i] != '\n':
+        elif text[i : i + 2] == "//":
+            while i < n and text[i] != "\n":
                 i += 1
-        elif text[i:i+2] == '/*':
+        elif text[i : i + 2] == "/*":
             i += 2
-            while i < n and text[i:i+2] != '*/':
+            while i < n and text[i : i + 2] != "*/":
                 i += 1
             i += 2
         else:
-            result.append(text[i]); i += 1
-    return ''.join(result)
+            result.append(text[i])
+            i += 1
+    return "".join(result)
 
 
 def _parse_json(text: str) -> Any:
@@ -251,6 +721,7 @@ def _parse_json(text: str) -> Any:
 def _parse_yaml(text: str) -> Any:
     try:
         import yaml
+
         return yaml.safe_load(text) or {}
     except ImportError:
         _log.debug("discovery: PyYAML not installed, cannot parse YAML config")
@@ -464,14 +935,16 @@ def _load_path(
         for name, entry in servers_map.items():
             if key == "__file__" and not (isinstance(entry, dict) and entry.get("name")):
                 name = f.stem
-            results.append({
-                "server_name": name,
-                "entry": entry,
-                "config_path": str(f),
-                "scope": path_def["scope"],
-                "confidence": confidence,
-                "activation_state_only": path_def.get("activation_state_only", False),
-            })
+            results.append(
+                {
+                    "server_name": name,
+                    "entry": entry,
+                    "config_path": str(f),
+                    "scope": path_def["scope"],
+                    "confidence": confidence,
+                    "activation_state_only": path_def.get("activation_state_only", False),
+                }
+            )
 
     return results
 
@@ -522,8 +995,7 @@ def discover_mcp_servers(
                     suggested_id = make_server_id(cid, raw["server_name"])
                     normalised["suggested_server_id"] = suggested_id
                     normalised["registered"] = (
-                        suggested_id in registered_server_ids
-                        if registered_server_ids is not None else False
+                        suggested_id in registered_server_ids if registered_server_ids is not None else False
                     )
                     seen[did] = normalised
 

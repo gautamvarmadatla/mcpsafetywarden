@@ -9,7 +9,12 @@ from ..core import database as _db
 from ..inventory.models import InventoryObject, InventoryRelation
 from . import store
 from . import provenance as _provenance
-from ._constants import READ_EFFECTS as _READ_EFFECTS, EXFILTRATION_EFFECTS as _EXFILTRATION_EFFECTS, RISK_TAG_TO_MITRE as _RISK_TAG_TO_MITRE, MITRE_NAMES as _MITRE_NAMES
+from ._constants import (
+    READ_EFFECTS as _READ_EFFECTS,
+    EXFILTRATION_EFFECTS as _EXFILTRATION_EFFECTS,
+    RISK_TAG_TO_MITRE as _RISK_TAG_TO_MITRE,
+    MITRE_NAMES as _MITRE_NAMES,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -20,50 +25,104 @@ _DESC_DRIFT_JACCARD_THRESHOLD = 0.25
 _DESC_SAME_JACCARD_THRESHOLD = 0.60
 _MIN_DESC_TOKENS = 3
 
-_STOPWORDS: frozenset = frozenset({
-    "a", "an", "the", "and", "or", "for", "in", "to", "of", "with",
-    "from", "by", "is", "it", "its", "that", "this", "be", "are", "as",
-})
+_STOPWORDS: frozenset = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "for",
+        "in",
+        "to",
+        "of",
+        "with",
+        "from",
+        "by",
+        "is",
+        "it",
+        "its",
+        "that",
+        "this",
+        "be",
+        "are",
+        "as",
+    }
+)
 
-_ANTONYM_TOKEN_PAIRS: frozenset = frozenset({
-    frozenset({"read", "write"}), frozenset({"get", "set"}),
-    frozenset({"fetch", "post"}), frozenset({"load", "save"}),
-    frozenset({"import", "export"}), frozenset({"pull", "push"}),
-    frozenset({"put", "get"}), frozenset({"receive", "send"}),
-    frozenset({"download", "upload"}),
-    frozenset({"create", "delete"}), frozenset({"create", "destroy"}),
-    frozenset({"create", "remove"}), frozenset({"add", "remove"}),
-    frozenset({"add", "delete"}), frozenset({"insert", "delete"}),
-    frozenset({"build", "destroy"}), frozenset({"spawn", "kill"}),
-    frozenset({"allocate", "free"}), frozenset({"register", "deregister"}),
-    frozenset({"register", "unregister"}), frozenset({"subscribe", "unsubscribe"}),
-    frozenset({"publish", "unpublish"}),
-    frozenset({"start", "stop"}), frozenset({"enable", "disable"}),
-    frozenset({"activate", "deactivate"}), frozenset({"open", "close"}),
-    frozenset({"begin", "end"}), frozenset({"init", "cleanup"}),
-    frozenset({"init", "teardown"}), frozenset({"setup", "teardown"}),
-    frozenset({"pause", "resume"}), frozenset({"suspend", "resume"}),
-    frozenset({"freeze", "unfreeze"}),
-    frozenset({"login", "logout"}), frozenset({"signin", "signout"}),
-    frozenset({"lock", "unlock"}), frozenset({"block", "unblock"}),
-    frozenset({"grant", "revoke"}), frozenset({"allow", "deny"}),
-    frozenset({"approve", "reject"}), frozenset({"accept", "decline"}),
-    frozenset({"authorize", "unauthorize"}), frozenset({"whitelist", "blacklist"}),
-    frozenset({"install", "uninstall"}), frozenset({"mount", "unmount"}),
-    frozenset({"attach", "detach"}), frozenset({"connect", "disconnect"}),
-    frozenset({"bind", "unbind"}), frozenset({"link", "unlink"}),
-    frozenset({"join", "leave"}), frozenset({"enroll", "unenroll"}),
-    frozenset({"encode", "decode"}), frozenset({"encrypt", "decrypt"}),
-    frozenset({"compress", "decompress"}), frozenset({"pack", "unpack"}),
-    frozenset({"serialize", "deserialize"}), frozenset({"marshal", "unmarshal"}),
-    frozenset({"zip", "unzip"}),
-    frozenset({"backup", "restore"}), frozenset({"archive", "unarchive"}),
-    frozenset({"archive", "restore"}), frozenset({"checkpoint", "rollback"}),
-    frozenset({"commit", "rollback"}), frozenset({"apply", "revert"}),
-    frozenset({"deploy", "rollback"}), frozenset({"promote", "demote"}),
-    frozenset({"push", "pop"}), frozenset({"enqueue", "dequeue"}),
-    frozenset({"acquire", "release"}),
-})
+_ANTONYM_TOKEN_PAIRS: frozenset = frozenset(
+    {
+        frozenset({"read", "write"}),
+        frozenset({"get", "set"}),
+        frozenset({"fetch", "post"}),
+        frozenset({"load", "save"}),
+        frozenset({"import", "export"}),
+        frozenset({"pull", "push"}),
+        frozenset({"put", "get"}),
+        frozenset({"receive", "send"}),
+        frozenset({"download", "upload"}),
+        frozenset({"create", "delete"}),
+        frozenset({"create", "destroy"}),
+        frozenset({"create", "remove"}),
+        frozenset({"add", "remove"}),
+        frozenset({"add", "delete"}),
+        frozenset({"insert", "delete"}),
+        frozenset({"build", "destroy"}),
+        frozenset({"spawn", "kill"}),
+        frozenset({"allocate", "free"}),
+        frozenset({"register", "deregister"}),
+        frozenset({"register", "unregister"}),
+        frozenset({"subscribe", "unsubscribe"}),
+        frozenset({"publish", "unpublish"}),
+        frozenset({"start", "stop"}),
+        frozenset({"enable", "disable"}),
+        frozenset({"activate", "deactivate"}),
+        frozenset({"open", "close"}),
+        frozenset({"begin", "end"}),
+        frozenset({"init", "cleanup"}),
+        frozenset({"init", "teardown"}),
+        frozenset({"setup", "teardown"}),
+        frozenset({"pause", "resume"}),
+        frozenset({"suspend", "resume"}),
+        frozenset({"freeze", "unfreeze"}),
+        frozenset({"login", "logout"}),
+        frozenset({"signin", "signout"}),
+        frozenset({"lock", "unlock"}),
+        frozenset({"block", "unblock"}),
+        frozenset({"grant", "revoke"}),
+        frozenset({"allow", "deny"}),
+        frozenset({"approve", "reject"}),
+        frozenset({"accept", "decline"}),
+        frozenset({"authorize", "unauthorize"}),
+        frozenset({"whitelist", "blacklist"}),
+        frozenset({"install", "uninstall"}),
+        frozenset({"mount", "unmount"}),
+        frozenset({"attach", "detach"}),
+        frozenset({"connect", "disconnect"}),
+        frozenset({"bind", "unbind"}),
+        frozenset({"link", "unlink"}),
+        frozenset({"join", "leave"}),
+        frozenset({"enroll", "unenroll"}),
+        frozenset({"encode", "decode"}),
+        frozenset({"encrypt", "decrypt"}),
+        frozenset({"compress", "decompress"}),
+        frozenset({"pack", "unpack"}),
+        frozenset({"serialize", "deserialize"}),
+        frozenset({"marshal", "unmarshal"}),
+        frozenset({"zip", "unzip"}),
+        frozenset({"backup", "restore"}),
+        frozenset({"archive", "unarchive"}),
+        frozenset({"archive", "restore"}),
+        frozenset({"checkpoint", "rollback"}),
+        frozenset({"commit", "rollback"}),
+        frozenset({"apply", "revert"}),
+        frozenset({"deploy", "rollback"}),
+        frozenset({"promote", "demote"}),
+        frozenset({"push", "pop"}),
+        frozenset({"enqueue", "dequeue"}),
+        frozenset({"acquire", "release"}),
+    }
+)
 
 _VERSION_SUFFIX_RE = re.compile(r"[_\-]?v\d+$|[_\-]?(old|new|legacy|deprecated|latest|beta|alpha|preview)$", re.I)
 _FORMAT_SUFFIX_RE = re.compile(r"[_\-](json|csv|xml|yaml|toml|txt|html|md|raw|binary|base64)$", re.I)
@@ -178,6 +237,7 @@ def _schema_fingerprint(schema: Any) -> str:
         if isinstance(obj, list):
             return [_strip(i) for i in obj]
         return obj
+
     return hashlib.md5(json.dumps(_strip(schema or {}), sort_keys=True).encode()).hexdigest()
 
 
@@ -232,33 +292,37 @@ def _detect_exact_name_shadows(
         sids = [sid for sid, _ in instances]
 
         finding_id = f"finding::tool_shadow::{client_id}::{tool_name}"
-        store.upsert_object(InventoryObject(
-            id=finding_id,
-            type="finding",
-            name=f"tool_shadowing:{tool_name}",
-            source="cross_server_analysis",
-            metadata={
-                "risk_level": risk_level,
-                "risk_tags": ["tool_shadowing"],
-                "shadow_types": shadow_types,
-                "confidence": confidence,
-                "shadowed_by": sids,
-                "tool_name": tool_name,
-                "evidence": evidence,
-                "description": (
-                    f"Tool '{tool_name}' on {len(sids)} servers diverges in "
-                    f"{' and '.join(shadow_types)}. Servers: {sids}. "
-                    "An attacker controlling one server can shadow the legitimate tool."
-                ),
-            },
-        ))
+        store.upsert_object(
+            InventoryObject(
+                id=finding_id,
+                type="finding",
+                name=f"tool_shadowing:{tool_name}",
+                source="cross_server_analysis",
+                metadata={
+                    "risk_level": risk_level,
+                    "risk_tags": ["tool_shadowing"],
+                    "shadow_types": shadow_types,
+                    "confidence": confidence,
+                    "shadowed_by": sids,
+                    "tool_name": tool_name,
+                    "evidence": evidence,
+                    "description": (
+                        f"Tool '{tool_name}' on {len(sids)} servers diverges in "
+                        f"{' and '.join(shadow_types)}. Servers: {sids}. "
+                        "An attacker controlling one server can shadow the legitimate tool."
+                    ),
+                },
+            )
+        )
         for sid, _ in instances:
             try:
-                store.upsert_relation(InventoryRelation(
-                    source_id=f"{sid}::{tool_name}",
-                    target_id=finding_id,
-                    relation="affected_by",
-                ))
+                store.upsert_relation(
+                    InventoryRelation(
+                        source_id=f"{sid}::{tool_name}",
+                        target_id=finding_id,
+                        relation="affected_by",
+                    )
+                )
             except Exception as exc:
                 _log.debug("exact shadow relation failed: %s", exc)
 
@@ -278,7 +342,7 @@ def _detect_typosquat_shadows(
 
     seen: Set[Tuple] = set()
     for i, (sid_a, name_a, tool_a) in enumerate(tool_list):
-        for sid_b, name_b, tool_b in tool_list[i + 1:]:
+        for sid_b, name_b, tool_b in tool_list[i + 1 :]:
             if sid_a == sid_b or name_a == name_b:
                 continue
             if len(name_a) < _MIN_NAME_LEN_TYPOSQUAT or len(name_b) < _MIN_NAME_LEN_TYPOSQUAT:
@@ -304,38 +368,40 @@ def _detect_typosquat_shadows(
                 continue
             seen.add(pair_key)
 
-            finding_id = (
-                f"finding::tool_shadow::{client_id}::{min(name_a, name_b)}::{max(name_a, name_b)}"
+            finding_id = f"finding::tool_shadow::{client_id}::{min(name_a, name_b)}::{max(name_a, name_b)}"
+            store.upsert_object(
+                InventoryObject(
+                    id=finding_id,
+                    type="finding",
+                    name=f"tool_shadowing_typosquat:{name_a}:{name_b}",
+                    source="cross_server_analysis",
+                    metadata={
+                        "risk_level": "MEDIUM",
+                        "risk_tags": ["tool_shadowing", "typosquatting"],
+                        "shadow_types": ["typosquat"],
+                        "confidence": round(ratio, 3),
+                        "tool_a": name_a,
+                        "tool_b": name_b,
+                        "server_a": sid_a,
+                        "server_b": sid_b,
+                        "evidence": {"name_similarity": round(ratio, 3), "edit_distance": dist},
+                        "description": (
+                            f"'{name_a}' on '{sid_a}' is suspiciously similar to '{name_b}' on '{sid_b}' "
+                            f"(similarity {ratio:.0%}, edit distance {dist}) with diverging schema/description. "
+                            "Possible typosquatting."
+                        ),
+                    },
+                )
             )
-            store.upsert_object(InventoryObject(
-                id=finding_id,
-                type="finding",
-                name=f"tool_shadowing_typosquat:{name_a}:{name_b}",
-                source="cross_server_analysis",
-                metadata={
-                    "risk_level": "MEDIUM",
-                    "risk_tags": ["tool_shadowing", "typosquatting"],
-                    "shadow_types": ["typosquat"],
-                    "confidence": round(ratio, 3),
-                    "tool_a": name_a,
-                    "tool_b": name_b,
-                    "server_a": sid_a,
-                    "server_b": sid_b,
-                    "evidence": {"name_similarity": round(ratio, 3), "edit_distance": dist},
-                    "description": (
-                        f"'{name_a}' on '{sid_a}' is suspiciously similar to '{name_b}' on '{sid_b}' "
-                        f"(similarity {ratio:.0%}, edit distance {dist}) with diverging schema/description. "
-                        "Possible typosquatting."
-                    ),
-                },
-            ))
             for sid, name in [(sid_a, name_a), (sid_b, name_b)]:
                 try:
-                    store.upsert_relation(InventoryRelation(
-                        source_id=f"{sid}::{name}",
-                        target_id=finding_id,
-                        relation="affected_by",
-                    ))
+                    store.upsert_relation(
+                        InventoryRelation(
+                            source_id=f"{sid}::{name}",
+                            target_id=finding_id,
+                            relation="affected_by",
+                        )
+                    )
                 except Exception as exc:
                     _log.debug("typosquat relation failed: %s", exc)
 
@@ -347,13 +413,15 @@ def on_server_registered(
     url: Optional[str],
 ) -> None:
     try:
-        store.upsert_object(InventoryObject(
-            id=server_id,
-            type="mcp_server",
-            name=server_id,
-            source="registration",
-            metadata={"transport": transport, "command": command, "url": url},
-        ))
+        store.upsert_object(
+            InventoryObject(
+                id=server_id,
+                type="mcp_server",
+                name=server_id,
+                source="registration",
+                metadata={"transport": transport, "command": command, "url": url},
+            )
+        )
     except Exception as exc:
         _log.debug("graph on_server_registered failed for %s: %s", server_id, exc)
 
@@ -377,10 +445,7 @@ def on_credentials_detected(
                 "SELECT obj_id FROM inventory_objects WHERE obj_type = 'credential_surface' AND obj_id LIKE ?",
                 (cred_prefix + "%",),
             ).fetchall()
-            stale_ids = [
-                r["obj_id"] for r in existing
-                if r["obj_id"] not in current_ids
-            ]
+            stale_ids = [r["obj_id"] for r in existing if r["obj_id"] not in current_ids]
             if stale_ids:
                 ph = ",".join("?" * len(stale_ids))
                 conn.execute(
@@ -394,32 +459,40 @@ def on_credentials_detected(
 
         for key in env_cred_keys:
             cred_id = f"cred_surface::{server_id}::env::{key}"
-            store.upsert_object(InventoryObject(
-                id=cred_id,
-                type="credential_surface",
-                name=f"env:{key}",
-                source="registration",
-                metadata={"server_id": server_id, "kind": "env_var", "key": key},
-            ))
-            store.upsert_relation(InventoryRelation(
-                source_id=server_id,
-                target_id=cred_id,
-                relation="uses_credential",
-            ))
+            store.upsert_object(
+                InventoryObject(
+                    id=cred_id,
+                    type="credential_surface",
+                    name=f"env:{key}",
+                    source="registration",
+                    metadata={"server_id": server_id, "kind": "env_var", "key": key},
+                )
+            )
+            store.upsert_relation(
+                InventoryRelation(
+                    source_id=server_id,
+                    target_id=cred_id,
+                    relation="uses_credential",
+                )
+            )
         for key in header_cred_keys:
             cred_id = f"cred_surface::{server_id}::header::{key}"
-            store.upsert_object(InventoryObject(
-                id=cred_id,
-                type="credential_surface",
-                name=f"header:{key}",
-                source="registration",
-                metadata={"server_id": server_id, "kind": "header", "key": key},
-            ))
-            store.upsert_relation(InventoryRelation(
-                source_id=server_id,
-                target_id=cred_id,
-                relation="uses_credential",
-            ))
+            store.upsert_object(
+                InventoryObject(
+                    id=cred_id,
+                    type="credential_surface",
+                    name=f"header:{key}",
+                    source="registration",
+                    metadata={"server_id": server_id, "kind": "header", "key": key},
+                )
+            )
+            store.upsert_relation(
+                InventoryRelation(
+                    source_id=server_id,
+                    target_id=cred_id,
+                    relation="uses_credential",
+                )
+            )
     except Exception as exc:
         _log.debug("graph on_credentials_detected failed for %s: %s", server_id, exc)
 
@@ -439,66 +512,72 @@ def on_provenance_detected(server_id: str, prov_info: Dict[str, Any]) -> None:
             new_cert = prov_info.get("tls_cert_fingerprint")
             if old_cert and old_cert != new_cert:
                 cert_fid = f"finding::cert_changed::{server_id}"
-                store.upsert_object(InventoryObject(
-                    id=cert_fid,
-                    type="finding",
-                    name="tls_cert_changed",
-                    source="provenance_detection",
-                    metadata={
-                        "risk_level": "HIGH",
-                        "risk_tags": ["tool_poisoning", "supply_chain"],
-                        "old_fingerprint": old_cert[:16],
-                        "new_fingerprint": (new_cert or "")[:16] or "none",
-                        "remediation": (
-                            "TLS certificate changed since last inspection. "
-                            "Verify the server is still operated by a trusted party."
-                        ),
-                        "exploitation_scenario": (
-                            "Certificate change may indicate MITM, subdomain takeover, "
-                            "or unauthorized operator change."
-                        ),
-                    },
-                ))
-                store.upsert_relation(InventoryRelation(
-                    source_id=server_id,
-                    target_id=cert_fid,
-                    relation="affected_by",
-                    metadata={"risk_level": "HIGH", "auto_detected": True},
-                ))
+                store.upsert_object(
+                    InventoryObject(
+                        id=cert_fid,
+                        type="finding",
+                        name="tls_cert_changed",
+                        source="provenance_detection",
+                        metadata={
+                            "risk_level": "HIGH",
+                            "risk_tags": ["tool_poisoning", "supply_chain"],
+                            "old_fingerprint": old_cert[:16],
+                            "new_fingerprint": (new_cert or "")[:16] or "none",
+                            "remediation": (
+                                "TLS certificate changed since last inspection. "
+                                "Verify the server is still operated by a trusted party."
+                            ),
+                            "exploitation_scenario": (
+                                "Certificate change may indicate MITM, subdomain takeover, "
+                                "or unauthorized operator change."
+                            ),
+                        },
+                    )
+                )
+                store.upsert_relation(
+                    InventoryRelation(
+                        source_id=server_id,
+                        target_id=cert_fid,
+                        relation="affected_by",
+                        metadata={"risk_level": "HIGH", "auto_detected": True},
+                    )
+                )
                 _log.warning("tls_cert_changed for %s: %s -> %s", server_id, old_cert[:12], (new_cert or "none")[:12])
 
             old_ips = set(old_meta.get("resolved_ips") or [])
             new_ips = set(prov_info.get("resolved_ips") or [])
             if old_ips and old_ips != new_ips:
                 dns_fid = f"finding::dns_changed::{server_id}"
-                store.upsert_object(InventoryObject(
-                    id=dns_fid,
-                    type="finding",
-                    name="dns_resolution_changed",
-                    source="provenance_detection",
-                    metadata={
-                        "risk_level": "HIGH",
-                        "risk_tags": ["supply_chain"],
-                        "old_ips": sorted(old_ips),
-                        "new_ips": sorted(new_ips),
-                        "added_ips": sorted(new_ips - old_ips),
-                        "removed_ips": sorted(old_ips - new_ips),
-                        "remediation": (
-                            "DNS resolution changed. Verify this is an expected "
-                            "infrastructure change."
-                        ),
-                        "exploitation_scenario": (
-                            "DNS hijacking or BGP reroute could redirect traffic "
-                            "to an attacker-controlled server."
-                        ),
-                    },
-                ))
-                store.upsert_relation(InventoryRelation(
-                    source_id=server_id,
-                    target_id=dns_fid,
-                    relation="affected_by",
-                    metadata={"risk_level": "HIGH", "auto_detected": True},
-                ))
+                store.upsert_object(
+                    InventoryObject(
+                        id=dns_fid,
+                        type="finding",
+                        name="dns_resolution_changed",
+                        source="provenance_detection",
+                        metadata={
+                            "risk_level": "HIGH",
+                            "risk_tags": ["supply_chain"],
+                            "old_ips": sorted(old_ips),
+                            "new_ips": sorted(new_ips),
+                            "added_ips": sorted(new_ips - old_ips),
+                            "removed_ips": sorted(old_ips - new_ips),
+                            "remediation": (
+                                "DNS resolution changed. Verify this is an expected infrastructure change."
+                            ),
+                            "exploitation_scenario": (
+                                "DNS hijacking or BGP reroute could redirect traffic to an attacker-controlled server."
+                            ),
+                        },
+                    )
+                )
+                store.upsert_relation(
+                    InventoryRelation(
+                        source_id=server_id,
+                        target_id=dns_fid,
+                        relation="affected_by",
+                        metadata={"risk_level": "HIGH", "auto_detected": True},
+                    )
+                )
                 _log.warning("dns_changed for %s: %s -> %s", server_id, sorted(old_ips), sorted(new_ips))
 
         dep_cves = prov_info.get("dependency_cves") or []
@@ -508,133 +587,151 @@ def on_provenance_detected(server_id: str, prov_info: Dict[str, Any]) -> None:
             top_severity = "CRITICAL" if critical else "HIGH"
             examples = [f"{c['package']} ({c['vuln_id']})" for c in (critical or high)[:3]]
             cve_fid = f"finding::dep_cve::{server_id}"
-            store.upsert_object(InventoryObject(
-                id=cve_fid,
-                type="finding",
-                name="dependency_cves",
-                source="provenance_detection",
-                metadata={
-                    "risk_level": top_severity,
-                    "risk_tags": ["supply_chain"],
-                    "cves": dep_cves,
-                    "critical_count": len(critical),
-                    "high_count": len(high),
-                    "remediation": (
-                        f"Update affected dependencies: {examples}. "
-                        "Run dependency audit and pin to patched versions."
-                    ),
-                    "exploitation_scenario": (
-                        "Known CVEs in dependencies can be exploited through the MCP server "
-                        "to compromise the agent or the host system."
-                    ),
-                },
-            ))
-            store.upsert_relation(InventoryRelation(
-                source_id=server_id,
-                target_id=cve_fid,
-                relation="affected_by",
-                metadata={"risk_level": top_severity, "auto_detected": True},
-            ))
+            store.upsert_object(
+                InventoryObject(
+                    id=cve_fid,
+                    type="finding",
+                    name="dependency_cves",
+                    source="provenance_detection",
+                    metadata={
+                        "risk_level": top_severity,
+                        "risk_tags": ["supply_chain"],
+                        "cves": dep_cves,
+                        "critical_count": len(critical),
+                        "high_count": len(high),
+                        "remediation": (
+                            f"Update affected dependencies: {examples}. "
+                            "Run dependency audit and pin to patched versions."
+                        ),
+                        "exploitation_scenario": (
+                            "Known CVEs in dependencies can be exploited through the MCP server "
+                            "to compromise the agent or the host system."
+                        ),
+                    },
+                )
+            )
+            store.upsert_relation(
+                InventoryRelation(
+                    source_id=server_id,
+                    target_id=cve_fid,
+                    relation="affected_by",
+                    metadata={"risk_level": top_severity, "auto_detected": True},
+                )
+            )
             _log.warning("dependency_cves for %s: %d findings", server_id, len(dep_cves))
 
             impacting_ids = list({c["vuln_id"] for c in dep_cves if c.get("vuln_id")})
             conn = _db.get_connection()
             try:
-                tool_rows = conn.execute(
-                    "SELECT tool_id FROM tools WHERE server_id = ?", (server_id,)
-                ).fetchall()
+                tool_rows = conn.execute("SELECT tool_id FROM tools WHERE server_id = ?", (server_id,)).fetchall()
             finally:
                 conn.close()
             for row in tool_rows:
-                store.patch_object_metadata(row["tool_id"], {
-                    "cve_impacted": True,
-                    "impacting_cves": impacting_ids,
-                })
+                store.patch_object_metadata(
+                    row["tool_id"],
+                    {
+                        "cve_impacted": True,
+                        "impacting_cves": impacting_ids,
+                    },
+                )
         else:
             conn = _db.get_connection()
             try:
-                tool_rows = conn.execute(
-                    "SELECT tool_id FROM tools WHERE server_id = ?", (server_id,)
-                ).fetchall()
+                tool_rows = conn.execute("SELECT tool_id FROM tools WHERE server_id = ?", (server_id,)).fetchall()
             finally:
                 conn.close()
             for row in tool_rows:
-                store.patch_object_metadata(row["tool_id"], {
-                    "cve_impacted": False,
-                    "impacting_cves": [],
-                })
+                store.patch_object_metadata(
+                    row["tool_id"],
+                    {
+                        "cve_impacted": False,
+                        "impacting_cves": [],
+                    },
+                )
 
         dep_squats = prov_info.get("dependency_typosquatting") or []
         if dep_squats:
             dep_fid = f"finding::dep_typosquat::{server_id}"
-            store.upsert_object(InventoryObject(
-                id=dep_fid,
-                type="finding",
-                name="dependency_typosquatting",
-                source="provenance_detection",
-                metadata={
-                    "risk_level": "HIGH",
-                    "risk_tags": ["supply_chain", "tool_poisoning"],
-                    "suspects": dep_squats,
-                    "remediation": (
-                        "One or more dependencies have names very similar to well-known packages. "
-                        "Verify each dependency is the intended package before use."
-                    ),
-                    "exploitation_scenario": (
-                        "A typosquatted dependency executes attacker code on install or import, "
-                        "compromising the MCP server and all agents that use it."
-                    ),
-                },
-            ))
-            store.upsert_relation(InventoryRelation(
-                source_id=server_id,
-                target_id=dep_fid,
-                relation="affected_by",
-                metadata={"risk_level": "HIGH", "auto_detected": True},
-            ))
+            store.upsert_object(
+                InventoryObject(
+                    id=dep_fid,
+                    type="finding",
+                    name="dependency_typosquatting",
+                    source="provenance_detection",
+                    metadata={
+                        "risk_level": "HIGH",
+                        "risk_tags": ["supply_chain", "tool_poisoning"],
+                        "suspects": dep_squats,
+                        "remediation": (
+                            "One or more dependencies have names very similar to well-known packages. "
+                            "Verify each dependency is the intended package before use."
+                        ),
+                        "exploitation_scenario": (
+                            "A typosquatted dependency executes attacker code on install or import, "
+                            "compromising the MCP server and all agents that use it."
+                        ),
+                    },
+                )
+            )
+            store.upsert_relation(
+                InventoryRelation(
+                    source_id=server_id,
+                    target_id=dep_fid,
+                    relation="affected_by",
+                    metadata={"risk_level": "HIGH", "auto_detected": True},
+                )
+            )
             _log.warning("dependency_typosquatting for %s: %s", server_id, dep_squats[:3])
 
         private_ips = prov_info.get("private_ips") or []
         if private_ips:
             priv_fid = f"finding::private_ip::{server_id}"
-            store.upsert_object(InventoryObject(
-                id=priv_fid,
-                type="finding",
-                name="private_ip_access",
-                source="provenance_detection",
-                metadata={
-                    "risk_level": "MEDIUM",
-                    "risk_tags": ["supply_chain"],
-                    "private_ips": private_ips,
-                    "remediation": (
-                        "Server resolves to private/internal IPs. "
-                        "Ensure this is expected before use in agent workflows."
-                    ),
-                    "exploitation_scenario": (
-                        "DNS rebinding: a public hostname resolving to internal IPs "
-                        "allows SSRF against internal services."
-                    ),
-                },
-            ))
-            store.upsert_relation(InventoryRelation(
-                source_id=server_id,
-                target_id=priv_fid,
-                relation="affected_by",
-                metadata={"risk_level": "MEDIUM", "auto_detected": True},
-            ))
+            store.upsert_object(
+                InventoryObject(
+                    id=priv_fid,
+                    type="finding",
+                    name="private_ip_access",
+                    source="provenance_detection",
+                    metadata={
+                        "risk_level": "MEDIUM",
+                        "risk_tags": ["supply_chain"],
+                        "private_ips": private_ips,
+                        "remediation": (
+                            "Server resolves to private/internal IPs. "
+                            "Ensure this is expected before use in agent workflows."
+                        ),
+                        "exploitation_scenario": (
+                            "DNS rebinding: a public hostname resolving to internal IPs "
+                            "allows SSRF against internal services."
+                        ),
+                    },
+                )
+            )
+            store.upsert_relation(
+                InventoryRelation(
+                    source_id=server_id,
+                    target_id=priv_fid,
+                    relation="affected_by",
+                    metadata={"risk_level": "MEDIUM", "auto_detected": True},
+                )
+            )
 
-        store.upsert_object(InventoryObject(
-            id=prov_id,
-            type="package_provenance",
-            name=display_name,
-            source="provenance_detection",
-            metadata={k: v for k, v in prov_info.items() if k != "server_id"},
-        ))
-        store.upsert_relation(InventoryRelation(
-            source_id=server_id,
-            target_id=prov_id,
-            relation="has_provenance",
-        ))
+        store.upsert_object(
+            InventoryObject(
+                id=prov_id,
+                type="package_provenance",
+                name=display_name,
+                source="provenance_detection",
+                metadata={k: v for k, v in prov_info.items() if k != "server_id"},
+            )
+        )
+        store.upsert_relation(
+            InventoryRelation(
+                source_id=server_id,
+                target_id=prov_id,
+                relation="has_provenance",
+            )
+        )
     except Exception as exc:
         _log.debug("graph on_provenance_detected failed for %s: %s", server_id, exc)
 
@@ -689,64 +786,76 @@ def on_tools_inspected(
                 old_fp = existing.get("metadata", {}).get("schema_fingerprint")
                 if old_fp and old_fp != fingerprint:
                     tamper_id = f"finding::tamper::{server_id}::{tool_name}"
-                    store.upsert_object(InventoryObject(
-                        id=tamper_id,
-                        type="finding",
-                        name=f"schema_tampered: {tool_name}",
-                        source="tamper_detection",
-                        metadata={
-                            "risk_level": "HIGH",
-                            "risk_tags": ["tool_poisoning"],
-                            "old_fingerprint": old_fp,
-                            "new_fingerprint": fingerprint,
-                            "remediation": (
-                                f"Tool '{tool_name}' schema changed since last inspection. "
-                                "Re-run security_scan_server to audit the new definition."
-                            ),
-                            "exploitation_scenario": (
-                                "A compromised or silently-updated package changed this tool's "
-                                "name, description, or parameters. An attacker can use this to "
-                                "manipulate agent behavior without detection."
-                            ),
-                        },
-                    ))
-                    store.upsert_relation(InventoryRelation(
-                        source_id=tool_id,
-                        target_id=tamper_id,
-                        relation="affected_by",
-                        metadata={"risk_level": "HIGH", "auto_detected": True},
-                    ))
+                    store.upsert_object(
+                        InventoryObject(
+                            id=tamper_id,
+                            type="finding",
+                            name=f"schema_tampered: {tool_name}",
+                            source="tamper_detection",
+                            metadata={
+                                "risk_level": "HIGH",
+                                "risk_tags": ["tool_poisoning"],
+                                "old_fingerprint": old_fp,
+                                "new_fingerprint": fingerprint,
+                                "remediation": (
+                                    f"Tool '{tool_name}' schema changed since last inspection. "
+                                    "Re-run security_scan_server to audit the new definition."
+                                ),
+                                "exploitation_scenario": (
+                                    "A compromised or silently-updated package changed this tool's "
+                                    "name, description, or parameters. An attacker can use this to "
+                                    "manipulate agent behavior without detection."
+                                ),
+                            },
+                        )
+                    )
+                    store.upsert_relation(
+                        InventoryRelation(
+                            source_id=tool_id,
+                            target_id=tamper_id,
+                            relation="affected_by",
+                            metadata={"risk_level": "HIGH", "auto_detected": True},
+                        )
+                    )
                     _log.warning(
                         "schema_tampered: %s::%s fingerprint %s -> %s",
-                        server_id, tool_name, old_fp[:12], fingerprint[:12],
+                        server_id,
+                        tool_name,
+                        old_fp[:12],
+                        fingerprint[:12],
                     )
 
-            store.upsert_object(InventoryObject(
-                id=tool_id,
-                type="tool",
-                name=tool_name,
-                source="inspection",
-                metadata={
-                    "server_id": server_id,
-                    "effect_class": t.get("effect_class", "unknown"),
-                    "destructiveness": t.get("destructiveness", "unknown"),
-                    "open_world": bool(t.get("open_world", False)),
-                    "description": description,
-                    "schema_fingerprint": fingerprint,
-                    "cve_impacted": (existing or {}).get("metadata", {}).get("cve_impacted", False),
-                    "impacting_cves": (existing or {}).get("metadata", {}).get("impacting_cves", []),
-                },
-            ))
-            store.upsert_relation(InventoryRelation(
-                source_id=server_id,
-                target_id=tool_id,
-                relation="exposes",
-            ))
+            store.upsert_object(
+                InventoryObject(
+                    id=tool_id,
+                    type="tool",
+                    name=tool_name,
+                    source="inspection",
+                    metadata={
+                        "server_id": server_id,
+                        "effect_class": t.get("effect_class", "unknown"),
+                        "destructiveness": t.get("destructiveness", "unknown"),
+                        "open_world": bool(t.get("open_world", False)),
+                        "description": description,
+                        "schema_fingerprint": fingerprint,
+                        "cve_impacted": (existing or {}).get("metadata", {}).get("cve_impacted", False),
+                        "impacting_cves": (existing or {}).get("metadata", {}).get("impacting_cves", []),
+                    },
+                )
+            )
+            store.upsert_relation(
+                InventoryRelation(
+                    source_id=server_id,
+                    target_id=tool_id,
+                    relation="exposes",
+                )
+            )
         _add_composition_edges(server_id, tools, llm_provider, llm_model, llm_api_key)
 
         current_tool_ids = {
             f"{server_id}::{t.get('tool_name') or t.get('name', '')}"
-            for t in tools if t.get("tool_name") or t.get("name")
+            for t in tools
+            if t.get("tool_name") or t.get("name")
         }
         _prune_stale_tool_nodes(server_id, current_tool_ids)
     except Exception as exc:
@@ -759,11 +868,14 @@ def on_scan_stored(server_id: str, findings: Dict[str, Any]) -> None:
         overall_risk = findings.get("overall_risk_level", "NONE")
         scanned_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
-        store.patch_object_metadata(server_id, {
-            "overall_risk_level": overall_risk,
-            "finding_count": len(tool_findings),
-            "last_scanned_at": scanned_at,
-        })
+        store.patch_object_metadata(
+            server_id,
+            {
+                "overall_risk_level": overall_risk,
+                "finding_count": len(tool_findings),
+                "last_scanned_at": scanned_at,
+            },
+        )
 
         for finding in tool_findings:
             tool_name = finding.get("name", "")
@@ -782,26 +894,30 @@ def on_scan_stored(server_id: str, findings: Dict[str, Any]) -> None:
             else:
                 confirmed_by = "inferred"
 
-            store.upsert_object(InventoryObject(
-                id=finding_id,
-                type="finding",
-                name=(finding.get("finding") or tool_name),
-                source="security_scan",
-                metadata={
-                    "risk_level": finding.get("risk_level"),
-                    "risk_tags": risk_tags,
-                    "exploitation_scenario": finding.get("exploitation_scenario") or "",
-                    "remediation": finding.get("remediation") or "",
-                    "confirmed_by": confirmed_by,
-                    "confidence": finding.get("confidence"),
-                },
-            ))
-            store.upsert_relation(InventoryRelation(
-                source_id=tool_id,
-                target_id=finding_id,
-                relation="affected_by",
-                metadata={"risk_level": finding.get("risk_level")},
-            ))
+            store.upsert_object(
+                InventoryObject(
+                    id=finding_id,
+                    type="finding",
+                    name=(finding.get("finding") or tool_name),
+                    source="security_scan",
+                    metadata={
+                        "risk_level": finding.get("risk_level"),
+                        "risk_tags": risk_tags,
+                        "exploitation_scenario": finding.get("exploitation_scenario") or "",
+                        "remediation": finding.get("remediation") or "",
+                        "confirmed_by": confirmed_by,
+                        "confidence": finding.get("confidence"),
+                    },
+                )
+            )
+            store.upsert_relation(
+                InventoryRelation(
+                    source_id=tool_id,
+                    target_id=finding_id,
+                    relation="affected_by",
+                    metadata={"risk_level": finding.get("risk_level")},
+                )
+            )
 
             techniques: List[str] = list(mitre_tags)
             for tag in risk_tags:
@@ -811,18 +927,22 @@ def on_scan_stored(server_id: str, findings: Dict[str, Any]) -> None:
 
             for tid in techniques:
                 technique_id = f"technique::{tid}"
-                store.upsert_object(InventoryObject(
-                    id=technique_id,
-                    type="mitre_technique",
-                    name=_MITRE_NAMES.get(tid, tid),
-                    source="security_scan",
-                    metadata={"technique_id": tid},
-                ))
-                store.upsert_relation(InventoryRelation(
-                    source_id=finding_id,
-                    target_id=technique_id,
-                    relation="maps_to",
-                ))
+                store.upsert_object(
+                    InventoryObject(
+                        id=technique_id,
+                        type="mitre_technique",
+                        name=_MITRE_NAMES.get(tid, tid),
+                        source="security_scan",
+                        metadata={"technique_id": tid},
+                    )
+                )
+                store.upsert_relation(
+                    InventoryRelation(
+                        source_id=finding_id,
+                        target_id=technique_id,
+                        relation="maps_to",
+                    )
+                )
     except Exception as exc:
         _log.debug("graph on_scan_stored failed for %s: %s", server_id, exc)
 
@@ -852,30 +972,38 @@ def on_server_discovered(
     registered_server_id: Optional[str] = None,
 ) -> None:
     try:
-        store.upsert_object(InventoryObject(
-            id=client,
-            type="agent_client",
-            name=client_name,
-            source="discovery",
-        ))
-        store.upsert_object(InventoryObject(
-            id=discovery_id,
-            type="mcp_config",
-            name=server_name,
-            source="discovery",
-            metadata={"client": client, "registered_server_id": registered_server_id},
-        ))
-        store.upsert_relation(InventoryRelation(
-            source_id=client,
-            target_id=discovery_id,
-            relation="declares",
-        ))
-        if registered_server_id:
-            store.upsert_relation(InventoryRelation(
-                source_id=discovery_id,
-                target_id=registered_server_id,
+        store.upsert_object(
+            InventoryObject(
+                id=client,
+                type="agent_client",
+                name=client_name,
+                source="discovery",
+            )
+        )
+        store.upsert_object(
+            InventoryObject(
+                id=discovery_id,
+                type="mcp_config",
+                name=server_name,
+                source="discovery",
+                metadata={"client": client, "registered_server_id": registered_server_id},
+            )
+        )
+        store.upsert_relation(
+            InventoryRelation(
+                source_id=client,
+                target_id=discovery_id,
                 relation="declares",
-            ))
+            )
+        )
+        if registered_server_id:
+            store.upsert_relation(
+                InventoryRelation(
+                    source_id=discovery_id,
+                    target_id=registered_server_id,
+                    relation="declares",
+                )
+            )
     except Exception as exc:
         _log.debug("graph on_server_discovered failed for %s: %s", discovery_id, exc)
 
@@ -911,6 +1039,7 @@ def _llm_evaluate_composition_pairs(
 ) -> List[Dict[str, Any]]:
     from ..scan.scanner import call_llm
     from ..core.security_utils import strip_json_fence as _strip_json_fence
+
     slim = [
         {
             "read_tool": r.get("tool_name") or r.get("name", ""),
@@ -939,7 +1068,8 @@ def _add_composition_edges(
 ) -> None:
     all_tool_ids = [
         f"{server_id}::{(t.get('tool_name') or t.get('name', ''))}"
-        for t in tools if (t.get("tool_name") or t.get("name", ""))
+        for t in tools
+        if (t.get("tool_name") or t.get("name", ""))
     ]
     if all_tool_ids:
         conn = _db.get_connection()
@@ -963,15 +1093,8 @@ def _add_composition_edges(
 
     if llm_provider:
         evaluated = _llm_evaluate_composition_pairs(all_pairs, llm_provider, llm_model, llm_api_key)
-        confirmed = {
-            (ev["read_tool"], ev["external_tool"])
-            for ev in evaluated
-            if ev.get("is_exfil_path")
-        }
-        confidence_map = {
-            (ev["read_tool"], ev["external_tool"]): ev.get("confidence", 1.0)
-            for ev in evaluated
-        }
+        confirmed = {(ev["read_tool"], ev["external_tool"]) for ev in evaluated if ev.get("is_exfil_path")}
+        confidence_map = {(ev["read_tool"], ev["external_tool"]): ev.get("confidence", 1.0) for ev in evaluated}
     else:
         confirmed = None
         confidence_map = {}
@@ -984,16 +1107,18 @@ def _add_composition_edges(
         if confirmed is not None and (r_name, e_name) not in confirmed:
             continue
         try:
-            store.upsert_relation(InventoryRelation(
-                source_id=f"{server_id}::{r_name}",
-                target_id=f"{server_id}::{e_name}",
-                relation="can_exfiltrate",
-                metadata={
-                    "composition": "read+external_action",
-                    "llm_evaluated": llm_provider is not None,
-                    "confidence": confidence_map.get((r_name, e_name), 1.0),
-                },
-            ))
+            store.upsert_relation(
+                InventoryRelation(
+                    source_id=f"{server_id}::{r_name}",
+                    target_id=f"{server_id}::{e_name}",
+                    relation="can_exfiltrate",
+                    metadata={
+                        "composition": "read+external_action",
+                        "llm_evaluated": llm_provider is not None,
+                        "confidence": confidence_map.get((r_name, e_name), 1.0),
+                    },
+                )
+            )
         except Exception as exc:
             _log.debug("graph composition edge failed: %s", exc)
 
@@ -1012,9 +1137,7 @@ def _parse_json_field(raw: Any) -> Dict[str, Any]:
 def _load_server_cred_keys(server_id: str) -> Tuple[List[str], List[str]]:
     conn = _db.get_connection()
     try:
-        row = conn.execute(
-            "SELECT env_json, headers_json FROM servers WHERE server_id = ?", (server_id,)
-        ).fetchone()
+        row = conn.execute("SELECT env_json, headers_json FROM servers WHERE server_id = ?", (server_id,)).fetchone()
         if not row:
             return [], []
         env_data = _parse_json_field(_db.decrypt_field(row["env_json"] or "{}"))
@@ -1030,9 +1153,7 @@ def cleanup_server_graph(server_id: str) -> None:
     try:
         conn = _db.get_connection()
         try:
-            tool_rows = conn.execute(
-                "SELECT tool_id FROM tools WHERE server_id = ?", (server_id,)
-            ).fetchall()
+            tool_rows = conn.execute("SELECT tool_id FROM tools WHERE server_id = ?", (server_id,)).fetchall()
             tool_ids = [r["tool_id"] for r in tool_rows]
             finding_prefix = f"finding::{server_id}::"
             tamper_prefix = f"finding::tamper::{server_id}::"
@@ -1105,8 +1226,11 @@ def rebuild_from_db() -> Dict[str, int]:
             prov = existing_prov.get("metadata", {})
         else:
             prov = _provenance.build_provenance_info(
-                sid, server.get("command"), server.get("args") or [],
-                url=server.get("url"), transport=server.get("transport"),
+                sid,
+                server.get("command"),
+                server.get("args") or [],
+                url=server.get("url"),
+                transport=server.get("transport"),
                 github_url=server.get("github_url"),
             )
         on_provenance_detected(sid, prov)
@@ -1155,10 +1279,13 @@ def on_cross_server_analysis(client_id: str) -> None:
             all_exfil = conn.execute(
                 "SELECT source_id, metadata FROM inventory_relations WHERE relation = 'cross_server_exfil'",
             ).fetchall()
-            stale_source_ids = list({
-                row["source_id"] for row in all_exfil
-                if json.loads(row["metadata"] or "{}").get("client_id") == client_id
-            })
+            stale_source_ids = list(
+                {
+                    row["source_id"]
+                    for row in all_exfil
+                    if json.loads(row["metadata"] or "{}").get("client_id") == client_id
+                }
+            )
             if stale_source_ids:
                 ph = ",".join("?" * len(stale_source_ids))
                 conn.execute(
@@ -1188,16 +1315,18 @@ def on_cross_server_analysis(client_id: str) -> None:
                         if not r_name or not e_name:
                             continue
                         try:
-                            store.upsert_relation(InventoryRelation(
-                                source_id=f"{sid_a}::{r_name}",
-                                target_id=f"{sid_b}::{e_name}",
-                                relation="cross_server_exfil",
-                                metadata={
-                                    "client_id": client_id,
-                                    "read_server": sid_a,
-                                    "exfil_server": sid_b,
-                                },
-                            ))
+                            store.upsert_relation(
+                                InventoryRelation(
+                                    source_id=f"{sid_a}::{r_name}",
+                                    target_id=f"{sid_b}::{e_name}",
+                                    relation="cross_server_exfil",
+                                    metadata={
+                                        "client_id": client_id,
+                                        "read_server": sid_a,
+                                        "exfil_server": sid_b,
+                                    },
+                                )
+                            )
                         except Exception as exc:
                             _log.debug("cross_server_exfil edge failed: %s", exc)
 
@@ -1230,25 +1359,29 @@ def _build_cross_server_cve_nodes(client_id: str, server_ids: List[str]) -> None
             severities = [sev for _, sev in affected]
             top_severity = "CRITICAL" if "CRITICAL" in severities else "HIGH" if "HIGH" in severities else "MEDIUM"
             cve_node_id = f"cve_blast::{client_id}::{vuln_id}"
-            store.upsert_object(InventoryObject(
-                id=cve_node_id,
-                type="cve_blast_radius",
-                name=vuln_id,
-                source="cross_server_analysis",
-                metadata={
-                    "vuln_id": vuln_id,
-                    "severity": top_severity,
-                    "affected_servers": unique_servers,
-                    "client_id": client_id,
-                },
-            ))
+            store.upsert_object(
+                InventoryObject(
+                    id=cve_node_id,
+                    type="cve_blast_radius",
+                    name=vuln_id,
+                    source="cross_server_analysis",
+                    metadata={
+                        "vuln_id": vuln_id,
+                        "severity": top_severity,
+                        "affected_servers": unique_servers,
+                        "client_id": client_id,
+                    },
+                )
+            )
             for sid in unique_servers:
                 try:
-                    store.upsert_relation(InventoryRelation(
-                        source_id=sid,
-                        target_id=cve_node_id,
-                        relation="affected_by_cve",
-                    ))
+                    store.upsert_relation(
+                        InventoryRelation(
+                            source_id=sid,
+                            target_id=cve_node_id,
+                            relation="affected_by_cve",
+                        )
+                    )
                 except Exception as exc:
                     _log.debug("affected_by_cve relation failed: %s", exc)
     except Exception as exc:

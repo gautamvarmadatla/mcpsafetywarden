@@ -55,9 +55,7 @@ def upsert_relation(rel: InventoryRelation) -> None:
 def patch_object_metadata(obj_id: str, updates: Dict[str, Any]) -> None:
     conn = _db.get_connection()
     try:
-        row = conn.execute(
-            "SELECT metadata FROM inventory_objects WHERE obj_id = ?", (obj_id,)
-        ).fetchone()
+        row = conn.execute("SELECT metadata FROM inventory_objects WHERE obj_id = ?", (obj_id,)).fetchone()
         if row is None:
             return
         meta = _jl(row["metadata"], {})
@@ -74,9 +72,7 @@ def patch_object_metadata(obj_id: str, updates: Dict[str, Any]) -> None:
 def get_object(obj_id: str) -> Optional[Dict[str, Any]]:
     conn = _db.get_connection()
     try:
-        row = conn.execute(
-            "SELECT * FROM inventory_objects WHERE obj_id = ?", (obj_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM inventory_objects WHERE obj_id = ?", (obj_id,)).fetchone()
         if row is None:
             return None
         d = dict(row)
@@ -89,9 +85,7 @@ def get_object(obj_id: str) -> Optional[Dict[str, Any]]:
 def get_objects_by_type(obj_type: str) -> List[Dict[str, Any]]:
     conn = _db.get_connection()
     try:
-        rows = conn.execute(
-            "SELECT * FROM inventory_objects WHERE obj_type = ?", (obj_type,)
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM inventory_objects WHERE obj_type = ?", (obj_type,)).fetchall()
         result = []
         for row in rows:
             d = dict(row)
@@ -105,9 +99,7 @@ def get_objects_by_type(obj_type: str) -> List[Dict[str, Any]]:
 def get_relations_from(source_id: str) -> List[Dict[str, Any]]:
     conn = _db.get_connection()
     try:
-        rows = conn.execute(
-            "SELECT * FROM inventory_relations WHERE source_id = ?", (source_id,)
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM inventory_relations WHERE source_id = ?", (source_id,)).fetchall()
         result = []
         for row in rows:
             d = dict(row)
@@ -121,9 +113,7 @@ def get_relations_from(source_id: str) -> List[Dict[str, Any]]:
 def get_relations_to(target_id: str) -> List[Dict[str, Any]]:
     conn = _db.get_connection()
     try:
-        rows = conn.execute(
-            "SELECT * FROM inventory_relations WHERE target_id = ?", (target_id,)
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM inventory_relations WHERE target_id = ?", (target_id,)).fetchall()
         result = []
         for row in rows:
             d = dict(row)
@@ -138,9 +128,7 @@ def get_full_graph(server_id: Optional[str] = None) -> Dict[str, Any]:
     conn = _db.get_connection()
     try:
         if server_id:
-            tool_ids_raw = conn.execute(
-                "SELECT tool_id FROM tools WHERE server_id = ?", (server_id,)
-            ).fetchall()
+            tool_ids_raw = conn.execute("SELECT tool_id FROM tools WHERE server_id = ?", (server_id,)).fetchall()
             tool_ids = [r["tool_id"] for r in tool_ids_raw]
             finding_prefix = f"finding::{server_id}::"
             tamper_prefix = f"finding::tamper::{server_id}::"

@@ -4,22 +4,31 @@ import hmac
 import logging
 import os as _os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Dict, Optional
 
 from mcp.server.fastmcp import FastMCP
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
-from ..core import database as db
-from ..scan.args import SSRF_RE
 
 _log = logging.getLogger(__name__)
 
-_SHELL_INTERPS = frozenset({
-    "bash", "sh", "dash", "zsh", "ksh", "csh", "tcsh", "fish",
-    "cmd", "powershell", "pwsh",
-})
+_SHELL_INTERPS = frozenset(
+    {
+        "bash",
+        "sh",
+        "dash",
+        "zsh",
+        "ksh",
+        "csh",
+        "tcsh",
+        "fish",
+        "cmd",
+        "powershell",
+        "pwsh",
+    }
+)
 _SHELL_EVAL_FLAGS = frozenset({"-c", "/c", "/k", "-e", "-enc", "-encodedcommand", "-command"})
 
 _LLM_SHORTHANDS: frozenset = frozenset({"anthropic", "openai", "gemini", "ollama"})
@@ -27,21 +36,21 @@ _LLM_SHORTHANDS: frozenset = frozenset({"anthropic", "openai", "gemini", "ollama
 _PREFLIGHT_SCAN_TIMEOUT_S = 60
 _preflight_scan_locks: Dict[str, asyncio.Lock] = {}
 
-_MGMT_RATE_LIMIT_MAX      = 10
+_MGMT_RATE_LIMIT_MAX = 10
 _MGMT_RATE_LIMIT_WINDOW_S = 60
-_GLOBAL_RATE_LIMIT_MAX    = 100
-_MGMT_DICT_MAX_ENTRIES    = 5_000
+_GLOBAL_RATE_LIMIT_MAX = 100
+_MGMT_DICT_MAX_ENTRIES = 5_000
 _mgmt_call_times: Dict[str, collections.deque] = {}
 _global_call_times: collections.deque = collections.deque(maxlen=_GLOBAL_RATE_LIMIT_MAX)
 _bg_scan_status: Dict[str, str] = {}
 
 _MAX_SERVER_ID_LEN = 256
-_MAX_COMMAND_LEN   = 1024
-_MAX_URL_LEN       = 2048
-_MAX_ARGS_COUNT    = 50
-_MAX_ARG_LEN       = 1024
-_MAX_ENV_VARS      = 50
-_MAX_HEADER_PAIRS  = 20
+_MAX_COMMAND_LEN = 1024
+_MAX_URL_LEN = 2048
+_MAX_ARGS_COUNT = 50
+_MAX_ARG_LEN = 1024
+_MAX_ENV_VARS = 50
+_MAX_HEADER_PAIRS = 20
 
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
@@ -66,7 +75,6 @@ mcp = FastMCP(
         "Security proxy that wraps MCP servers to enforce risk gating, behavioral profiling, "
         "and security scanning before any tool is called. "
         "All tool calls to wrapped servers MUST go through safe_tool_call, never directly. "
-
         "ENTRY POINT - pick the right starting point based on what you have: "
         "- User mentions a server by name/URL but it is not registered -> onboard_server (one-shot preferred) or register_server. "
         "- User asks what servers are available on this machine -> discover_servers -> onboard_discovered_servers. "
@@ -74,14 +82,12 @@ mcp = FastMCP(
         "- User has a GitHub URL but no local setup (server not running) -> security_scan_server(github_url=...) for source-only scan, then user fixes local setup, then onboard_server. "
         "- User wants a security audit of an already-registered server -> security_scan_server(server_id=...). "
         "- User wants to check for drift since last scan -> check_server_drift. "
-
         "FLOWS after entry: "
         "(1) discover_servers -> onboard_discovered_servers -> safe_tool_call. "
         "(2) onboard_server -> review scan in response -> set_tool_policy('block') for HIGH-risk tools -> safe_tool_call. "
         "(3) register_server -> security_scan_server -> get_security_scan (poll every 30s) -> set_tool_policy('block') -> safe_tool_call. "
         "(4) safe_tool_call blocked -> safe_tool_call(approved=True) | safe_tool_call(use_alternative=X) | suggest_safer_alternative. "
         "(5) check_server_drift severity MEDIUM+ -> security_scan_server -> get_security_scan -> update policies. "
-
         "NEVER: "
         "- Call preflight_tool_call before safe_tool_call (safe_tool_call runs it internally). "
         "- Skip security_scan_server for an untrusted server that was just registered. "
@@ -138,6 +144,7 @@ def main():
         mcp.run()
     else:
         import uvicorn
+
         host = _os.environ.get("MCP_HOST", "127.0.0.1")
         try:
             port = int(_os.environ.get("MCP_PORT", "8000"))

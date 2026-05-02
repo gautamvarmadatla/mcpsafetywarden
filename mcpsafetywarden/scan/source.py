@@ -47,15 +47,41 @@ _EXCLUDE_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 
-_PRIORITY_NAMES = frozenset({
-    "server.py", "main.py", "core.py", "middleware.py", "app.py",
-    "handler.py", "router.py", "proxy.py", "gateway.py", "agent.py",
-    "tools.py", "tool.py", "commands.py", "command.py",
-    "server.ts", "main.ts", "core.ts", "middleware.ts", "app.ts",
-    "handler.ts", "router.ts", "proxy.ts", "gateway.ts", "agent.ts",
-    "tools.ts", "tool.ts", "index.ts", "index.js",
-    "server.js", "main.js", "app.js",
-})
+_PRIORITY_NAMES = frozenset(
+    {
+        "server.py",
+        "main.py",
+        "core.py",
+        "middleware.py",
+        "app.py",
+        "handler.py",
+        "router.py",
+        "proxy.py",
+        "gateway.py",
+        "agent.py",
+        "tools.py",
+        "tool.py",
+        "commands.py",
+        "command.py",
+        "server.ts",
+        "main.ts",
+        "core.ts",
+        "middleware.ts",
+        "app.ts",
+        "handler.ts",
+        "router.ts",
+        "proxy.ts",
+        "gateway.ts",
+        "agent.ts",
+        "tools.ts",
+        "tool.ts",
+        "index.ts",
+        "index.js",
+        "server.js",
+        "main.js",
+        "app.js",
+    }
+)
 _DEPRIORITY_NAMES = frozenset({"__init__.py", "__main__.py", "types.ts", "types.js"})
 
 _PY_EXTS = frozenset({".py"})
@@ -110,13 +136,13 @@ _TS_CAPABILITY_IMPORTS: Dict[str, str] = {
 }
 
 _TS_DANGEROUS_PATTERNS: List[Tuple[re.Pattern, str]] = [
-    (re.compile(r'\b(?:exec|execSync|spawn|spawnSync|execFile|execFileSync)\s*\('), "shell_exec"),
-    (re.compile(r'\beval\s*\('), "code_eval"),
-    (re.compile(r'\bnew\s+Function\s*\('), "code_eval"),
-    (re.compile(r'\bvm\.(?:runIn|compile|Script)\b'), "code_eval"),
-    (re.compile(r'\b(?:writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream)\s*\('), "file_write"),
-    (re.compile(r'\b(?:unlink|unlinkSync|rmdir|rmdirSync|rm)\s*\('), "file_delete"),
-    (re.compile(r'\bdeserialize\s*\('), "deserialization"),
+    (re.compile(r"\b(?:exec|execSync|spawn|spawnSync|execFile|execFileSync)\s*\("), "shell_exec"),
+    (re.compile(r"\beval\s*\("), "code_eval"),
+    (re.compile(r"\bnew\s+Function\s*\("), "code_eval"),
+    (re.compile(r"\bvm\.(?:runIn|compile|Script)\b"), "code_eval"),
+    (re.compile(r"\b(?:writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream)\s*\("), "file_write"),
+    (re.compile(r"\b(?:unlink|unlinkSync|rmdir|rmdirSync|rm)\s*\("), "file_delete"),
+    (re.compile(r"\bdeserialize\s*\("), "deserialization"),
 ]
 
 _TS_IMPORT_RE = re.compile(
@@ -124,9 +150,7 @@ _TS_IMPORT_RE = re.compile(
     re.MULTILINE,
 )
 _TS_MCP_TOOL_RE = re.compile(r"""(?:server\.tool|\.tool)\s*\(\s*['"]([\w\-]+)['"]""")
-_TS_FUNC_RE = re.compile(
-    r"""(?:(?:async\s+)?function\s+(\w+)\s*\(|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\()"""
-)
+_TS_FUNC_RE = re.compile(r"""(?:(?:async\s+)?function\s+(\w+)\s*\(|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\()""")
 _TS_STRING_RE = re.compile(r"""(?:"(?:[^"\n\\]|\\.)*"|'(?:[^'\n\\]|\\.)*')""")
 
 _CAPABILITY_IMPORTS: Dict[str, str] = {
@@ -234,10 +258,7 @@ def _detect_github_url(
 
 async def _detect_github_url_from_pypi(server_config: Dict[str, Any]) -> Optional[str]:
     args = server_config.get("args") or []
-    candidates = [
-        a for a in args
-        if isinstance(a, str) and re.match(r"^[a-z0-9][a-z0-9\-_.]+$", a, re.IGNORECASE)
-    ]
+    candidates = [a for a in args if isinstance(a, str) and re.match(r"^[a-z0-9][a-z0-9\-_.]+$", a, re.IGNORECASE)]
     if not candidates:
         return None
     async with httpx.AsyncClient(timeout=10) as client:
@@ -337,7 +358,8 @@ async def _fetch_source_files(owner: str, repo: str) -> Dict[str, str]:
             if tree_data.get("truncated"):
                 _log.warning(
                     "GitHub tree response truncated for %s/%s - large repo, some files may be missed",
-                    owner, repo,
+                    owner,
+                    repo,
                 )
         except Exception as exc:
             _log.debug("GitHub tree fetch failed for %s/%s: %s", owner, repo, exc)
@@ -400,14 +422,16 @@ def _entropy_secret_scan(source_files: Dict[str, str]) -> List[Dict[str, Any]]:
             matched_pattern = False
             for pattern in _KNOWN_SECRET_FORMATS:
                 if pattern.search(s):
-                    findings.append({
-                        "layer": "entropy",
-                        "name": "hardcoded_secret_pattern",
-                        "finding": f"Known secret format detected in {path}:{getattr(node, 'lineno', '?')}",
-                        "severity": "HIGH",
-                        "file": path,
-                        "lineno": getattr(node, "lineno", 0),
-                    })
+                    findings.append(
+                        {
+                            "layer": "entropy",
+                            "name": "hardcoded_secret_pattern",
+                            "finding": f"Known secret format detected in {path}:{getattr(node, 'lineno', '?')}",
+                            "severity": "HIGH",
+                            "file": path,
+                            "lineno": getattr(node, "lineno", 0),
+                        }
+                    )
                     matched_pattern = True
                     break
 
@@ -425,17 +449,19 @@ def _entropy_secret_scan(source_files: Dict[str, str]) -> List[Dict[str, Any]]:
                     elif isinstance(parent, ast.keyword):
                         var_name = parent.arg or ""
                     if var_name and _SENSITIVE_KEY_RE.search(var_name):
-                        findings.append({
-                            "layer": "entropy",
-                            "name": "high_entropy_secret",
-                            "finding": (
-                                f"High-entropy value (entropy={entropy:.1f}) assigned to "
-                                f"sensitive name '{var_name}' in {path}:{getattr(node, 'lineno', '?')}"
-                            ),
-                            "severity": "MEDIUM",
-                            "file": path,
-                            "lineno": getattr(node, "lineno", 0),
-                        })
+                        findings.append(
+                            {
+                                "layer": "entropy",
+                                "name": "high_entropy_secret",
+                                "finding": (
+                                    f"High-entropy value (entropy={entropy:.1f}) assigned to "
+                                    f"sensitive name '{var_name}' in {path}:{getattr(node, 'lineno', '?')}"
+                                ),
+                                "severity": "MEDIUM",
+                                "file": path,
+                                "lineno": getattr(node, "lineno", 0),
+                            }
+                        )
     return findings
 
 
@@ -448,38 +474,42 @@ def _ts_entropy_scan(source_files: Dict[str, str]) -> List[Dict[str, Any]]:
             s = m.group(0)[1:-1]
             if len(s) < _MIN_SECRET_LEN:
                 continue
-            lineno = content[:m.start()].count("\n") + 1
+            lineno = content[: m.start()].count("\n") + 1
             matched = False
             for pattern in _KNOWN_SECRET_FORMATS:
                 if pattern.search(s):
-                    findings.append({
-                        "layer": "entropy",
-                        "name": "hardcoded_secret_pattern",
-                        "finding": f"Known secret format detected in {path}:{lineno}",
-                        "severity": "HIGH",
-                        "file": path,
-                        "lineno": lineno,
-                    })
+                    findings.append(
+                        {
+                            "layer": "entropy",
+                            "name": "hardcoded_secret_pattern",
+                            "finding": f"Known secret format detected in {path}:{lineno}",
+                            "severity": "HIGH",
+                            "file": path,
+                            "lineno": lineno,
+                        }
+                    )
                     matched = True
                     break
             if not matched:
                 entropy = _shannon_entropy(s)
                 if entropy >= _ENTROPY_THRESHOLD:
-                    preceding = content[max(0, m.start() - 100):m.start()]
-                    vm = re.search(r'(?:const|let|var)\s+(\w+)\s*[=:]\s*$', preceding.rstrip())
+                    preceding = content[max(0, m.start() - 100) : m.start()]
+                    vm = re.search(r"(?:const|let|var)\s+(\w+)\s*[=:]\s*$", preceding.rstrip())
                     var_name = vm.group(1) if vm else ""
                     if var_name and _SENSITIVE_KEY_RE.search(var_name):
-                        findings.append({
-                            "layer": "entropy",
-                            "name": "high_entropy_secret",
-                            "finding": (
-                                f"High-entropy value (entropy={entropy:.1f}) assigned to "
-                                f"sensitive name '{var_name}' in {path}:{lineno}"
-                            ),
-                            "severity": "MEDIUM",
-                            "file": path,
-                            "lineno": lineno,
-                        })
+                        findings.append(
+                            {
+                                "layer": "entropy",
+                                "name": "high_entropy_secret",
+                                "finding": (
+                                    f"High-entropy value (entropy={entropy:.1f}) assigned to "
+                                    f"sensitive name '{var_name}' in {path}:{lineno}"
+                                ),
+                                "severity": "MEDIUM",
+                                "file": path,
+                                "lineno": lineno,
+                            }
+                        )
     return findings
 
 
@@ -540,7 +570,7 @@ class _SecurityVisitor(ast.NodeVisitor):
 
         self._current_func = node.name
         params: Set[str] = set()
-        for arg in (node.args.args + node.args.posonlyargs + node.args.kwonlyargs):
+        for arg in node.args.args + node.args.posonlyargs + node.args.kwonlyargs:
             if arg.arg not in ("self", "cls"):
                 params.add(arg.arg)
         if node.args.vararg:
@@ -590,19 +620,31 @@ class _SecurityVisitor(ast.NodeVisitor):
                     except Exception:
                         pass
                 if not safe:
-                    self.dangerous_sinks.append({
-                        "function": func_ctx, "sink": "unsafe_yaml_load", "lineno": lineno,
-                    })
+                    self.dangerous_sinks.append(
+                        {
+                            "function": func_ctx,
+                            "sink": "unsafe_yaml_load",
+                            "lineno": lineno,
+                        }
+                    )
                     if self._current_func and self._tainted_vars:
                         arg_names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
                         if arg_names & self._tainted_vars:
-                            self.taint_flows.append({
-                                "function": func_ctx, "sink": "unsafe_yaml_load", "lineno": lineno,
-                            })
+                            self.taint_flows.append(
+                                {
+                                    "function": func_ctx,
+                                    "sink": "unsafe_yaml_load",
+                                    "lineno": lineno,
+                                }
+                            )
             else:
-                self.dangerous_sinks.append({
-                    "function": func_ctx, "sink": sink_type, "lineno": lineno,
-                })
+                self.dangerous_sinks.append(
+                    {
+                        "function": func_ctx,
+                        "sink": sink_type,
+                        "lineno": lineno,
+                    }
+                )
                 if self._current_func and self._tainted_vars:
                     arg_names: Set[str] = set()
                     for arg in node.args:
@@ -615,9 +657,13 @@ class _SecurityVisitor(ast.NodeVisitor):
                                 if isinstance(n, ast.Name):
                                     arg_names.add(n.id)
                     if arg_names & self._tainted_vars:
-                        self.taint_flows.append({
-                            "function": func_ctx, "sink": sink_type, "lineno": lineno,
-                        })
+                        self.taint_flows.append(
+                            {
+                                "function": func_ctx,
+                                "sink": sink_type,
+                                "lineno": lineno,
+                            }
+                        )
 
         self.generic_visit(node)
 
@@ -703,37 +749,41 @@ def _ts_analysis(source_files: Dict[str, str]) -> Dict[str, Any]:
 
         for pattern, sink_type in _TS_DANGEROUS_PATTERNS:
             for m in pattern.finditer(content):
-                lineno = content[:m.start()].count("\n") + 1
+                lineno = content[: m.start()].count("\n") + 1
                 func_name = "<module>"
-                for fm in _TS_FUNC_RE.finditer(content[:m.start()]):
+                for fm in _TS_FUNC_RE.finditer(content[: m.start()]):
                     func_name = fm.group(1) or fm.group(2) or "<module>"
 
-                all_sinks.append({
-                    "function": func_name,
-                    "sink": sink_type,
-                    "lineno": lineno,
-                    "file": path,
-                })
-
-                sink_line = lines[lineno - 1] if lineno <= len(lines) else ""
-                context = "\n".join(lines[max(0, lineno - 8):lineno])
-                params: Set[str] = set()
-                for pm in re.finditer(
-                    r'(?:\bfunction\s+\w+\s*\(([^)]+)\)|(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?\(([^)]+)\)\s*=>)',
-                    context,
-                ):
-                    raw = pm.group(1) or pm.group(2) or ""
-                    for p in raw.split(","):
-                        pname = re.sub(r'[?:=].*', '', p).strip().lstrip(".")
-                        if pname and re.match(r'^\w+$', pname) and pname not in ("this", "self"):
-                            params.add(pname)
-                if params and any(p in sink_line for p in params):
-                    all_flows.append({
+                all_sinks.append(
+                    {
                         "function": func_name,
                         "sink": sink_type,
                         "lineno": lineno,
                         "file": path,
-                    })
+                    }
+                )
+
+                sink_line = lines[lineno - 1] if lineno <= len(lines) else ""
+                context = "\n".join(lines[max(0, lineno - 8) : lineno])
+                params: Set[str] = set()
+                for pm in re.finditer(
+                    r"(?:\bfunction\s+\w+\s*\(([^)]+)\)|(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?\(([^)]+)\)\s*=>)",
+                    context,
+                ):
+                    raw = pm.group(1) or pm.group(2) or ""
+                    for p in raw.split(","):
+                        pname = re.sub(r"[?:=].*", "", p).strip().lstrip(".")
+                        if pname and re.match(r"^\w+$", pname) and pname not in ("this", "self"):
+                            params.add(pname)
+                if params and any(p in sink_line for p in params):
+                    all_flows.append(
+                        {
+                            "function": func_name,
+                            "sink": sink_type,
+                            "lineno": lineno,
+                            "file": path,
+                        }
+                    )
 
     return {
         "import_capabilities": sorted(all_capabilities),
@@ -759,56 +809,68 @@ def _description_mismatch(
         if not desc:
             continue
 
-        if any(w in desc for w in (
-            "read only", "read-only", "readonly", "non-destructive",
-            "only reads", "no side effect", "does not modify",
-        )):
+        if any(
+            w in desc
+            for w in (
+                "read only",
+                "read-only",
+                "readonly",
+                "non-destructive",
+                "only reads",
+                "no side effect",
+                "does not modify",
+            )
+        ):
             risky = [s for s in ("shell_exec", "code_eval", "file_delete", "deserialization") if s in sink_types]
             key = f"read_only_mismatch:{','.join(sorted(risky))}"
             if risky and key not in seen_mismatch_types:
                 seen_mismatch_types.add(key)
-                findings.append({
-                    "layer": "description_mismatch",
-                    "name": "read_only_claim_mismatch",
-                    "finding": (
-                        f"Tool '{name}' claims read-only/non-destructive but codebase uses: "
-                        f"{', '.join(risky)}"
-                    ),
-                    "severity": "HIGH",
-                    "tool": name,
-                })
+                findings.append(
+                    {
+                        "layer": "description_mismatch",
+                        "name": "read_only_claim_mismatch",
+                        "finding": (
+                            f"Tool '{name}' claims read-only/non-destructive but codebase uses: {', '.join(risky)}"
+                        ),
+                        "severity": "HIGH",
+                        "tool": name,
+                    }
+                )
 
         if any(w in desc for w in ("local only", "no network", "offline", "no http", "no external")):
             net_caps = [c for c in ("outbound_http", "outbound_network") if c in caps_set]
             key = f"local_only_mismatch:{','.join(sorted(net_caps))}"
             if net_caps and key not in seen_mismatch_types:
                 seen_mismatch_types.add(key)
-                findings.append({
-                    "layer": "description_mismatch",
-                    "name": "local_only_claim_mismatch",
-                    "finding": (
-                        f"Tool '{name}' claims local-only but codebase imports outbound network libraries: "
-                        f"{', '.join(net_caps)}"
-                    ),
-                    "severity": "MEDIUM",
-                    "tool": name,
-                })
+                findings.append(
+                    {
+                        "layer": "description_mismatch",
+                        "name": "local_only_claim_mismatch",
+                        "finding": (
+                            f"Tool '{name}' claims local-only but codebase imports outbound network libraries: "
+                            f"{', '.join(net_caps)}"
+                        ),
+                        "severity": "MEDIUM",
+                        "tool": name,
+                    }
+                )
 
         if any(w in desc for w in ("sandboxed", "no execution", "no shell", "no command execution")):
             exec_sinks = [s for s in ("shell_exec", "code_eval") if s in sink_types]
             key = f"sandbox_mismatch:{','.join(sorted(exec_sinks))}"
             if exec_sinks and key not in seen_mismatch_types:
                 seen_mismatch_types.add(key)
-                findings.append({
-                    "layer": "description_mismatch",
-                    "name": "sandboxed_claim_mismatch",
-                    "finding": (
-                        f"Tool '{name}' claims sandboxed/no execution but codebase uses: "
-                        f"{', '.join(exec_sinks)}"
-                    ),
-                    "severity": "HIGH",
-                    "tool": name,
-                })
+                findings.append(
+                    {
+                        "layer": "description_mismatch",
+                        "name": "sandboxed_claim_mismatch",
+                        "finding": (
+                            f"Tool '{name}' claims sandboxed/no execution but codebase uses: {', '.join(exec_sinks)}"
+                        ),
+                        "severity": "HIGH",
+                        "tool": name,
+                    }
+                )
 
     return findings
 
@@ -827,9 +889,7 @@ async def _check_rug_pull_hash(
 
     loop = asyncio.get_running_loop()
     existing = await loop.run_in_executor(None, db.get_source_hash, server_id)
-    await loop.run_in_executor(
-        None, db.upsert_source_hash, server_id, github_url, current_hash, file_paths
-    )
+    await loop.run_in_executor(None, db.upsert_source_hash, server_id, github_url, current_hash, file_paths)
 
     if existing and existing["files_hash"] != current_hash:
         return {
@@ -866,7 +926,12 @@ async def _run_bandit(source_files: Dict[str, str]) -> List[Dict[str, Any]]:
                 f.write(content)
 
         proc = await asyncio.create_subprocess_exec(
-            "bandit", "-r", tmpdir, "-f", "json", "-q",
+            "bandit",
+            "-r",
+            tmpdir,
+            "-f",
+            "json",
+            "-q",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -886,15 +951,17 @@ async def _run_bandit(source_files: Dict[str, str]) -> List[Dict[str, Any]]:
         for result in data.get("results", []):
             sev = sev_map.get(result.get("issue_severity", ""), "LOW")
             flat = os.path.basename(result.get("filename", ""))
-            findings.append({
-                "layer": "bandit",
-                "name": result.get("test_id", "bandit_finding"),
-                "finding": sanitise_for_prompt(result.get("issue_text", ""), 200),
-                "severity": sev,
-                "file": flat_to_orig.get(flat, flat),
-                "lineno": result.get("line_number", 0),
-                "cwe": (result.get("issue_cwe") or {}).get("id"),
-            })
+            findings.append(
+                {
+                    "layer": "bandit",
+                    "name": result.get("test_id", "bandit_finding"),
+                    "finding": sanitise_for_prompt(result.get("issue_text", ""), 200),
+                    "severity": sev,
+                    "file": flat_to_orig.get(flat, flat),
+                    "lineno": result.get("line_number", 0),
+                    "cwe": (result.get("issue_cwe") or {}).get("id"),
+                }
+            )
     except FileNotFoundError:
         _log.debug("bandit not installed - skipping L4")
     except Exception as exc:
@@ -955,14 +1022,16 @@ async def _run_semgrep(source_files: Dict[str, str]) -> List[Dict[str, Any]]:
             raw_sev = (meta.get("severity") or "WARNING").upper()
             sev = "HIGH" if raw_sev in ("ERROR", "HIGH") else "MEDIUM" if raw_sev == "WARNING" else "LOW"
             flat = os.path.basename(result.get("path", ""))
-            findings.append({
-                "layer": "semgrep",
-                "name": result.get("check_id", "semgrep_finding"),
-                "finding": sanitise_for_prompt(meta.get("message", ""), 200),
-                "severity": sev,
-                "file": flat_to_orig.get(flat, flat),
-                "lineno": (result.get("start") or {}).get("line", 0),
-            })
+            findings.append(
+                {
+                    "layer": "semgrep",
+                    "name": result.get("check_id", "semgrep_finding"),
+                    "finding": sanitise_for_prompt(meta.get("message", ""), 200),
+                    "severity": sev,
+                    "file": flat_to_orig.get(flat, flat),
+                    "lineno": (result.get("start") or {}).get("line", 0),
+                }
+            )
     except FileNotFoundError:
         _log.debug("semgrep not installed - skipping L5")
     except Exception as exc:
@@ -1029,13 +1098,15 @@ async def _run_llm_analysis(
         findings: List[Dict[str, Any]] = []
         for item in parsed:
             if isinstance(item, dict) and item.get("action") == "new_finding":
-                findings.append({
-                    "layer": "llm",
-                    "name": sanitise_for_prompt(item.get("name", "llm_finding"), 80),
-                    "finding": sanitise_for_prompt(item.get("finding", ""), 200),
-                    "severity": item.get("severity", "MEDIUM"),
-                    "rationale": sanitise_for_prompt(item.get("rationale", ""), 150),
-                })
+                findings.append(
+                    {
+                        "layer": "llm",
+                        "name": sanitise_for_prompt(item.get("name", "llm_finding"), 80),
+                        "finding": sanitise_for_prompt(item.get("finding", ""), 200),
+                        "severity": item.get("severity", "MEDIUM"),
+                        "rationale": sanitise_for_prompt(item.get("rationale", ""), 150),
+                    }
+                )
         return findings
     except (asyncio.TimeoutError, json.JSONDecodeError, Exception) as exc:
         _log.debug("LLM analysis failed: %s", exc)
@@ -1117,11 +1188,7 @@ async def run_source_recon(
 
     py_files = {k: v for k, v in source_files.items() if k.endswith(".py")}
     ts_files = {k: v for k, v in source_files.items() if os.path.splitext(k)[1].lower() in _TS_EXTS}
-    result["language"] = (
-        "python+typescript" if py_files and ts_files
-        else "typescript" if ts_files
-        else "python"
-    )
+    result["language"] = "python+typescript" if py_files and ts_files else "typescript" if ts_files else "python"
     result["files_analyzed"] = len(source_files)
     all_findings: List[Dict[str, Any]] = []
 
@@ -1134,8 +1201,10 @@ async def run_source_recon(
         _log.debug("source_recon L1 failed: %s", exc)
 
     ast_result: Dict[str, Any] = {
-        "import_capabilities": [], "dangerous_sinks": [],
-        "taint_flows": [], "mcp_tool_functions": [],
+        "import_capabilities": [],
+        "dangerous_sinks": [],
+        "taint_flows": [],
+        "mcp_tool_functions": [],
     }
     try:
         merged_caps: Set[str] = set()
@@ -1236,6 +1305,9 @@ async def run_source_recon(
     result["findings"] = unique
     _log.info(
         "source_recon: server=%s files=%d findings=%d layers=%s",
-        server_id, result["files_analyzed"], len(unique), result["layers_run"],
+        server_id,
+        result["files_analyzed"],
+        len(unique),
+        result["layers_run"],
     )
     return result

@@ -1,4 +1,5 @@
 """Drift detection tests: unit (pure functions) + integration (live subprocess)."""
+
 import json
 import sys
 import uuid
@@ -8,10 +9,7 @@ import pytest
 from mcpsafetywarden.proxy.drift import _diff_input_schema, compare_db_snapshots
 from mcpsafetywarden.core import database as db
 
-_DRIFT_SERVER = str((
-    __file__
-    and __import__("pathlib").Path(__file__).parent / "helpers" / "drift_server.py"
-))
+_DRIFT_SERVER = str((__file__ and __import__("pathlib").Path(__file__).parent / "helpers" / "drift_server.py"))
 
 
 def _unique_id(prefix: str = "drift-test") -> str:
@@ -35,13 +33,16 @@ def _switch_mode(server_id: str, mode: str) -> None:
         server["transport"],
         command=server["command"],
         args=server["args"],
-        env={**{k: v for k, v in (server.get("env") or {}).items() if k != "DRIFT_SERVER_MODE"},
-             "DRIFT_SERVER_MODE": mode},
+        env={
+            **{k: v for k, v in (server.get("env") or {}).items() if k != "DRIFT_SERVER_MODE"},
+            "DRIFT_SERVER_MODE": mode,
+        },
     )
 
 
 async def _inspect(server_id: str) -> None:
     from mcpsafetywarden.proxy.client import inspect_server_tools
+
     await inspect_server_tools(server_id)
 
 
@@ -158,8 +159,10 @@ class TestCompareDbSnapshots:
 
 class TestCheckServerDrift:
     pytestmark = pytest.mark.asyncio
+
     async def test_no_drift_when_unchanged(self):
         from mcpsafetywarden.proxy.drift import check_server_drift
+
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
@@ -168,6 +171,7 @@ class TestCheckServerDrift:
 
     async def test_drift_on_description_change(self):
         from mcpsafetywarden.proxy.drift import check_server_drift
+
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
@@ -178,6 +182,7 @@ class TestCheckServerDrift:
 
     async def test_drift_on_schema_change(self):
         from mcpsafetywarden.proxy.drift import check_server_drift
+
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
@@ -188,6 +193,7 @@ class TestCheckServerDrift:
 
     async def test_drift_on_tool_removed(self):
         from mcpsafetywarden.proxy.drift import check_server_drift
+
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
@@ -199,6 +205,7 @@ class TestCheckServerDrift:
 
     async def test_drift_on_tool_added(self):
         from mcpsafetywarden.proxy.drift import check_server_drift
+
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
@@ -209,6 +216,7 @@ class TestCheckServerDrift:
 
     async def test_update_baseline_clears_drift(self):
         from mcpsafetywarden.proxy.drift import check_server_drift
+
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
@@ -221,11 +229,13 @@ class TestCheckServerDrift:
 
     async def test_raises_for_unregistered_server(self):
         from mcpsafetywarden.proxy.drift import check_server_drift
+
         with pytest.raises(ValueError, match="not registered"):
             await check_server_drift("no-such-server-xyz")
 
     async def test_raises_when_no_baseline(self):
         from mcpsafetywarden.proxy.drift import check_server_drift
+
         server_id = _unique_id()
         _register_server(server_id, "v1")
         with pytest.raises(ValueError, match="inspect_server"):
@@ -233,6 +243,7 @@ class TestCheckServerDrift:
 
     async def test_result_has_required_keys(self):
         from mcpsafetywarden.proxy.drift import check_server_drift
+
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
@@ -243,81 +254,104 @@ class TestCheckServerDrift:
 
 class TestPerCallDriftGuard:
     pytestmark = pytest.mark.asyncio
+
     async def test_call_blocked_when_description_drifted(self):
-        from mcpsafetywarden.server import safe_tool_call, register_server
+        from mcpsafetywarden.server import safe_tool_call
+
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
         _switch_mode(server_id, "evil")
-        result = json.loads(await safe_tool_call(
-            server_id, "add_numbers",
-            args={"a": 1, "b": 2},
-            approved=True,
-        ))
+        result = json.loads(
+            await safe_tool_call(
+                server_id,
+                "add_numbers",
+                args={"a": 1, "b": 2},
+                approved=True,
+            )
+        )
         assert result.get("blocked") is True
         assert result.get("reason") == "drift_detected"
         assert result.get("change_type") == "description_changed"
 
     async def test_call_blocked_when_schema_drifted(self):
         from mcpsafetywarden.server import safe_tool_call
+
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
         _switch_mode(server_id, "schema_changed")
-        result = json.loads(await safe_tool_call(
-            server_id, "add_numbers",
-            args={"a": 1, "b": 2},
-            approved=True,
-        ))
+        result = json.loads(
+            await safe_tool_call(
+                server_id,
+                "add_numbers",
+                args={"a": 1, "b": 2},
+                approved=True,
+            )
+        )
         assert result.get("blocked") is True
         assert result.get("reason") == "drift_detected"
 
     async def test_call_blocked_when_tool_removed(self):
         from mcpsafetywarden.server import safe_tool_call
+
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
         _switch_mode(server_id, "tool_removed")
-        result = json.loads(await safe_tool_call(
-            server_id, "add_numbers",
-            args={"a": 1, "b": 2},
-            approved=True,
-        ))
+        result = json.loads(
+            await safe_tool_call(
+                server_id,
+                "add_numbers",
+                args={"a": 1, "b": 2},
+                approved=True,
+            )
+        )
         assert result.get("blocked") is True
         assert result.get("reason") == "drift_detected"
         assert result.get("change_type") == "tool_removed"
 
     async def test_call_succeeds_with_no_drift(self):
         from mcpsafetywarden.server import safe_tool_call
+
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
-        result = json.loads(await safe_tool_call(
-            server_id, "add_numbers",
-            args={"a": 3, "b": 4},
-            approved=True,
-        ))
+        result = json.loads(
+            await safe_tool_call(
+                server_id,
+                "add_numbers",
+                args={"a": 3, "b": 4},
+                approved=True,
+            )
+        )
         assert result.get("blocked") is not True
         assert "error" not in result or result.get("telemetry") is not None
 
     async def test_drift_message_hints_reinspect(self):
         from mcpsafetywarden.server import safe_tool_call
+
         server_id = _unique_id()
         _register_server(server_id, "v1")
         await _inspect(server_id)
         _switch_mode(server_id, "evil")
-        result = json.loads(await safe_tool_call(
-            server_id, "add_numbers",
-            args={"a": 1, "b": 2},
-            approved=True,
-        ))
+        result = json.loads(
+            await safe_tool_call(
+                server_id,
+                "add_numbers",
+                args={"a": 1, "b": 2},
+                approved=True,
+            )
+        )
         assert "inspect" in result.get("message", "").lower()
 
 
 class TestInspectDriftSurface:
     pytestmark = pytest.mark.asyncio
+
     async def test_inspect_includes_drift_on_change(self):
         from mcpsafetywarden.server import inspect_server
+
         server_id = _unique_id()
         _register_server(server_id, "v1")
         first = json.loads(await inspect_server(server_id))
@@ -328,6 +362,7 @@ class TestInspectDriftSurface:
 
     async def test_inspect_no_drift_key_on_first_run(self):
         from mcpsafetywarden.server import inspect_server
+
         server_id = _unique_id()
         _register_server(server_id, "v1")
         result = json.loads(await inspect_server(server_id))

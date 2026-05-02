@@ -16,6 +16,7 @@ try:
     _key = os.environ.get("MCP_DB_ENCRYPTION_KEY")
     if _key:
         from cryptography.fernet import Fernet as _Fernet
+
         _fernet = _Fernet(_key.encode() if isinstance(_key, str) else _key)
 except Exception as _fernet_err:
     _log.warning(
@@ -55,8 +56,12 @@ def _jloads(s: str, default: Any) -> Any:
     try:
         return json.loads(s)
     except (json.JSONDecodeError, TypeError) as exc:
-        _log.warning("_jloads: failed to parse stored JSON (%s) - returning default. Data may be corrupted or from a key rotation.", exc)
+        _log.warning(
+            "_jloads: failed to parse stored JSON (%s) - returning default. Data may be corrupted or from a key rotation.",
+            exc,
+        )
         return default
+
 
 _db_env = os.environ.get("MCP_DB_PATH")
 if _db_env:
@@ -64,6 +69,7 @@ if _db_env:
 else:
     try:
         from platformdirs import user_data_dir as _user_data_dir
+
         _data_dir = Path(_user_data_dir("mcpsafetywarden", "mcpsafetywarden"))
         _data_dir.mkdir(parents=True, exist_ok=True)
         DB_PATH = _data_dir / "behavior_profiles.db"
@@ -271,9 +277,7 @@ def init_db() -> None:
 
 
 def make_hash(data: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(data, sort_keys=True, default=str).encode()
-    ).hexdigest()[:16]
+    return hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
 def upsert_server(
@@ -301,7 +305,9 @@ def upsert_server(
                 github_url=COALESCE(excluded.github_url, servers.github_url)
             """,
             (
-                server_id, transport, command,
+                server_id,
+                transport,
+                command,
                 json.dumps(args or []),
                 url,
                 _encrypt_field(json.dumps(env or {})),
@@ -312,7 +318,8 @@ def upsert_server(
             ),
         )
         conn.commit()
-    finally: conn.close()
+    finally:
+        conn.close()
 
 
 def delete_server(server_id: str) -> None:
@@ -322,20 +329,23 @@ def delete_server(server_id: str) -> None:
         conn.execute("DELETE FROM security_scans WHERE server_id=?", (server_id,))
         conn.execute("DELETE FROM servers WHERE server_id=?", (server_id,))
         conn.commit()
-    finally: conn.close()
+    finally:
+        conn.close()
 
 
 def get_server(server_id: str) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     try:
         row = conn.execute("SELECT * FROM servers WHERE server_id = ?", (server_id,)).fetchone()
-        if row is None: return None
+        if row is None:
+            return None
         d = dict(row)
         d["args"] = _jloads(d.pop("args_json", "[]"), [])
         d["env"] = _jloads(_decrypt_field(d.pop("env_json", None) or "{}"), {})
         d["headers"] = _jloads(_decrypt_field(d.pop("headers_json", None) or "{}"), {})
         return d
-    finally: conn.close()
+    finally:
+        conn.close()
 
 
 def list_servers(include_credentials: bool = False) -> List[Dict[str, Any]]:
@@ -362,7 +372,8 @@ def list_servers(include_credentials: bool = False) -> List[Dict[str, Any]]:
                 d.pop("headers_json", None)
             result.append(d)
         return result
-    finally: conn.close()
+    finally:
+        conn.close()
 
 
 def upsert_tool(
@@ -380,7 +391,9 @@ def upsert_tool(
     if len(schema_json.encode()) > _MAX_SCHEMA_BYTES:
         _log.warning(
             "Schema for %s::%s exceeds %d bytes; storing empty schema.",
-            server_id, tool_name, _MAX_SCHEMA_BYTES,
+            server_id,
+            tool_name,
+            _MAX_SCHEMA_BYTES,
         )
         schema_json = "{}"
         schema_hash = "OVERSIZED"
@@ -398,13 +411,19 @@ def upsert_tool(
                 annotations_json=excluded.annotations_json, schema_hash=excluded.schema_hash
             """,
             (
-                tool_id, server_id, tool_name, description,
-                schema_json, json.dumps(annotations), schema_hash,
+                tool_id,
+                server_id,
+                tool_name,
+                description,
+                schema_json,
+                json.dumps(annotations),
+                schema_hash,
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
         conn.commit()
-    finally: conn.close()
+    finally:
+        conn.close()
     return tool_id
 
 
@@ -415,20 +434,20 @@ def get_tool(server_id: str, tool_name: str) -> Optional[Dict[str, Any]]:
             "SELECT * FROM tools WHERE server_id = ? AND tool_name = ?",
             (server_id, tool_name),
         ).fetchone()
-        if row is None: return None
+        if row is None:
+            return None
         d = dict(row)
         d["schema"] = _jloads(d.pop("schema_json", "{}"), {})
         d["annotations"] = _jloads(d.pop("annotations_json", "{}"), {})
         return d
-    finally: conn.close()
+    finally:
+        conn.close()
 
 
 def list_tools(server_id: str) -> List[Dict[str, Any]]:
     conn = get_connection()
     try:
-        rows = conn.execute(
-            "SELECT * FROM tools WHERE server_id = ? ORDER BY tool_name", (server_id,)
-        ).fetchall()
+        rows = conn.execute("SELECT * FROM tools WHERE server_id = ? ORDER BY tool_name", (server_id,)).fetchall()
         result = []
         for row in rows:
             d = dict(row)
@@ -436,8 +455,8 @@ def list_tools(server_id: str) -> List[Dict[str, Any]]:
             d["annotations"] = _jloads(d.pop("annotations_json", "{}"), {})
             result.append(d)
         return result
-    finally: conn.close()
-
+    finally:
+        conn.close()
 
 
 def record_run(
@@ -462,18 +481,23 @@ def record_run(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                tool_id, args_hash, json.dumps(args, default=str),
+                tool_id,
+                args_hash,
+                json.dumps(args, default=str),
                 datetime.now(timezone.utc).isoformat(),
                 1 if success else 0,
                 1 if is_tool_error else 0,
-                latency_ms, output_size, output_schema_hash,
+                latency_ms,
+                output_size,
+                output_schema_hash,
                 (output_preview or "")[:500],
                 notes,
             ),
         )
         conn.commit()
         return cursor.lastrowid
-    finally: conn.close()
+    finally:
+        conn.close()
 
 
 def get_runs(tool_id: str, limit: int = 500) -> List[Dict[str, Any]]:
@@ -484,8 +508,8 @@ def get_runs(tool_id: str, limit: int = 500) -> List[Dict[str, Any]]:
             (tool_id, limit),
         ).fetchall()
         return [dict(r) for r in rows]
-    finally: conn.close()
-
+    finally:
+        conn.close()
 
 
 def upsert_profile(tool_id: str, profile: Dict[str, Any]) -> None:
@@ -528,7 +552,8 @@ def upsert_profile(tool_id: str, profile: Dict[str, Any]) -> None:
             ),
         )
         conn.commit()
-    finally: conn.close()
+    finally:
+        conn.close()
 
 
 def get_profiles_batch(tool_ids: List[str]) -> Dict[str, Dict[str, Any]]:
@@ -549,23 +574,23 @@ def get_profiles_batch(tool_ids: List[str]) -> Dict[str, Dict[str, Any]]:
             d["open_world"] = bool(d["open_world"])
             result[d["tool_id"]] = d
         return result
-    finally: conn.close()
+    finally:
+        conn.close()
 
 
 def get_profile(tool_id: str) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     try:
-        row = conn.execute(
-            "SELECT * FROM behavior_profiles WHERE tool_id = ?", (tool_id,)
-        ).fetchone()
-        if row is None: return None
+        row = conn.execute("SELECT * FROM behavior_profiles WHERE tool_id = ?", (tool_id,)).fetchone()
+        if row is None:
+            return None
         d = dict(row)
         d["confidence"] = _jloads(d.pop("confidence_json", "{}"), {})
         d["evidence"] = _jloads(d.pop("evidence_json", "[]"), [])
         d["open_world"] = bool(d["open_world"])
         return d
-    finally: conn.close()
-
+    finally:
+        conn.close()
 
 
 def store_security_scan(server_id: str, findings: Dict[str, Any]) -> int:
@@ -592,7 +617,8 @@ def store_security_scan(server_id: str, findings: Dict[str, Any]) -> int:
         )
         conn.commit()
         return cursor.lastrowid
-    finally: conn.close()
+    finally:
+        conn.close()
 
 
 def get_latest_security_scan(server_id: str) -> Optional[Dict[str, Any]]:
@@ -606,16 +632,18 @@ def get_latest_security_scan(server_id: str) -> Optional[Dict[str, Any]]:
             """,
             (server_id,),
         ).fetchone()
-        if row is None: return None
+        if row is None:
+            return None
         d = dict(row)
-        d["tool_findings"]      = _jloads(d.pop("tool_findings_json", "[]"), [])
+        d["tool_findings"] = _jloads(d.pop("tool_findings_json", "[]"), [])
         d["server_level_risks"] = _jloads(d.pop("server_risks_json", "[]"), [])
         raw = _jloads(d.pop("raw_report_json", None) or "{}", {})
         for field in ("false_positives", "unconfirmed_findings", "audit_metadata", "coverage_gaps"):
             if field in raw:
                 d.setdefault(field, raw[field])
         return d
-    finally: conn.close()
+    finally:
+        conn.close()
 
 
 def get_tool_security_findings_map(server_id: str) -> Dict[str, Dict[str, Any]]:
@@ -627,9 +655,11 @@ def get_tool_security_findings_map(server_id: str) -> Dict[str, Dict[str, Any]]:
 
 def get_tool_security_finding(server_id: str, tool_name: str) -> Optional[Dict[str, Any]]:
     scan = get_latest_security_scan(server_id)
-    if not scan: return None
+    if not scan:
+        return None
     for finding in scan.get("tool_findings", []):
-        if finding.get("name") == tool_name: return finding
+        if finding.get("name") == tool_name:
+            return finding
     return None
 
 
@@ -651,7 +681,8 @@ def set_tool_policy(server_id: str, tool_name: str, policy: Optional[str]) -> No
                 (server_id, tool_name, policy, datetime.now(timezone.utc).isoformat()),
             )
         conn.commit()
-    finally: conn.close()
+    finally:
+        conn.close()
 
 
 def get_tool_policy(server_id: str, tool_name: str) -> Optional[str]:
@@ -662,7 +693,8 @@ def get_tool_policy(server_id: str, tool_name: str) -> Optional[str]:
             (server_id, tool_name),
         ).fetchone()
         return row["policy"] if row else None
-    finally: conn.close()
+    finally:
+        conn.close()
 
 
 def upsert_tool_snapshot(server_id: str, tool_name_to_hash: Dict[str, str]) -> None:
@@ -705,9 +737,7 @@ def get_latest_tool_snapshot(server_id: str) -> Optional[Dict[str, Any]]:
 def get_source_hash(server_id: str) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     try:
-        row = conn.execute(
-            "SELECT * FROM source_hashes WHERE server_id = ?", (server_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM source_hashes WHERE server_id = ?", (server_id,)).fetchone()
         if row is None:
             return None
         d = dict(row)
@@ -775,9 +805,7 @@ def upsert_discovered_server(entry: Dict[str, Any]) -> None:
 def get_discovered_server(discovery_id: str) -> Optional[Dict[str, Any]]:
     conn = get_connection()
     try:
-        row = conn.execute(
-            "SELECT * FROM discovered_servers WHERE discovery_id = ?", (discovery_id,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM discovered_servers WHERE discovery_id = ?", (discovery_id,)).fetchone()
         if row is None:
             return None
         d = dict(row)
@@ -801,9 +829,7 @@ def list_discovered_servers(client: Optional[str] = None) -> List[Dict[str, Any]
                 (client,),
             ).fetchall()
         else:
-            rows = conn.execute(
-                "SELECT * FROM discovered_servers ORDER BY client, last_seen_at DESC"
-            ).fetchall()
+            rows = conn.execute("SELECT * FROM discovered_servers ORDER BY client, last_seen_at DESC").fetchall()
         result = []
         for row in rows:
             d = dict(row)
@@ -909,8 +935,7 @@ def _decrypt_cref(ciphertext: str) -> Optional[str]:
         return _fernet.decrypt(ciphertext.encode()).decode()
     except Exception as _dec_err:
         _log.error(
-            "_decrypt_cref failed - MCP_DB_ENCRYPTION_KEY may have been rotated "
-            "after this credential was stored: %s",
+            "_decrypt_cref failed - MCP_DB_ENCRYPTION_KEY may have been rotated after this credential was stored: %s",
             _dec_err,
         )
         return None
@@ -922,9 +947,7 @@ def resolve_credential_ref(ref_id: str) -> Optional[str]:
         return None
     conn = get_connection()
     try:
-        row = conn.execute(
-            "SELECT value_enc FROM credential_refs WHERE ref_id = ?", (ref_id,)
-        ).fetchone()
+        row = conn.execute("SELECT value_enc FROM credential_refs WHERE ref_id = ?", (ref_id,)).fetchone()
         if row is None:
             return None
         plaintext = _decrypt_cref(row["value_enc"])

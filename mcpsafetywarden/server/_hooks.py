@@ -2,7 +2,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from ..core import database as db
-from ..graph import store as _graph_store, builder as _graph_builder
+from ..graph import builder as _graph_builder
 
 _log = logging.getLogger(__name__)
 
@@ -22,21 +22,27 @@ def _gh_on_tools_inspected(
     llm_api_key: Optional[str] = None,
 ) -> None:
     try:
-        tool_ids = [
-            t.get("tool_id") or f"{server_id}::{t.get('tool_name') or t.get('name', '')}"
-            for t in tools
-        ]
+        tool_ids = [t.get("tool_id") or f"{server_id}::{t.get('tool_name') or t.get('name', '')}" for t in tools]
         profiles = db.get_profiles_batch([tid for tid in tool_ids if tid])
         enriched = [
-            {**t, **(profiles.get(
-                t.get("tool_id") or f"{server_id}::{t.get('tool_name') or t.get('name', '')}",
-                {},
-            ) or {})}
+            {
+                **t,
+                **(
+                    profiles.get(
+                        t.get("tool_id") or f"{server_id}::{t.get('tool_name') or t.get('name', '')}",
+                        {},
+                    )
+                    or {}
+                ),
+            }
             for t in tools
         ]
         _graph_builder.on_tools_inspected(
-            server_id, enriched,
-            llm_provider=llm_provider, llm_model=llm_model, llm_api_key=llm_api_key,
+            server_id,
+            enriched,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            llm_api_key=llm_api_key,
         )
     except Exception as _ge:
         _log.debug("graph hook on_tools_inspected failed: %s", _ge)
@@ -87,7 +93,10 @@ def _gh_on_provenance_detected(server_id: str, prov_info: Dict[str, Any]) -> Non
 
 
 def _gh_on_server_discovered(
-    discovery_id: str, client: str, client_name: str, server_name: str,
+    discovery_id: str,
+    client: str,
+    client_name: str,
+    server_name: str,
     registered_server_id: Optional[str] = None,
 ) -> None:
     try:

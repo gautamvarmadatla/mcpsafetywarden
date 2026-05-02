@@ -197,7 +197,7 @@ _SQL_INJECTION_RE = re.compile(
 )
 
 _NOSQL_INJECTION_RE = re.compile(
-    r'(\$\s*(where|gt|lt|gte|lte|ne|in|nin|regex|or|and|not|nor|exists|type|mod|all|size|elemMatch)\b'
+    r"(\$\s*(where|gt|lt|gte|lte|ne|in|nin|regex|or|and|not|nor|exists|type|mod|all|size|elemMatch)\b"
     r'|\{\s*"\$'
     r"|;\s*return\s+true\b"
     r"|this\.[a-zA-Z_]\w*\.length"
@@ -306,6 +306,7 @@ _B64_CANDIDATE_RE = re.compile(r"[A-Za-z0-9+/]{24,}={0,2}")
 _MAX_ARG_VALUE_LEN = 50_000
 _MAX_PRODUCTION_SCAN_DEPTH = 20
 
+
 def _extract_json_fence(raw: str, open_ch: str, close_ch: str):
     start = raw.find(open_ch)
     if start == -1:
@@ -331,7 +332,7 @@ def _extract_json_fence(raw: str, open_ch: str, close_ch: str):
         elif ch == close_ch:
             depth -= 1
             if depth == 0:
-                return raw[start:i + 1]
+                return raw[start : i + 1]
     return None
 
 
@@ -373,17 +374,26 @@ def _scan_single_str(value: str, allow_destructive: bool) -> List[str]:
     issues: List[str] = []
     norm = _normalise_probe_str(value)
 
-    if SSRF_RE.search(norm): issues.append("ssrf_target")
-    if _NULL_BYTE_RE.search(value) or _NULL_BYTE_RE.search(norm): issues.append("null_byte")
-    if len(value.encode("utf-8", errors="ignore")) > _MAX_ARG_VALUE_LEN: issues.append("oversized_value")
-    if _CRLF_RE.search(norm): issues.append("crlf_injection")
-    if _TEMPLATE_INJECTION_RE.search(norm): issues.append("template_injection")
+    if SSRF_RE.search(norm):
+        issues.append("ssrf_target")
+    if _NULL_BYTE_RE.search(value) or _NULL_BYTE_RE.search(norm):
+        issues.append("null_byte")
+    if len(value.encode("utf-8", errors="ignore")) > _MAX_ARG_VALUE_LEN:
+        issues.append("oversized_value")
+    if _CRLF_RE.search(norm):
+        issues.append("crlf_injection")
+    if _TEMPLATE_INJECTION_RE.search(norm):
+        issues.append("template_injection")
 
     if not allow_destructive:
-        if _PATH_TRAVERSAL_RE.search(norm): issues.append("path_traversal")
-        if _SENSITIVE_ABS_PATHS_RE.search(norm): issues.append("sensitive_path_access")
-        if _CREDENTIAL_PATH_RE.search(norm): issues.append("credential_path_access")
-        if _COMMAND_INJECTION_RE.search(norm): issues.append("command_injection")
+        if _PATH_TRAVERSAL_RE.search(norm):
+            issues.append("path_traversal")
+        if _SENSITIVE_ABS_PATHS_RE.search(norm):
+            issues.append("sensitive_path_access")
+        if _CREDENTIAL_PATH_RE.search(norm):
+            issues.append("credential_path_access")
+        if _COMMAND_INJECTION_RE.search(norm):
+            issues.append("command_injection")
 
     return issues
 
@@ -411,8 +421,7 @@ def _inspect_probe_args(
     categories = _scan_arg_values(args, allow_destructive)
     if categories:
         return (
-            f"Probe args rejected [{', '.join(categories)}] for tool '{tool_name}'. "
-            "Args never reached target server."
+            f"Probe args rejected [{', '.join(categories)}] for tool '{tool_name}'. Args never reached target server."
         )
     return None
 
@@ -431,12 +440,18 @@ def _detect_base64_payloads(value: str) -> List[str]:
             continue
         norm = _normalise_probe_str(decoded)
         found: List[str] = []
-        if SSRF_RE.search(norm): found.append("ssrf_target")
-        if _COMMAND_INJECTION_RE.search(norm): found.append("command_injection")
-        if _PATH_TRAVERSAL_RE.search(norm): found.append("path_traversal")
-        if _SQL_INJECTION_RE.search(norm): found.append("sql_injection")
-        if _PROMPT_INJECTION_RE.search(decoded): found.append("prompt_injection")
-        if _XXE_RE.search(norm): found.append("xxe")
+        if SSRF_RE.search(norm):
+            found.append("ssrf_target")
+        if _COMMAND_INJECTION_RE.search(norm):
+            found.append("command_injection")
+        if _PATH_TRAVERSAL_RE.search(norm):
+            found.append("path_traversal")
+        if _SQL_INJECTION_RE.search(norm):
+            found.append("sql_injection")
+        if _PROMPT_INJECTION_RE.search(decoded):
+            found.append("prompt_injection")
+        if _XXE_RE.search(norm):
+            found.append("xxe")
         if found:
             issues.extend(f"b64_{cat}" for cat in found)
     return list(dict.fromkeys(issues))
@@ -446,24 +461,42 @@ def _scan_production_value(value: str) -> List[str]:
     issues: List[str] = []
     norm = _normalise_probe_str(value)
 
-    if SSRF_RE.search(norm): issues.append("ssrf_target")
-    if _NULL_BYTE_RE.search(value) or _NULL_BYTE_RE.search(norm): issues.append("null_byte")
-    if len(value.encode("utf-8", errors="ignore")) > _MAX_ARG_VALUE_LEN: issues.append("oversized_value")
-    if _CRLF_RE.search(norm): issues.append("crlf_injection")
-    if _TEMPLATE_INJECTION_RE.search(norm): issues.append("template_injection")
-    if _PATH_TRAVERSAL_RE.search(norm): issues.append("path_traversal")
-    if _SENSITIVE_ABS_PATHS_RE.search(norm): issues.append("sensitive_path_access")
-    if _CREDENTIAL_PATH_RE.search(norm): issues.append("credential_path_access")
-    if _COMMAND_INJECTION_RE.search(norm): issues.append("command_injection")
-    if _SQL_INJECTION_RE.search(norm): issues.append("sql_injection")
-    if _NOSQL_INJECTION_RE.search(norm): issues.append("nosql_injection")
-    if _LDAP_INJECTION_RE.search(value): issues.append("ldap_injection")
-    if _XPATH_INJECTION_RE.search(norm): issues.append("xpath_injection")
-    if _XXE_RE.search(norm): issues.append("xxe")
-    if _HEADER_INJECTION_RE.search(value): issues.append("header_injection")
-    if _PROMPT_INJECTION_RE.search(value): issues.append("prompt_injection")
-    if _WINDOWS_SPECIFIC_RE.search(value): issues.append("windows_attack_path")
-    if _DESERIALIZE_RE.search(value): issues.append("deserialization_payload")
+    if SSRF_RE.search(norm):
+        issues.append("ssrf_target")
+    if _NULL_BYTE_RE.search(value) or _NULL_BYTE_RE.search(norm):
+        issues.append("null_byte")
+    if len(value.encode("utf-8", errors="ignore")) > _MAX_ARG_VALUE_LEN:
+        issues.append("oversized_value")
+    if _CRLF_RE.search(norm):
+        issues.append("crlf_injection")
+    if _TEMPLATE_INJECTION_RE.search(norm):
+        issues.append("template_injection")
+    if _PATH_TRAVERSAL_RE.search(norm):
+        issues.append("path_traversal")
+    if _SENSITIVE_ABS_PATHS_RE.search(norm):
+        issues.append("sensitive_path_access")
+    if _CREDENTIAL_PATH_RE.search(norm):
+        issues.append("credential_path_access")
+    if _COMMAND_INJECTION_RE.search(norm):
+        issues.append("command_injection")
+    if _SQL_INJECTION_RE.search(norm):
+        issues.append("sql_injection")
+    if _NOSQL_INJECTION_RE.search(norm):
+        issues.append("nosql_injection")
+    if _LDAP_INJECTION_RE.search(value):
+        issues.append("ldap_injection")
+    if _XPATH_INJECTION_RE.search(norm):
+        issues.append("xpath_injection")
+    if _XXE_RE.search(norm):
+        issues.append("xxe")
+    if _HEADER_INJECTION_RE.search(value):
+        issues.append("header_injection")
+    if _PROMPT_INJECTION_RE.search(value):
+        issues.append("prompt_injection")
+    if _WINDOWS_SPECIFIC_RE.search(value):
+        issues.append("windows_attack_path")
+    if _DESERIALIZE_RE.search(value):
+        issues.append("deserialization_payload")
     issues.extend(_detect_base64_payloads(value))
 
     return list(dict.fromkeys(issues))
@@ -665,7 +698,12 @@ async def _llm_verify_arg_threat(
     try:
         loop = asyncio.get_running_loop()
         raw = await loop.run_in_executor(
-            None, _call_llm_scanner, provider, model, api_key, prompt,
+            None,
+            _call_llm_scanner,
+            provider,
+            model,
+            api_key,
+            prompt,
         )
         parsed = _safe_json_dict(raw)
         if "is_attack" not in parsed:
@@ -697,16 +735,19 @@ async def scan_args_for_threats(
     if not flagged:
         return None
 
-    all_flagged = [
-        {"arg": p, "value": v[:200], "categories": c}
-        for p, v, c in flagged
-    ]
+    all_flagged = [{"arg": p, "value": v[:200], "categories": c} for p, v, c in flagged]
 
     if llm_provider:
         for arg_path, value_snippet, categories in flagged:
             verdict = await _llm_verify_arg_threat(
-                value_snippet, arg_path, tool_name, tool_description,
-                categories, llm_provider, llm_model, llm_api_key,
+                value_snippet,
+                arg_path,
+                tool_name,
+                tool_description,
+                categories,
+                llm_provider,
+                llm_model,
+                llm_api_key,
             )
             is_attack: bool = bool(verdict.get("is_attack", True))
             confidence: float = float(verdict.get("confidence", 0.5))
@@ -715,7 +756,10 @@ async def scan_args_for_threats(
             if not is_attack:
                 _log.info(
                     "LLM cleared false positive in '%s' arg '%s' (confidence %.2f): %s",
-                    tool_name, arg_path, confidence, reason,
+                    tool_name,
+                    arg_path,
+                    confidence,
+                    reason,
                 )
                 continue
 

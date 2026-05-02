@@ -164,16 +164,20 @@ Tools to analyze:
 
 
 _LLM_HTTP_TIMEOUT = 120.0
-_OLLAMA_BASE_URL  = "http://localhost:11434/v1"
+_OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
 
 def _call_anthropic(model_id: str, api_key: Optional[str], prompt: str) -> str:
     try:
         import anthropic
-    except ImportError: raise ImportError("Run: pip install anthropic")
+    except ImportError:
+        raise ImportError("Run: pip install anthropic")
 
-    client = anthropic.Anthropic(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT) if api_key \
+    client = (
+        anthropic.Anthropic(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT)
+        if api_key
         else anthropic.Anthropic(timeout=_LLM_HTTP_TIMEOUT)
+    )
     response = client.messages.create(
         model=model_id or "claude-opus-4-7",
         max_tokens=16384,
@@ -185,10 +189,14 @@ def _call_anthropic(model_id: str, api_key: Optional[str], prompt: str) -> str:
 def _call_openai(model_id: str, api_key: Optional[str], prompt: str) -> str:
     try:
         import openai
-    except ImportError: raise ImportError("Run: pip install openai")
+    except ImportError:
+        raise ImportError("Run: pip install openai")
 
-    client = openai.OpenAI(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT) if api_key \
+    client = (
+        openai.OpenAI(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT)
+        if api_key
         else openai.OpenAI(timeout=_LLM_HTTP_TIMEOUT)
+    )
     response = client.chat.completions.create(
         model=model_id or "gpt-5.4",
         messages=[{"role": "user", "content": prompt}],
@@ -201,35 +209,41 @@ def _call_gemini(model_id: str, api_key: Optional[str], prompt: str) -> str:
     key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     try:
         from google import genai
+
         client = genai.Client(api_key=key, http_options={"timeout": _LLM_HTTP_TIMEOUT})
         response = client.models.generate_content(
             model=model_id or "gemini-2.5-flash",
             contents=prompt,
         )
         return response.text or ""
-    except ImportError: pass
+    except ImportError:
+        pass
 
     try:
         import google.generativeai as genai_legacy
-        if key: genai_legacy.configure(api_key=key)
+
+        if key:
+            genai_legacy.configure(api_key=key)
         model = genai_legacy.GenerativeModel(model_id or "gemini-2.5-flash")
         response = model.generate_content(
             prompt,
             request_options={"timeout": _LLM_HTTP_TIMEOUT},
         )
         return response.text or ""
-    except ImportError: raise ImportError("Run: pip install google-genai  OR  pip install google-generativeai")
+    except ImportError:
+        raise ImportError("Run: pip install google-genai  OR  pip install google-generativeai")
 
 
 def _call_ollama(model_id: str, api_key: Optional[str], prompt: str) -> str:
     """OpenAI-compatible Ollama endpoint. No API key required; model via model_id or OLLAMA_MODEL."""
     try:
         import openai
-    except ImportError: raise ImportError("Run: pip install openai")
+    except ImportError:
+        raise ImportError("Run: pip install openai")
 
     base_url = os.environ.get("OLLAMA_BASE_URL", _OLLAMA_BASE_URL)
-    model    = model_id or os.environ.get("OLLAMA_MODEL", "llama3.1")
-    client   = openai.OpenAI(api_key="ollama", base_url=base_url, timeout=_LLM_HTTP_TIMEOUT)
+    model = model_id or os.environ.get("OLLAMA_MODEL", "llama3.1")
+    client = openai.OpenAI(api_key="ollama", base_url=base_url, timeout=_LLM_HTTP_TIMEOUT)
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
@@ -239,14 +253,19 @@ def _call_ollama(model_id: str, api_key: Optional[str], prompt: str) -> str:
 
 LLM_PROVIDERS = {
     "anthropic": _call_anthropic,
-    "openai":    _call_openai,
-    "gemini":    _call_gemini,
-    "ollama":    _call_ollama,
+    "openai": _call_openai,
+    "gemini": _call_gemini,
+    "ollama": _call_ollama,
 }
 
 ALL_PROVIDERS = [
-    "cisco", "snyk", "all",
-    "mcpsafety+anthropic", "mcpsafety+openai", "mcpsafety+gemini", "mcpsafety+ollama",
+    "cisco",
+    "snyk",
+    "all",
+    "mcpsafety+anthropic",
+    "mcpsafety+openai",
+    "mcpsafety+gemini",
+    "mcpsafety+ollama",
 ]
 
 
@@ -263,14 +282,17 @@ def detect_llm_provider() -> Optional[str]:
         return "anthropic"
     if os.environ.get("OPENAI_API_KEY") and _pkg_importable("openai"):
         return "openai"
-    if (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")) and (_pkg_importable("google.genai") or _pkg_importable("google.generativeai")):
+    if (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")) and (
+        _pkg_importable("google.genai") or _pkg_importable("google.generativeai")
+    ):
         return "gemini"
     return None
 
 
 def _cisco_available() -> bool:
     try:
-        import mcpscanner
+        import mcpscanner  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -280,7 +302,8 @@ def _snyk_available() -> bool:
     if not os.environ.get("SNYK_TOKEN"):
         return False
     try:
-        import agent_scan
+        import agent_scan  # noqa: F401
+
         return True
     except ImportError:
         return bool(shutil.which("snyk-agent-scan") or shutil.which("uvx"))
@@ -351,7 +374,7 @@ def merge_findings(server_id: str, results: List[Dict[str, Any]]) -> Dict[str, A
                     entry["sources"].append(prov)
 
     all_findings = list(tool_map.values())
-    high   = sum(1 for t in all_findings if t["risk_level"] == "HIGH")
+    high = sum(1 for t in all_findings if t["risk_level"] == "HIGH")
     medium = sum(1 for t in all_findings if t["risk_level"] == "MEDIUM")
 
     return {
@@ -372,26 +395,27 @@ def merge_findings(server_id: str, results: List[Dict[str, Any]]) -> Dict[str, A
 def call_llm(provider: str, model_id: Optional[str], api_key: Optional[str], prompt: str) -> str:
     """Unified LLM caller. Provider must be 'anthropic', 'openai', or 'gemini'."""
     if provider not in LLM_PROVIDERS:
-            raise ValueError(
-            f"Unknown LLM provider '{provider}'. Choose from: {list(LLM_PROVIDERS.keys())}"
-        )
+        raise ValueError(f"Unknown LLM provider '{provider}'. Choose from: {list(LLM_PROVIDERS.keys())}")
     return LLM_PROVIDERS[provider](model_id, api_key, prompt)
 
 
 def _format_tools_for_prompt(tools: List[Dict[str, Any]]) -> str:
     slim = []
     for t in tools:
-        slim.append({
-            "name": _sanitise_for_prompt(t.get("name") or t.get("tool_name") or "", 100),
-            "description": _sanitise_for_prompt(t.get("description", ""), 300),
-            "parameters": list((t.get("schema") or t.get("inputSchema") or {}).get("properties", {}).keys()),
-        })
+        slim.append(
+            {
+                "name": _sanitise_for_prompt(t.get("name") or t.get("tool_name") or "", 100),
+                "description": _sanitise_for_prompt(t.get("description", ""), 300),
+                "parameters": list((t.get("schema") or t.get("inputSchema") or {}).get("properties", {}).keys()),
+            }
+        )
     return json.dumps(slim, indent=2)
 
 
 def _parse_llm_response(raw: str) -> Dict[str, Any]:
     raw = _strip_json_fence(raw.strip())
-    try: return json.loads(raw)
+    try:
+        return json.loads(raw)
     except json.JSONDecodeError:
         redacted_raw, _ = _redact_text(raw[:2000])
         return {
@@ -415,7 +439,7 @@ def run_security_scan(
     provider must be 'anthropic', 'openai', or 'gemini'.
     """
     if not tools:
-            return {
+        return {
             "server_id": server_id,
             "overall_risk_level": "UNKNOWN",
             "summary": "No tools found to analyze.",
@@ -429,11 +453,10 @@ def run_security_scan(
     raw = call_llm(provider, model_id, api_key, prompt)
     findings = _parse_llm_response(raw)
     findings["server_id"] = server_id
-    findings["provider"]  = provider
-    findings["model"]     = model_id or "default"
+    findings["provider"] = provider
+    findings["model"] = model_id or "default"
 
     return findings
-
 
 
 _SEVERITY_MAP = {
@@ -460,28 +483,33 @@ def _normalize_cisco_results(server_id: str, results: list) -> Dict[str, Any]:
         for analyzer_name, sec_findings in (result.findings_by_analyzer or {}).items():
             for f in sec_findings:
                 raw_sev = str(getattr(f, "severity", "UNKNOWN")).upper()
-                mapped  = _SEVERITY_MAP.get(raw_sev, "LOW")
+                mapped = _SEVERITY_MAP.get(raw_sev, "LOW")
 
-                if _OVERALL_ORDER[mapped] > _OVERALL_ORDER[tool_risk]: tool_risk = mapped
-                if _OVERALL_ORDER[mapped] > _OVERALL_ORDER[worst]: worst = mapped
+                if _OVERALL_ORDER[mapped] > _OVERALL_ORDER[tool_risk]:
+                    tool_risk = mapped
+                if _OVERALL_ORDER[mapped] > _OVERALL_ORDER[worst]:
+                    worst = mapped
 
                 finding_lines.append(f"[{analyzer_name}] {getattr(f, 'summary', '') or ''}")
 
                 cat = getattr(f, "threat_category", None)
-                if cat: risk_tags.append(str(cat))
+                if cat:
+                    risk_tags.append(str(cat))
 
-        tool_findings.append({
-            "name": result.tool_name,
-            "risk_level": tool_risk,
-            "risk_tags": list(dict.fromkeys(risk_tags)),
-            "finding": " | ".join(finding_lines) or "No issues found",
-            "exploitation_scenario": "",
-            "remediation": "",
-            "is_safe": getattr(result, "is_safe", tool_risk == "NONE"),
-            "analyzer_status": getattr(result, "status", ""),
-        })
+        tool_findings.append(
+            {
+                "name": result.tool_name,
+                "risk_level": tool_risk,
+                "risk_tags": list(dict.fromkeys(risk_tags)),
+                "finding": " | ".join(finding_lines) or "No issues found",
+                "exploitation_scenario": "",
+                "remediation": "",
+                "is_safe": getattr(result, "is_safe", tool_risk == "NONE"),
+                "analyzer_status": getattr(result, "status", ""),
+            }
+        )
 
-    high_count   = sum(1 for t in tool_findings if t["risk_level"] == "HIGH")
+    high_count = sum(1 for t in tool_findings if t["risk_level"] == "HIGH")
     medium_count = sum(1 for t in tool_findings if t["risk_level"] == "MEDIUM")
 
     summary = (
@@ -508,9 +536,11 @@ def _select_cisco_analyzers(cisco_api_key: Optional[str]) -> list:
     analyzers = [AnalyzerEnum.YARA, AnalyzerEnum.READINESS]
 
     llm_key = os.environ.get("MCP_SCANNER_LLM_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    if llm_key: analyzers += [AnalyzerEnum.LLM, AnalyzerEnum.BEHAVIORAL]
+    if llm_key:
+        analyzers += [AnalyzerEnum.LLM, AnalyzerEnum.BEHAVIORAL]
 
-    if cisco_api_key or os.environ.get("MCP_SCANNER_API_KEY"): analyzers.append(AnalyzerEnum.API)
+    if cisco_api_key or os.environ.get("MCP_SCANNER_API_KEY"):
+        analyzers.append(AnalyzerEnum.API)
 
     return analyzers
 
@@ -521,20 +551,22 @@ async def run_cisco_scan(
     cisco_api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Run Cisco MCP Scanner against a live server.
+        Run Cisco MCP Scanner against a live server.
 
-Engines used (based on available credentials):
-        - YARA rules        - always, fully offline
-      - Readiness checks  - always, fully offline
-      - LLM analysis      - if MCP_SCANNER_LLM_API_KEY or OPENAI_API_KEY is set
-      - Behavioral (AST)  - same as LLM
-      - Cisco ML engine   - if cisco_api_key or MCP_SCANNER_API_KEY is set
+    Engines used (based on available credentials):
+            - YARA rules        - always, fully offline
+          - Readiness checks  - always, fully offline
+          - LLM analysis      - if MCP_SCANNER_LLM_API_KEY or OPENAI_API_KEY is set
+          - Behavioral (AST)  - same as LLM
+          - Cisco ML engine   - if cisco_api_key or MCP_SCANNER_API_KEY is set
 
-    cisco_api_key: Cisco AI Defense API key (optional - enables the cloud ML engine)
-    LLM key for Cisco's internal analysis: set MCP_SCANNER_LLM_API_KEY env var
+        cisco_api_key: Cisco AI Defense API key (optional - enables the cloud ML engine)
+        LLM key for Cisco's internal analysis: set MCP_SCANNER_LLM_API_KEY env var
     """
-    try: from mcpscanner import Config, Scanner
-    except ImportError: raise ImportError("Run: pip install cisco-ai-mcp-scanner")
+    try:
+        from mcpscanner import Config, Scanner
+    except ImportError:
+        raise ImportError("Run: pip install cisco-ai-mcp-scanner")
 
     key = cisco_api_key or os.environ.get("MCP_SCANNER_API_KEY") or ""
     config = Config(api_key=key)
@@ -545,6 +577,7 @@ Engines used (based on available credentials):
 
     if transport == "stdio":
         from mcp import StdioServerParameters
+
         params = StdioServerParameters(
             command=server_config["command"],
             args=server_config.get("args") or [],
@@ -559,41 +592,43 @@ Engines used (based on available credentials):
             headers=headers or None,
             analyzers=analyzers,
         )
-    else: raise ValueError(f"Unsupported transport '{transport}' for Cisco scanner.")
+    else:
+        raise ValueError(f"Unsupported transport '{transport}' for Cisco scanner.")
 
     return _normalize_cisco_results(server_id, results)
 
 
-
 _SNYK_CODES: Dict[str, tuple] = {
-    "E001": ("HIGH",   "prompt_injection"),
-    "E002": ("HIGH",   "tool_shadowing"),
-    "E004": ("HIGH",   "prompt_injection_skill"),
-    "E005": ("HIGH",   "suspicious_download_url"),
-    "E006": ("HIGH",   "malicious_code_pattern"),
-    "W001": ("LOW",    "suspicious_words"),
-    "W007": ("HIGH",   "insecure_credential_handling"),
-    "W008": ("HIGH",   "hardcoded_secrets"),
+    "E001": ("HIGH", "prompt_injection"),
+    "E002": ("HIGH", "tool_shadowing"),
+    "E004": ("HIGH", "prompt_injection_skill"),
+    "E005": ("HIGH", "suspicious_download_url"),
+    "E006": ("HIGH", "malicious_code_pattern"),
+    "W001": ("LOW", "suspicious_words"),
+    "W007": ("HIGH", "insecure_credential_handling"),
+    "W008": ("HIGH", "hardcoded_secrets"),
     "W009": ("MEDIUM", "direct_financial_execution"),
     "W011": ("MEDIUM", "untrusted_third_party_content"),
-    "W012": ("HIGH",   "unverifiable_external_dependency"),
+    "W012": ("HIGH", "unverifiable_external_dependency"),
     "W013": ("MEDIUM", "system_service_modification"),
-    "W014": ("LOW",    "missing_skill_md"),
+    "W014": ("LOW", "missing_skill_md"),
     "W015": ("MEDIUM", "untrusted_content"),
-    "W016": ("LOW",    "potential_untrusted_content"),
+    "W016": ("LOW", "potential_untrusted_content"),
     "W017": ("MEDIUM", "sensitive_data_exposure"),
-    "W018": ("LOW",    "workspace_data_exposure"),
+    "W018": ("LOW", "workspace_data_exposure"),
     "W019": ("MEDIUM", "destructive_capabilities"),
-    "W020": ("LOW",    "local_destructive_capabilities"),
+    "W020": ("LOW", "local_destructive_capabilities"),
 }
 
 _SNYK_SEVERITY_ORDER = {"HIGH": 3, "MEDIUM": 2, "LOW": 1, "NONE": 0}
 
 
-def _snyk_severity(code: str) -> str: return _SNYK_CODES.get(code, ("LOW", "unknown"))[0]
+def _snyk_severity(code: str) -> str:
+    return _SNYK_CODES.get(code, ("LOW", "unknown"))[0]
 
 
-def _snyk_tag(code: str) -> str: return _SNYK_CODES.get(code, ("LOW", code.lower()))[1]
+def _snyk_tag(code: str) -> str:
+    return _SNYK_CODES.get(code, ("LOW", code.lower()))[1]
 
 
 def _build_snyk_config(server_id: str, server_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -604,15 +639,19 @@ def _build_snyk_config(server_id: str, server_config: Dict[str, Any]) -> Dict[st
     if transport == "stdio":
         entry["type"] = "stdio"
         entry["command"] = server_config["command"]
-        if server_config.get("args"): entry["args"] = server_config["args"]
-        if server_config.get("env"): entry["env"] = server_config["env"]
+        if server_config.get("args"):
+            entry["args"] = server_config["args"]
+        if server_config.get("env"):
+            entry["env"] = server_config["env"]
 
     elif transport in ("sse", "streamable_http"):
         entry["url"] = server_config["url"]
-        if server_config.get("headers"): entry["headers"] = server_config["headers"]
+        if server_config.get("headers"):
+            entry["headers"] = server_config["headers"]
         entry["type"] = "sse" if transport == "sse" else "http"
 
-    else: raise ValueError(f"Unsupported transport '{transport}' for Snyk scanner.")
+    else:
+        raise ValueError(f"Unsupported transport '{transport}' for Snyk scanner.")
 
     return {"mcpServers": {server_id: entry}}
 
@@ -629,13 +668,14 @@ def _normalize_snyk_results(
     if config_path not in raw and normalized not in raw:
         _log.warning(
             "snyk-agent-scan output key %r not found (available: %s) - results may be misattributed",
-            config_path, list(raw.keys())[:3],
+            config_path,
+            list(raw.keys())[:3],
         )
     path_data = raw.get(config_path) or raw.get(normalized) or {}
 
     top_error = path_data.get("error")
-    servers   = path_data.get("servers", [])
-    issues    = path_data.get("issues", [])
+    servers = path_data.get("servers", [])
+    issues = path_data.get("issues", [])
 
     tool_names: List[str] = []
     if servers:
@@ -647,19 +687,21 @@ def _normalize_snyk_results(
     worst = "NONE"
 
     for issue in issues:
-        code      = issue.get("code", "")
-        message   = issue.get("message", "")
+        code = issue.get("code", "")
+        message = issue.get("message", "")
         reference = issue.get("reference") or []
 
         severity = _snyk_severity(code)
-        tag      = _snyk_tag(code)
+        tag = _snyk_tag(code)
 
-        if _SNYK_SEVERITY_ORDER[severity] > _SNYK_SEVERITY_ORDER[worst]: worst = severity
+        if _SNYK_SEVERITY_ORDER[severity] > _SNYK_SEVERITY_ORDER[worst]:
+            worst = severity
 
         tool_name: Optional[str] = None
         if len(reference) >= 2:
             idx = reference[1]
-            if isinstance(idx, int) and 0 <= idx < len(tool_names): tool_name = tool_names[idx]
+            if isinstance(idx, int) and 0 <= idx < len(tool_names):
+                tool_name = tool_names[idx]
 
         if tool_name:
             if tool_name not in tool_map:
@@ -668,43 +710,46 @@ def _normalize_snyk_results(
                     "risk_level": "NONE",
                     "risk_tags": [],
                     "finding": "",
-                    "exploitation_scenario":"",
+                    "exploitation_scenario": "",
                     "remediation": "",
                 }
             entry = tool_map[tool_name]
-            if _SNYK_SEVERITY_ORDER[severity] > _SNYK_SEVERITY_ORDER[entry["risk_level"]]: entry["risk_level"] = severity
-            if tag not in entry["risk_tags"]: entry["risk_tags"].append(tag)
+            if _SNYK_SEVERITY_ORDER[severity] > _SNYK_SEVERITY_ORDER[entry["risk_level"]]:
+                entry["risk_level"] = severity
+            if tag not in entry["risk_tags"]:
+                entry["risk_tags"].append(tag)
             prefix = f"[{code}] "
             entry["finding"] += ("" if not entry["finding"] else " | ") + prefix + message
-        else: server_level_risks.append(f"[{code}] {message}")
+        else:
+            server_level_risks.append(f"[{code}] {message}")
 
     all_findings = list(tool_map.values())
     found = {t["name"] for t in all_findings}
     for name in tool_names:
         if name not in found:
-            all_findings.append({
-                "name": name,
-                "risk_level": "NONE",
-                "risk_tags": [],
-                "finding": "No issues found",
-                "exploitation_scenario": "",
-                "remediation": "",
-            })
+            all_findings.append(
+                {
+                    "name": name,
+                    "risk_level": "NONE",
+                    "risk_tags": [],
+                    "finding": "No issues found",
+                    "exploitation_scenario": "",
+                    "remediation": "",
+                }
+            )
 
     if top_error:
         err_msg = top_error.get("message") if isinstance(top_error, dict) else str(top_error)
         server_level_risks.insert(0, f"[scan_error] {err_msg}")
 
-    high   = sum(1 for t in all_findings if t["risk_level"] == "HIGH")
+    high = sum(1 for t in all_findings if t["risk_level"] == "HIGH")
     medium = sum(1 for t in all_findings if t["risk_level"] == "MEDIUM")
 
     return {
         "server_id": server_id,
         "overall_risk_level": worst,
-"summary":
-            (
-            f"Snyk agent-scan: {high} HIGH, {medium} MEDIUM risk across "
-            f"{len(all_findings)} tool(s). Overall: {worst}."
+        "summary": (
+            f"Snyk agent-scan: {high} HIGH, {medium} MEDIUM risk across {len(all_findings)} tool(s). Overall: {worst}."
         ),
         "tool_findings": all_findings,
         "server_level_risks": server_level_risks,
@@ -720,17 +765,17 @@ async def run_snyk_scan(
     timeout: int = 120,
 ) -> Dict[str, Any]:
     """
-    Run Snyk agent-scan against a server via subprocess.
+        Run Snyk agent-scan against a server via subprocess.
 
-    Detects: prompt injection (E001), tool shadowing (E002), toxic data flows,
-    hardcoded secrets, insecure credential handling, malicious skill patterns.
+        Detects: prompt injection (E001), tool shadowing (E002), toxic data flows,
+        hardcoded secrets, insecure credential handling, malicious skill patterns.
 
-snyk_token:
-        Snyk API token - required for prompt-injection (E001) detection,
-                optional for structural/offline checks.
-                Falls back to SNYK_TOKEN env var.
+    snyk_token:
+            Snyk API token - required for prompt-injection (E001) detection,
+                    optional for structural/offline checks.
+                    Falls back to SNYK_TOKEN env var.
 
-    Invocation priority: snyk-agent-scan -> uvx snyk-agent-scan@latest
+        Invocation priority: snyk-agent-scan -> uvx snyk-agent-scan@latest
     """
     config = _build_snyk_config(server_id, server_config)
 
@@ -740,14 +785,17 @@ snyk_token:
         tmpdir = tempfile.mkdtemp(prefix="mcp_wrapper_snyk_")
         if os.name == "nt":
             try:
-                import getpass, subprocess as _sp
+                import getpass
+                import subprocess as _sp
+
                 _sp.run(
-                    ["icacls", tmpdir, "/inheritance:r", "/grant:r",
-                     f"{getpass.getuser()}:(OI)(CI)F"],
-                    check=False, capture_output=True,
+                    ["icacls", tmpdir, "/inheritance:r", "/grant:r", f"{getpass.getuser()}:(OI)(CI)F"],
+                    check=False,
+                    capture_output=True,
                 )
             except Exception:
                 import logging as _log_snyk
+
                 _log_snyk.getLogger(__name__).warning(
                     "run_snyk_scan: could not restrict temp dir permissions on Windows"
                 )
@@ -765,11 +813,28 @@ snyk_token:
         except OSError:
             pass
 
-        env = {k: v for k, v in os.environ.items() if k in (
-            "PATH", "HOME", "TEMP", "TMP", "SYSTEMROOT", "COMSPEC",
-            "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA",
-            "USERNAME", "USER", "LOGNAME", "LNAME",
-        )}
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k
+            in (
+                "PATH",
+                "HOME",
+                "TEMP",
+                "TMP",
+                "SYSTEMROOT",
+                "COMSPEC",
+                "USERPROFILE",
+                "HOMEDRIVE",
+                "HOMEPATH",
+                "APPDATA",
+                "LOCALAPPDATA",
+                "USERNAME",
+                "USER",
+                "LOGNAME",
+                "LNAME",
+            )
+        }
         token = snyk_token or os.environ.get("SNYK_TOKEN")
         if not token:
             raise ValueError(

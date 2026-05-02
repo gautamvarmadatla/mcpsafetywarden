@@ -10,8 +10,11 @@ from typing import Any, Dict, List, Optional
 
 from ..core import database as _db
 from . import store
-from ._constants import EXTERNAL_EFFECTS as _EXTERNAL_EFFECTS, READ_EFFECTS as _READ_EFFECTS, RISK_TAG_TO_MITRE as _RISK_TAG_TO_MITRE
-from . import provenance as _provenance
+from ._constants import (
+    EXTERNAL_EFFECTS as _EXTERNAL_EFFECTS,
+    READ_EFFECTS as _READ_EFFECTS,
+    RISK_TAG_TO_MITRE as _RISK_TAG_TO_MITRE,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -50,9 +53,7 @@ def explain_tool_risk(server_id: str, tool_name: str) -> Dict[str, Any]:
     tool_id = f"{server_id}::{tool_name}"
     tool_obj = store.get_object(tool_id)
     if tool_obj is None:
-        return {
-            "error": f"Tool '{tool_name}' not found in graph. Call get_risk_graph with rebuild=true first."
-        }
+        return {"error": f"Tool '{tool_name}' not found in graph. Call get_risk_graph with rebuild=true first."}
 
     tool_meta = tool_obj.get("metadata", {})
     effect_class = tool_meta.get("effect_class", "unknown")
@@ -84,10 +85,7 @@ def explain_tool_risk(server_id: str, tool_name: str) -> Dict[str, Any]:
             entry["confidence"] = fmeta["confidence"]
         findings.append(entry)
 
-    has_cred_surface = any(
-        r["relation"] == "uses_credential"
-        for r in store.get_relations_from(server_id)
-    )
+    has_cred_surface = any(r["relation"] == "uses_credential" for r in store.get_relations_from(server_id))
 
     sibling_tools = _load_sibling_tools(server_id)
     external_tool_count = sum(1 for t in sibling_tools if t.get("effect_class") in _EXTERNAL_EFFECTS)
@@ -103,17 +101,18 @@ def explain_tool_risk(server_id: str, tool_name: str) -> Dict[str, Any]:
             ext_name = ext_obj["name"]
             ext_policy = _db.get_tool_policy(server_id, ext_name)
             is_mitigated = ext_policy == "block"
-            composition_risks.append({
-                "read_tool": tool_name,
-                "external_tool": ext_name,
-                "description": (
-                    f"'{tool_name}' (read) + '{ext_name}' (external_action) = "
-                    f"potential data exfiltration path"
-                ),
-                "mitigated": is_mitigated,
-                "mitigation_note": f"'{ext_name}' is blocked by policy" if is_mitigated else None,
-                "mitre_technique": "T1041",
-            })
+            composition_risks.append(
+                {
+                    "read_tool": tool_name,
+                    "external_tool": ext_name,
+                    "description": (
+                        f"'{tool_name}' (read) + '{ext_name}' (external_action) = potential data exfiltration path"
+                    ),
+                    "mitigated": is_mitigated,
+                    "mitigation_note": f"'{ext_name}' is blocked by policy" if is_mitigated else None,
+                    "mitre_technique": "T1041",
+                }
+            )
     elif effect_class in _EXTERNAL_EFFECTS:
         for rel in store.get_relations_to(tool_id):
             if rel["relation"] != "can_exfiltrate":
@@ -130,17 +129,18 @@ def explain_tool_risk(server_id: str, tool_name: str) -> Dict[str, Any]:
                 mitigation_note = f"'{tool_name}' is blocked by policy"
             else:
                 mitigation_note = None
-            composition_risks.append({
-                "read_tool": src_name,
-                "external_tool": tool_name,
-                "description": (
-                    f"'{src_name}' (read) + '{tool_name}' (external_action) = "
-                    f"potential data exfiltration path"
-                ),
-                "mitigated": is_mitigated,
-                "mitigation_note": mitigation_note,
-                "mitre_technique": "T1041",
-            })
+            composition_risks.append(
+                {
+                    "read_tool": src_name,
+                    "external_tool": tool_name,
+                    "description": (
+                        f"'{src_name}' (read) + '{tool_name}' (external_action) = potential data exfiltration path"
+                    ),
+                    "mitigated": is_mitigated,
+                    "mitigation_note": mitigation_note,
+                    "mitre_technique": "T1041",
+                }
+            )
 
     live_risks = [c for c in composition_risks if not c["mitigated"]]
     mitigated_risks = [c for c in composition_risks if c["mitigated"]]
@@ -189,18 +189,17 @@ def explain_tool_risk(server_id: str, tool_name: str) -> Dict[str, Any]:
     for cr in live_risks:
         risk_paths.append(f"[EXFIL] {cr['description']} (MITRE: T1041)")
     if not scan_exists and has_cred_surface:
-        risk_paths.append(
-            "[UNSCANNED] Server has credential surfaces but no security scan has been run"
-        )
+        risk_paths.append("[UNSCANNED] Server has credential surfaces but no security scan has been run")
 
     prov_obj = store.get_object(f"provenance::{server_id}")
     provenance_info: Optional[Dict[str, Any]] = prov_obj.get("metadata") if prov_obj else None
 
-    interaction_risks = _detect_interaction_risks(server_id, agent_clients, scan_exists, sibling_tools, has_cred_surface, provenance_info)
+    interaction_risks = _detect_interaction_risks(
+        server_id, agent_clients, scan_exists, sibling_tools, has_cred_surface, provenance_info
+    )
 
     schema_tampered = any(
-        "tool_poisoning" in f.get("risk_tags", [])
-        and f.get("finding", "").startswith("schema_tampered")
+        "tool_poisoning" in f.get("risk_tags", []) and f.get("finding", "").startswith("schema_tampered")
         for f in findings
     )
 
@@ -293,156 +292,173 @@ def _detect_interaction_risks(
     read_tools = [t["name"] for t in sibling_tools if t.get("effect_class") in _READ_EFFECTS]
 
     if len(agent_clients) >= 2:
-        risks.append(InteractionRisk(
-            pattern="shared_server",
-            agents=agent_clients,
-            risk_score=round(5.0 + min(len(agent_clients) * _MULTI_AGENT_AMPLIFIER, 2.0), 1),
-            description=(
-                f"Server '{server_id}' is configured across {len(agent_clients)} agent clients "
-                f"({', '.join(agent_clients)}). A compromise affects all of them simultaneously."
-            ),
-            owasp_agentic_tag=_OWASP_SHARED_RESOURCE,
-            mitre_tags=["T1078"],
-        ))
+        risks.append(
+            InteractionRisk(
+                pattern="shared_server",
+                agents=agent_clients,
+                risk_score=round(5.0 + min(len(agent_clients) * _MULTI_AGENT_AMPLIFIER, 2.0), 1),
+                description=(
+                    f"Server '{server_id}' is configured across {len(agent_clients)} agent clients "
+                    f"({', '.join(agent_clients)}). A compromise affects all of them simultaneously."
+                ),
+                owasp_agentic_tag=_OWASP_SHARED_RESOURCE,
+                mitre_tags=["T1078"],
+            )
+        )
 
     if external_tools and len(agent_clients) >= 2:
-        risks.append(InteractionRisk(
-            pattern="tool_overlap_execute",
-            agents=agent_clients,
-            risk_score=round(6.5 + min(len(agent_clients) * _MULTI_AGENT_AMPLIFIER, 2.0), 1),
-            description=(
-                f"External/destructive tools {external_tools[:3]} on '{server_id}' are "
-                f"accessible from {len(agent_clients)} agent clients. Any client can trigger "
-                f"side effects that affect the others' shared environment."
-            ),
-            owasp_agentic_tag=_OWASP_SHARED_RESOURCE,
-            mitre_tags=["T1059", "T1041"],
-        ))
+        risks.append(
+            InteractionRisk(
+                pattern="tool_overlap_execute",
+                agents=agent_clients,
+                risk_score=round(6.5 + min(len(agent_clients) * _MULTI_AGENT_AMPLIFIER, 2.0), 1),
+                description=(
+                    f"External/destructive tools {external_tools[:3]} on '{server_id}' are "
+                    f"accessible from {len(agent_clients)} agent clients. Any client can trigger "
+                    f"side effects that affect the others' shared environment."
+                ),
+                owasp_agentic_tag=_OWASP_SHARED_RESOURCE,
+                mitre_tags=["T1059", "T1041"],
+            )
+        )
 
     if has_cred_surface and not scan_exists:
-        risks.append(InteractionRisk(
-            pattern="unscanned_credentials",
-            agents=agent_clients,
-            risk_score=6.0,
-            description=(
-                f"Server '{server_id}' exposes credential surfaces but has never been "
-                f"security-scanned. Credential leak risk is unquantified - no scan does not mean clean."
-            ),
-            owasp_agentic_tag=_OWASP_UNSCANNED,
-            mitre_tags=["T1078"],
-        ))
+        risks.append(
+            InteractionRisk(
+                pattern="unscanned_credentials",
+                agents=agent_clients,
+                risk_score=6.0,
+                description=(
+                    f"Server '{server_id}' exposes credential surfaces but has never been "
+                    f"security-scanned. Credential leak risk is unquantified - no scan does not mean clean."
+                ),
+                owasp_agentic_tag=_OWASP_UNSCANNED,
+                mitre_tags=["T1078"],
+            )
+        )
 
     if read_tools and external_tools:
         unblocked_external = [t for t in external_tools if _db.get_tool_policy(server_id, t) != "block"]
         if unblocked_external:
-            client_note = (
-                f" Accessible from {len(agent_clients)} agent client(s)." if agent_clients else ""
+            client_note = f" Accessible from {len(agent_clients)} agent client(s)." if agent_clients else ""
+            risks.append(
+                InteractionRisk(
+                    pattern="scope_mismatch",
+                    agents=agent_clients,
+                    risk_score=5.5,
+                    description=(
+                        f"Server '{server_id}' has {len(read_tools)} read tool(s) and "
+                        f"{len(unblocked_external)} unblocked external/destructive tool(s) with no "
+                        f"separating policy.{client_note} Set block on {unblocked_external[:3]} to "
+                        f"eliminate exfiltration composition paths."
+                    ),
+                    owasp_agentic_tag=_OWASP_SHARED_RESOURCE,
+                    mitre_tags=["T1041"],
+                )
             )
-            risks.append(InteractionRisk(
-                pattern="scope_mismatch",
-                agents=agent_clients,
-                risk_score=5.5,
-                description=(
-                    f"Server '{server_id}' has {len(read_tools)} read tool(s) and "
-                    f"{len(unblocked_external)} unblocked external/destructive tool(s) with no "
-                    f"separating policy.{client_note} Set block on {unblocked_external[:3]} to "
-                    f"eliminate exfiltration composition paths."
-                ),
-                owasp_agentic_tag=_OWASP_SHARED_RESOURCE,
-                mitre_tags=["T1041"],
-            ))
         else:
-            risks.append(InteractionRisk(
-                pattern="scope_mismatch",
-                agents=agent_clients,
-                risk_score=1.0,
-                description="Server has read and external tools but all external tools are blocked by policy.",
-                mitigated=True,
-            ))
+            risks.append(
+                InteractionRisk(
+                    pattern="scope_mismatch",
+                    agents=agent_clients,
+                    risk_score=1.0,
+                    description="Server has read and external tools but all external tools are blocked by policy.",
+                    mitigated=True,
+                )
+            )
 
     if prov_info:
         if store.get_object(f"finding::cert_changed::{server_id}"):
-            risks.append(InteractionRisk(
-                pattern="cert_changed",
-                agents=agent_clients,
-                risk_score=8.0,
-                description=(
-                    f"TLS certificate for '{server_id}' changed since last inspection. "
-                    f"Possible MITM, subdomain takeover, or unauthorized operator change."
-                ),
-                mitre_tags=["T1557", "T1195"],
-            ))
+            risks.append(
+                InteractionRisk(
+                    pattern="cert_changed",
+                    agents=agent_clients,
+                    risk_score=8.0,
+                    description=(
+                        f"TLS certificate for '{server_id}' changed since last inspection. "
+                        f"Possible MITM, subdomain takeover, or unauthorized operator change."
+                    ),
+                    mitre_tags=["T1557", "T1195"],
+                )
+            )
 
         if store.get_object(f"finding::dns_changed::{server_id}"):
-            risks.append(InteractionRisk(
-                pattern="dns_changed",
-                agents=agent_clients,
-                risk_score=7.5,
-                description=(
-                    f"DNS resolution for '{server_id}' changed since last inspection. "
-                    f"Possible DNS hijacking or BGP reroute to attacker-controlled infrastructure."
-                ),
-                mitre_tags=["T1584", "T1195"],
-            ))
+            risks.append(
+                InteractionRisk(
+                    pattern="dns_changed",
+                    agents=agent_clients,
+                    risk_score=7.5,
+                    description=(
+                        f"DNS resolution for '{server_id}' changed since last inspection. "
+                        f"Possible DNS hijacking or BGP reroute to attacker-controlled infrastructure."
+                    ),
+                    mitre_tags=["T1584", "T1195"],
+                )
+            )
 
         private_ips = prov_info.get("private_ips") or []
         if private_ips:
-            risks.append(InteractionRisk(
-                pattern="private_ip_access",
-                agents=agent_clients,
-                risk_score=6.5,
-                description=(
-                    f"Server '{server_id}' resolves to private/internal IPs {private_ips[:3]}. "
-                    f"DNS rebinding could redirect agent traffic to internal services."
-                ),
-                mitre_tags=["T1090", "T1557"],
-            ))
+            risks.append(
+                InteractionRisk(
+                    pattern="private_ip_access",
+                    agents=agent_clients,
+                    risk_score=6.5,
+                    description=(
+                        f"Server '{server_id}' resolves to private/internal IPs {private_ips[:3]}. "
+                        f"DNS rebinding could redirect agent traffic to internal services."
+                    ),
+                    mitre_tags=["T1090", "T1557"],
+                )
+            )
 
         attest = prov_info.get("attestation") or {}
         ecosystem = prov_info.get("ecosystem", "unresolvable")
-        if (
-            ecosystem not in ("unresolvable", "")
-            and attest.get("attestation_status") == "absent"
-        ):
-            risks.append(InteractionRisk(
-                pattern="no_attestation",
-                agents=agent_clients,
-                risk_score=4.0,
-                description=(
-                    f"Package '{prov_info.get('package_name')}' ({ecosystem}) has no "
-                    f"cryptographic provenance attestation on the registry. "
-                    f"Supply chain tampering cannot be ruled out."
-                ),
-                mitre_tags=["T1195"],
-            ))
+        if ecosystem not in ("unresolvable", "") and attest.get("attestation_status") == "absent":
+            risks.append(
+                InteractionRisk(
+                    pattern="no_attestation",
+                    agents=agent_clients,
+                    risk_score=4.0,
+                    description=(
+                        f"Package '{prov_info.get('package_name')}' ({ecosystem}) has no "
+                        f"cryptographic provenance attestation on the registry. "
+                        f"Supply chain tampering cannot be ruled out."
+                    ),
+                    mitre_tags=["T1195"],
+                )
+            )
 
         squats = prov_info.get("typosquatting_suspects") or []
         if squats:
-            risks.append(InteractionRisk(
-                pattern="typosquatting_risk",
-                agents=agent_clients,
-                risk_score=7.0,
-                description=(
-                    f"Package name '{prov_info.get('package_name')}' is suspiciously similar "
-                    f"to known package(s): {squats[:3]}. Possible typosquatting attack."
-                ),
-                mitre_tags=["T1195", "T1036"],
-            ))
+            risks.append(
+                InteractionRisk(
+                    pattern="typosquatting_risk",
+                    agents=agent_clients,
+                    risk_score=7.0,
+                    description=(
+                        f"Package name '{prov_info.get('package_name')}' is suspiciously similar "
+                        f"to known package(s): {squats[:3]}. Possible typosquatting attack."
+                    ),
+                    mitre_tags=["T1195", "T1036"],
+                )
+            )
 
         dep_squats = prov_info.get("dependency_typosquatting") or []
         if dep_squats:
             examples = [d["dependency"] for d in dep_squats[:3]]
-            risks.append(InteractionRisk(
-                pattern="dependency_typosquatting",
-                agents=agent_clients,
-                risk_score=8.5,
-                description=(
-                    f"Server '{server_id}' has {len(dep_squats)} dependency name(s) "
-                    f"suspiciously similar to well-known packages: {examples}. "
-                    f"A typosquatted dependency executes attacker code on install or import."
-                ),
-                mitre_tags=["T1195", "T1036"],
-            ))
+            risks.append(
+                InteractionRisk(
+                    pattern="dependency_typosquatting",
+                    agents=agent_clients,
+                    risk_score=8.5,
+                    description=(
+                        f"Server '{server_id}' has {len(dep_squats)} dependency name(s) "
+                        f"suspiciously similar to well-known packages: {examples}. "
+                        f"A typosquatted dependency executes attacker code on install or import."
+                    ),
+                    mitre_tags=["T1195", "T1036"],
+                )
+            )
 
         dep_cves = prov_info.get("dependency_cves") or []
         if dep_cves:
@@ -450,24 +466,24 @@ def _detect_interaction_risks(
             high = [c for c in dep_cves if c.get("severity") == "HIGH"]
             top_score = 9.5 if critical else 8.0
             examples = [f"{c['package']} {c['vuln_id']}" for c in (critical or high)[:3]]
-            risks.append(InteractionRisk(
-                pattern="known_cves",
-                agents=agent_clients,
-                risk_score=top_score,
-                description=(
-                    f"Server '{server_id}' dependencies have {len(critical)} CRITICAL and "
-                    f"{len(high)} HIGH CVEs: {examples}. Update affected packages."
-                ),
-                mitre_tags=["T1190", "T1195"],
-            ))
+            risks.append(
+                InteractionRisk(
+                    pattern="known_cves",
+                    agents=agent_clients,
+                    risk_score=top_score,
+                    description=(
+                        f"Server '{server_id}' dependencies have {len(critical)} CRITICAL and "
+                        f"{len(high)} HIGH CVEs: {examples}. Update affected packages."
+                    ),
+                    mitre_tags=["T1190", "T1195"],
+                )
+            )
 
     risks.sort(key=lambda r: r.risk_score, reverse=True)
     return risks
 
 
-def _recommended_action(
-    blast_radius: str, composite_risk_score: float, tool_policy: Optional[str]
-) -> str:
+def _recommended_action(blast_radius: str, composite_risk_score: float, tool_policy: Optional[str]) -> str:
     if tool_policy == "block":
         return "block"
     if tool_policy == "allow":
@@ -487,7 +503,9 @@ def explain_client_risk(client_id: str) -> Dict[str, Any]:
     if not server_ids:
         client_obj = store.get_object(client_id)
         if not client_obj:
-            return {"error": f"Client '{client_id}' not found. Run discover_servers or onboard_discovered_servers first."}
+            return {
+                "error": f"Client '{client_id}' not found. Run discover_servers or onboard_discovered_servers first."
+            }
         server_ids = []
 
     if len(server_ids) < 2:
@@ -556,13 +574,15 @@ def _find_cross_server_exfiltration(server_ids: List[str]) -> List[Dict[str, Any
                 meta = rel.get("metadata", {})
                 if meta.get("read_server") not in server_id_set:
                     continue
-                paths.append({
-                    "read_tool": rel["source_id"],
-                    "exfil_tool": rel["target_id"],
-                    "read_server": meta.get("read_server", sid),
-                    "exfil_server": meta.get("exfil_server", ""),
-                    "client_id": meta.get("client_id", ""),
-                })
+                paths.append(
+                    {
+                        "read_tool": rel["source_id"],
+                        "exfil_tool": rel["target_id"],
+                        "read_server": meta.get("read_server", sid),
+                        "exfil_server": meta.get("exfil_server", ""),
+                        "client_id": meta.get("client_id", ""),
+                    }
+                )
     return paths
 
 
@@ -601,11 +621,13 @@ def _aggregate_cves(client_id: str) -> List[Dict[str, Any]]:
         if not n["obj_id"].startswith(prefix):
             continue
         meta = n.get("metadata", {})
-        results.append({
-            "vuln_id": meta.get("vuln_id", n["name"]),
-            "severity": meta.get("severity", "UNKNOWN"),
-            "affected_servers": meta.get("affected_servers", []),
-        })
+        results.append(
+            {
+                "vuln_id": meta.get("vuln_id", n["name"]),
+                "severity": meta.get("severity", "UNKNOWN"),
+                "affected_servers": meta.get("affected_servers", []),
+            }
+        )
     results.sort(
         key=lambda x: {"CRITICAL": 3, "HIGH": 2, "MEDIUM": 1}.get(x.get("severity", ""), 0),
         reverse=True,
@@ -637,11 +659,11 @@ def export_as_mermaid(server_id: Optional[str] = None) -> str:
     graph = store.get_full_graph(server_id)
 
     _SERVER_RISK_STYLES: Dict[str, str] = {
-        "HIGH":     "fill:#D0021B,color:#fff",
+        "HIGH": "fill:#D0021B,color:#fff",
         "CRITICAL": "fill:#7B0000,color:#fff",
-        "MEDIUM":   "fill:#F5A623,color:#fff",
-        "LOW":      "fill:#4A90E2,color:#fff",
-        "NONE":     "fill:#4A90E2,color:#fff",
+        "MEDIUM": "fill:#F5A623,color:#fff",
+        "LOW": "fill:#4A90E2,color:#fff",
+        "NONE": "fill:#4A90E2,color:#fff",
     }
 
     type_styles: Dict[str, str] = {
@@ -669,10 +691,21 @@ def export_as_mermaid(server_id: Optional[str] = None) -> str:
     }
 
     def _clean(s: str) -> str:
-        return s.replace("\n", " ").replace("\r", "").replace('"', "'").replace("[", "(").replace("]", ")").replace("{", "(").replace("}", ")").replace("#", "-").replace("|", "-")
+        return (
+            s.replace("\n", " ")
+            .replace("\r", "")
+            .replace('"', "'")
+            .replace("[", "(")
+            .replace("]", ")")
+            .replace("{", "(")
+            .replace("}", ")")
+            .replace("#", "-")
+            .replace("|", "-")
+        )
 
     skip_ids = {
-        obj["obj_id"] for obj in graph["objects"]
+        obj["obj_id"]
+        for obj in graph["objects"]
         if obj["obj_type"] == "package_provenance" and obj.get("name") == "unresolvable"
     }
 
@@ -727,9 +760,7 @@ def export_as_mermaid(server_id: Optional[str] = None) -> str:
 
 def export_as_png(server_id: Optional[str] = None, output_path: Optional[str] = None) -> str:
     if not shutil.which("mmdc"):
-        raise RuntimeError(
-            "mmdc not found. Install it with: npm install -g @mermaid-js/mermaid-cli"
-        )
+        raise RuntimeError("mmdc not found. Install it with: npm install -g @mermaid-js/mermaid-cli")
     diagram = export_as_mermaid(server_id)
     if output_path is None:
         stem = server_id or "graph"

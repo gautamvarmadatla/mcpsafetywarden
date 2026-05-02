@@ -6,6 +6,7 @@ explicitly document (with xfail markers) what the current system MISSES.
 
 Run with: pytest tests/test_redteam.py -v
 """
+
 import json
 import sys
 import uuid
@@ -37,6 +38,7 @@ def _register(server_id: str) -> None:
 async def _inspect_tools(server_id: str) -> list:
     """Inspect and return tools in run_deterministic_scan-compatible format."""
     from mcpsafetywarden.proxy.client import inspect_server_tools
+
     await inspect_server_tools(server_id)
     db_tools = db.list_tools(server_id)
     return [
@@ -53,6 +55,7 @@ async def _inspect_tools(server_id: str) -> list:
 async def _full_inspect(server_id: str) -> dict:
     """Full inspect via server pipeline - builds graph, composition edges."""
     from mcpsafetywarden.server import inspect_server
+
     return json.loads(await inspect_server(server_id))
 
 
@@ -88,10 +91,7 @@ class TestDeterministicDetection:
         tools = await _inspect_tools(sid)
         result = run_deterministic_scan(sid, tools)
         flagged = {f["name"]: f for f in result.get("tool_findings", [])}
-        risky = {
-            name for name, f in flagged.items()
-            if "parameter" in f.get("finding", "").lower()
-        }
+        risky = {name for name, f in flagged.items() if "parameter" in f.get("finding", "").lower()}
         assert risky & {"exec_command", "send_to_webhook", "read_workspace_file", "hidden_exfil"}, (
             f"No risky-param tools flagged; got flags on: {set(flagged.keys())}"
         )
@@ -103,8 +103,7 @@ class TestDeterministicDetection:
         result = run_deterministic_scan(sid, tools)
         flagged = {f["name"]: f for f in result.get("tool_findings", [])}
         assert "hidden_exfil" in flagged, (
-            "hidden_exfil 'destination' param not flagged - "
-            "_RISKY_PARAM_RE must include 'destination'"
+            "hidden_exfil 'destination' param not flagged - _RISKY_PARAM_RE must include 'destination'"
         )
 
     async def test_safe_cleanup_caught_via_risky_param(self):
@@ -113,9 +112,7 @@ class TestDeterministicDetection:
         tools = await _inspect_tools(sid)
         result = run_deterministic_scan(sid, tools)
         flagged = {f["name"]: f for f in result.get("tool_findings", [])}
-        assert "safe_cleanup" in flagged, (
-            "safe_cleanup not flagged - 'directory' param should match _RISKY_PARAM_RE"
-        )
+        assert "safe_cleanup" in flagged, "safe_cleanup not flagged - 'directory' param should match _RISKY_PARAM_RE"
         assert "parameter" in flagged["safe_cleanup"]["finding"].lower(), (
             "Expected safe_cleanup to be caught via risky 'directory' param, not name"
         )
@@ -128,25 +125,19 @@ class TestEffectClassification:
         sid = _uid()
         _register(sid)
         await _inspect_tools(sid)
-        assert _effect(sid, "send_to_webhook") == "external_action", (
-            "send_to_webhook should be external_action"
-        )
+        assert _effect(sid, "send_to_webhook") == "external_action", "send_to_webhook should be external_action"
 
     async def test_exec_command_is_external_action(self):
         sid = _uid()
         _register(sid)
         await _inspect_tools(sid)
-        assert _effect(sid, "exec_command") == "external_action", (
-            "exec_command should be external_action"
-        )
+        assert _effect(sid, "exec_command") == "external_action", "exec_command should be external_action"
 
     async def test_read_workspace_file_is_read_only(self):
         sid = _uid()
         _register(sid)
         await _inspect_tools(sid)
-        assert _effect(sid, "read_workspace_file") == "read_only", (
-            "read_workspace_file should be read_only"
-        )
+        assert _effect(sid, "read_workspace_file") == "read_only", "read_workspace_file should be read_only"
 
     @pytest.mark.xfail(reason="'clean up' not in destructive verb patterns - classifier returns additive_write")
     async def test_safe_cleanup_is_destructive(self):
@@ -181,12 +172,11 @@ class TestCompositionEdges:
         await _full_inspect(sid)
 
         from mcpsafetywarden.graph.explain import explain_tool_risk
+
         result = explain_tool_risk(sid, "read_workspace_file")
         assert "error" not in result
         composition_risks = result.get("composition_risks", [])
-        assert composition_risks, (
-            "No composition risks for read_workspace_file despite external tools on same server"
-        )
+        assert composition_risks, "No composition risks for read_workspace_file despite external tools on same server"
         external_in_paths = {r.get("external_tool") for r in composition_risks}
         assert external_in_paths & {"send_to_webhook", "exec_command"}, (
             f"Expected send_to_webhook or exec_command in paths, got: {external_in_paths}"
@@ -198,13 +188,12 @@ class TestCompositionEdges:
         await _full_inspect(sid)
 
         from mcpsafetywarden.graph.explain import explain_tool_risk
+
         result = explain_tool_risk(sid, "read_workspace_file")
         assert result.get("blast_radius") in ("critical", "high", "medium"), (
             f"Expected elevated blast radius for read+exfil server, got: {result.get('blast_radius')}"
         )
-        assert result.get("blast_radius") != "none", (
-            "blast_radius should not be 'none' when exfiltration paths exist"
-        )
+        assert result.get("blast_radius") != "none", "blast_radius should not be 'none' when exfiltration paths exist"
 
     @pytest.mark.xfail(reason="credential-harvest + exfil not scored higher than generic read + exfil")
     async def test_credential_harvest_plus_exfil_elevated(self):
@@ -213,6 +202,7 @@ class TestCompositionEdges:
         await _full_inspect(sid)
 
         from mcpsafetywarden.graph.explain import explain_tool_risk
+
         r_env = explain_tool_risk(sid, "get_env_var")
         r_read = explain_tool_risk(sid, "read_workspace_file")
         score_env = r_env.get("composite_risk_score", 0)
@@ -233,6 +223,7 @@ class TestInteractionRisks:
         await _full_inspect(sid)
 
         from mcpsafetywarden.graph.explain import explain_tool_risk
+
         result = explain_tool_risk(sid, "read_workspace_file")
         patterns = {r["pattern"] for r in result.get("interaction_risks", [])}
         assert "scope_mismatch" in patterns, (
@@ -246,6 +237,7 @@ class TestInteractionRisks:
         await _full_inspect(sid)
 
         from mcpsafetywarden.graph.explain import explain_tool_risk
+
         result = explain_tool_risk(sid, "read_workspace_file")
         for risk in result.get("interaction_risks", []):
             assert "confirmed_by" in risk, (
@@ -292,6 +284,7 @@ class TestKnownGaps:
         await _full_inspect(sid)
 
         from mcpsafetywarden.graph.explain import explain_tool_risk
+
         result = explain_tool_risk(sid, "read_workspace_file")
         for risk in result.get("interaction_risks", []):
             assert "precision_rate" in risk, (

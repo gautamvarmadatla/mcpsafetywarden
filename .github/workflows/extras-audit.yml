@@ -1,0 +1,58 @@
+name: Extras Dependency Audit
+
+on:
+  pull_request:
+    paths:
+      - pyproject.toml
+      - .github/workflows/extras-audit.yml
+  schedule:
+    - cron: "0 8 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-extras:
+    name: Audit extras (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: llm-providers
+            extras: "anthropic openai gemini"
+          - name: security-tools
+            extras: "cisco snyk"
+          - name: research-source
+            extras: "research source"
+          - name: encryption
+            extras: "encryption"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install selected extras
+        run: |
+          for extra in ${{ matrix.extras }}; do
+            pip install -e ".[$extra]" --quiet
+          done
+
+      - name: Audit with pip-audit
+        run: |
+          pip install pip-audit --quiet
+          mkdir -p audit
+          pip-audit --format json --output "audit/${{ matrix.name }}-pip-audit.json" || true
+          pip-audit --format cyclonedx-json --output "audit/${{ matrix.name }}-sbom.json" || true
+
+      - name: Upload audit artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: extras-audit-${{ matrix.name }}
+          path: audit/
+          retention-days: 30

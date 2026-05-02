@@ -1,0 +1,25 @@
+name: Dependency Submission
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  dependency-submission:
+    name: Submit dependency snapshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Submit dependency graph snapshot
+        uses: advanced-security/component-detection-dependency-submission-action@v0.1.1
+        with:
+          detectorArgs: Pip=EnableIfDefaultOff,SimplePip=EnableIfDefaultOff,Dockerfile=EnableIfDefaultOff

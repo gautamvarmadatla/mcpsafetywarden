@@ -7,6 +7,7 @@ package registry attestations (PyPI PEP 740 / npm Sigstore), detects typosquatti
 computes per-tool schema fingerprints, and for HTTP servers captures the TLS cert
 fingerprint and resolved IPs for change detection between inspections.
 """
+
 from __future__ import annotations
 
 import base64
@@ -45,84 +46,293 @@ _CMDLINE_DETECTORS: List[Tuple[str, re.Pattern, int]] = [
 
 _VERSION_SUFFIX = re.compile(r"(?<=\w)[@#][^\s]*$")
 
-_RUNTIME_BINS = frozenset({
-    "python", "python3", "python3.exe", "py", "node", "node.exe",
-    "deno", "bun", "npx", "uvx", "uv", "pipx", "pip", "pip3",
-    "sh", "bash", "zsh", "fish", "cmd", "powershell", "pwsh",
-})
+_RUNTIME_BINS = frozenset(
+    {
+        "python",
+        "python3",
+        "python3.exe",
+        "py",
+        "node",
+        "node.exe",
+        "deno",
+        "bun",
+        "npx",
+        "uvx",
+        "uv",
+        "pipx",
+        "pip",
+        "pip3",
+        "sh",
+        "bash",
+        "zsh",
+        "fish",
+        "cmd",
+        "powershell",
+        "pwsh",
+    }
+)
 
 # Well-known MCP packages frequently impersonated in typosquatting attacks
-_KNOWN_MCP_PACKAGES = frozenset({
-    "anthropic", "openai", "mcp", "fastmcp", "mcp-server", "mcp-framework",
-    "mcp-agent", "mcp-cli", "mcp-remote", "mcp-use", "mcp-installer",
-    "fast-agent-mcp", "fastapi-mcp", "modelcontextprotocol",
-    "@modelcontextprotocol/sdk",
-    "@modelcontextprotocol/server-filesystem",
-    "@modelcontextprotocol/server-github",
-    "@modelcontextprotocol/server-postgres",
-    "@modelcontextprotocol/server-slack",
-    "@modelcontextprotocol/server-everything",
-    "@modelcontextprotocol/server-git",
-    "@modelcontextprotocol/server-memory",
-    "@modelcontextprotocol/server-fetch",
-    "@modelcontextprotocol/server-time",
-    "@modelcontextprotocol/server-sqlite",
-    "@modelcontextprotocol/create-server",
-    "@playwright/mcp", "mcp-playwright", "mcp-browser",
-    "mcp-brave-search", "brave-search-mcp", "mcp-perplexity", "mcp-exa",
-    "mcp-fetch", "fetch-mcp",
-    "filesystem-mcp-server", "memory-mcp", "time-mcp", "everything-mcp",
-    "aws-mcp-server", "gcp-mcp-server", "azure-mcp-server",
-    "mcp-cloudflare", "mcp-docker", "mcp-vercel", "mcp-neon",
-    "docker-mcp", "kubernetes-mcp",
-    "postgres-mcp", "sqlite-mcp", "mysql-mcp", "mcp-mongodb",
-    "mcp-duckdb", "mcp-elasticsearch", "mcp-pinecone", "mcp-weaviate",
-    "mcp-chroma", "mcp-qdrant", "mcp-milvus", "mcp-neo4j", "mcp-redis",
-    "github-mcp-server", "mcp-github", "mcp-gitlab", "mcp-gitlab-server",
-    "mcp-sentry", "mcp-linear", "mcp-jira", "atlassian-mcp-server",
-    "slack-mcp", "mcp-slack", "gmail-mcp", "mcp-gmail", "mcp-twilio",
-    "sendgrid-mcp",
-    "mcp-notion", "mcp-figma", "mcp-obsidian", "mcp-google-drive",
-    "mcp-google-sheets", "google-drive-mcp",
-    "mcp-stripe", "mcp-hubspot", "mcp-salesforce", "mcp-paypal",
-    "mcp-pypi", "arxiv-mcp-server", "supabase-mcp",
-    "mcp-server-git", "mcp-server-fetch", "mcp-client-cli",
-    "mcp-shell-tools", "weave-mcp",
-    "openai-mcp", "openai-agents",
-    "boto3", "packaging", "urllib3", "certifi", "requests",
-    "typing-extensions", "idna", "charset-normalizer", "setuptools", "botocore",
-    "cryptography", "aiobotocore", "python-dateutil", "six", "pyyaml",
-    "cffi", "pydantic", "pygments", "click", "numpy",
-    "grpcio-status", "pycparser", "pydantic-core", "pluggy", "s3transfer",
-    "protobuf", "anyio", "attrs", "h11", "fsspec",
-    "annotated-types", "pytest", "pandas", "httpx", "iniconfig",
-    "httpcore", "s3fs", "markupsafe", "platformdirs", "python-dotenv",
-    "pip", "jinja2", "pyjwt", "jmespath", "importlib-metadata",
-    "rich", "filelock", "aiohttp", "zipp", "pathspec",
-    "wheel", "jsonschema", "markdown-it-py", "pytz", "pyasn1",
-    "multidict", "yarl", "mdurl", "googleapis-common-protos", "starlette",
-    "uvicorn", "google-auth", "rpds-py", "tzdata", "propcache",
-    "frozenlist", "referencing", "pillow", "tqdm", "google-api-core",
-    "jsonschema-specifications", "virtualenv", "aiosignal", "grpcio", "fastapi",
-    "colorama", "aiohappyeyeballs", "awscli", "greenlet", "pyasn1-modules",
-    "pyarrow", "requests-oauthlib", "wrapt", "opentelemetry-api", "scipy",
-    "tomli", "tenacity", "pyparsing", "sqlalchemy", "opentelemetry-sdk",
-    "typer", "beautifulsoup4", "websockets", "oauthlib", "soupsieve",
-    "trove-classifiers", "opentelemetry-semantic-conventions", "shellingham",
-    "lodash", "chalk", "request", "commander", "react",
-    "express", "debug", "async", "fs-extra", "moment",
-    "prop-types", "react-dom", "bluebird", "underscore", "vue",
-    "axios", "tslib", "mkdirp", "glob", "yargs",
-    "colors", "inquirer", "webpack", "uuid", "classnames",
-    "minimist", "body-parser", "rxjs", "core-js", "semver",
-    "cheerio", "rimraf", "eslint", "dotenv", "typescript",
-    "@types/node", "js-yaml", "winston", "redux", "object-assign",
-    "node-fetch", "@babel/runtime", "handlebars", "aws-sdk", "mocha",
-    "socket.io", "ws", "ramda", "react-redux", "@babel/core",
-    "ejs", "superagent", "mongodb", "chai", "mongoose",
-    "xml2js", "bootstrap", "jest", "redis", "vue-router",
-    "ora", "prettier", "eslint-plugin-react",
-})
+_KNOWN_MCP_PACKAGES = frozenset(
+    {
+        "anthropic",
+        "openai",
+        "mcp",
+        "fastmcp",
+        "mcp-server",
+        "mcp-framework",
+        "mcp-agent",
+        "mcp-cli",
+        "mcp-remote",
+        "mcp-use",
+        "mcp-installer",
+        "fast-agent-mcp",
+        "fastapi-mcp",
+        "modelcontextprotocol",
+        "@modelcontextprotocol/sdk",
+        "@modelcontextprotocol/server-filesystem",
+        "@modelcontextprotocol/server-github",
+        "@modelcontextprotocol/server-postgres",
+        "@modelcontextprotocol/server-slack",
+        "@modelcontextprotocol/server-everything",
+        "@modelcontextprotocol/server-git",
+        "@modelcontextprotocol/server-memory",
+        "@modelcontextprotocol/server-fetch",
+        "@modelcontextprotocol/server-time",
+        "@modelcontextprotocol/server-sqlite",
+        "@modelcontextprotocol/create-server",
+        "@playwright/mcp",
+        "mcp-playwright",
+        "mcp-browser",
+        "mcp-brave-search",
+        "brave-search-mcp",
+        "mcp-perplexity",
+        "mcp-exa",
+        "mcp-fetch",
+        "fetch-mcp",
+        "filesystem-mcp-server",
+        "memory-mcp",
+        "time-mcp",
+        "everything-mcp",
+        "aws-mcp-server",
+        "gcp-mcp-server",
+        "azure-mcp-server",
+        "mcp-cloudflare",
+        "mcp-docker",
+        "mcp-vercel",
+        "mcp-neon",
+        "docker-mcp",
+        "kubernetes-mcp",
+        "postgres-mcp",
+        "sqlite-mcp",
+        "mysql-mcp",
+        "mcp-mongodb",
+        "mcp-duckdb",
+        "mcp-elasticsearch",
+        "mcp-pinecone",
+        "mcp-weaviate",
+        "mcp-chroma",
+        "mcp-qdrant",
+        "mcp-milvus",
+        "mcp-neo4j",
+        "mcp-redis",
+        "github-mcp-server",
+        "mcp-github",
+        "mcp-gitlab",
+        "mcp-gitlab-server",
+        "mcp-sentry",
+        "mcp-linear",
+        "mcp-jira",
+        "atlassian-mcp-server",
+        "slack-mcp",
+        "mcp-slack",
+        "gmail-mcp",
+        "mcp-gmail",
+        "mcp-twilio",
+        "sendgrid-mcp",
+        "mcp-notion",
+        "mcp-figma",
+        "mcp-obsidian",
+        "mcp-google-drive",
+        "mcp-google-sheets",
+        "google-drive-mcp",
+        "mcp-stripe",
+        "mcp-hubspot",
+        "mcp-salesforce",
+        "mcp-paypal",
+        "mcp-pypi",
+        "arxiv-mcp-server",
+        "supabase-mcp",
+        "mcp-server-git",
+        "mcp-server-fetch",
+        "mcp-client-cli",
+        "mcp-shell-tools",
+        "weave-mcp",
+        "openai-mcp",
+        "openai-agents",
+        "boto3",
+        "packaging",
+        "urllib3",
+        "certifi",
+        "requests",
+        "typing-extensions",
+        "idna",
+        "charset-normalizer",
+        "setuptools",
+        "botocore",
+        "cryptography",
+        "aiobotocore",
+        "python-dateutil",
+        "six",
+        "pyyaml",
+        "cffi",
+        "pydantic",
+        "pygments",
+        "click",
+        "numpy",
+        "grpcio-status",
+        "pycparser",
+        "pydantic-core",
+        "pluggy",
+        "s3transfer",
+        "protobuf",
+        "anyio",
+        "attrs",
+        "h11",
+        "fsspec",
+        "annotated-types",
+        "pytest",
+        "pandas",
+        "httpx",
+        "iniconfig",
+        "httpcore",
+        "s3fs",
+        "markupsafe",
+        "platformdirs",
+        "python-dotenv",
+        "pip",
+        "jinja2",
+        "pyjwt",
+        "jmespath",
+        "importlib-metadata",
+        "rich",
+        "filelock",
+        "aiohttp",
+        "zipp",
+        "pathspec",
+        "wheel",
+        "jsonschema",
+        "markdown-it-py",
+        "pytz",
+        "pyasn1",
+        "multidict",
+        "yarl",
+        "mdurl",
+        "googleapis-common-protos",
+        "starlette",
+        "uvicorn",
+        "google-auth",
+        "rpds-py",
+        "tzdata",
+        "propcache",
+        "frozenlist",
+        "referencing",
+        "pillow",
+        "tqdm",
+        "google-api-core",
+        "jsonschema-specifications",
+        "virtualenv",
+        "aiosignal",
+        "grpcio",
+        "fastapi",
+        "colorama",
+        "aiohappyeyeballs",
+        "awscli",
+        "greenlet",
+        "pyasn1-modules",
+        "pyarrow",
+        "requests-oauthlib",
+        "wrapt",
+        "opentelemetry-api",
+        "scipy",
+        "tomli",
+        "tenacity",
+        "pyparsing",
+        "sqlalchemy",
+        "opentelemetry-sdk",
+        "typer",
+        "beautifulsoup4",
+        "websockets",
+        "oauthlib",
+        "soupsieve",
+        "trove-classifiers",
+        "opentelemetry-semantic-conventions",
+        "shellingham",
+        "lodash",
+        "chalk",
+        "request",
+        "commander",
+        "react",
+        "express",
+        "debug",
+        "async",
+        "fs-extra",
+        "moment",
+        "prop-types",
+        "react-dom",
+        "bluebird",
+        "underscore",
+        "vue",
+        "axios",
+        "tslib",
+        "mkdirp",
+        "glob",
+        "yargs",
+        "colors",
+        "inquirer",
+        "webpack",
+        "uuid",
+        "classnames",
+        "minimist",
+        "body-parser",
+        "rxjs",
+        "core-js",
+        "semver",
+        "cheerio",
+        "rimraf",
+        "eslint",
+        "dotenv",
+        "typescript",
+        "@types/node",
+        "js-yaml",
+        "winston",
+        "redux",
+        "object-assign",
+        "node-fetch",
+        "@babel/runtime",
+        "handlebars",
+        "aws-sdk",
+        "mocha",
+        "socket.io",
+        "ws",
+        "ramda",
+        "react-redux",
+        "@babel/core",
+        "ejs",
+        "superagent",
+        "mongodb",
+        "chai",
+        "mongoose",
+        "xml2js",
+        "bootstrap",
+        "jest",
+        "redis",
+        "vue-router",
+        "ora",
+        "prettier",
+        "eslint-plugin-react",
+    }
+)
 
 _UA = "mcpsafetywarden/provenance-check"
 
@@ -130,6 +340,7 @@ _UA = "mcpsafetywarden/provenance-check"
 # ---------------------------------------------------------------------------
 # Package detection
 # ---------------------------------------------------------------------------
+
 
 def detect_package(command: Optional[str], args: Optional[List[str]]) -> Dict[str, Any]:
     """
@@ -271,7 +482,9 @@ def _query_npm(package_name: str) -> Dict[str, Any]:
     try:
         proc = subprocess.run(
             ["npm", "list", "--json", "--depth=0", package_name],
-            capture_output=True, text=True, timeout=_PKG_TIMEOUT,
+            capture_output=True,
+            text=True,
+            timeout=_PKG_TIMEOUT,
         )
         if proc.returncode == 0 and proc.stdout.strip():
             try:
@@ -292,7 +505,9 @@ def _query_npm(package_name: str) -> Dict[str, Any]:
     try:
         proc2 = subprocess.run(
             ["npm", "info", package_name, "--json"],
-            capture_output=True, text=True, timeout=_PKG_TIMEOUT,
+            capture_output=True,
+            text=True,
+            timeout=_PKG_TIMEOUT,
         )
         if proc2.returncode == 0 and proc2.stdout.strip():
             try:
@@ -350,11 +565,7 @@ def check_pypi_attestation(package: str, version: Optional[str] = None) -> Dict[
 
     Returns attestation status, source repository URL, and registry version.
     """
-    api_url = (
-        f"https://pypi.org/pypi/{package}/{version}/json"
-        if version else
-        f"https://pypi.org/pypi/{package}/json"
-    )
+    api_url = f"https://pypi.org/pypi/{package}/{version}/json" if version else f"https://pypi.org/pypi/{package}/json"
     data = _http_get_json(api_url)
     if data is None:
         return {"attestation_status": "not_on_registry", "has_attestation": False}
@@ -447,13 +658,14 @@ def check_typosquatting(package_name: str) -> List[str]:
 
 
 _PEP621_DEP_LINE = re.compile(r'"([A-Za-z0-9][A-Za-z0-9._-]*)')
-_POETRY_DEP_KEY = re.compile(r'^([A-Za-z0-9][A-Za-z0-9._-]*)\s*=', re.MULTILINE)
-_REQ_PKG_NAME = re.compile(r'^([A-Za-z0-9][A-Za-z0-9._-]*)')
-_VERSION_FROM_CONSTRAINT = re.compile(r'[=~^><!\s]*([0-9]+\.[0-9][0-9a-zA-Z._-]*)')
+_POETRY_DEP_KEY = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*=", re.MULTILINE)
+_REQ_PKG_NAME = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)")
+_VERSION_FROM_CONSTRAINT = re.compile(r"[=~^><!\s]*([0-9]+\.[0-9][0-9a-zA-Z._-]*)")
 
 
 def _github_raw_base(github_url: str) -> Optional[str]:
     from urllib.parse import urlparse
+
     parsed = urlparse(github_url)
     if parsed.hostname not in ("github.com", "www.github.com"):
         return None
@@ -476,7 +688,7 @@ def _parse_pyproject_deps(content: str) -> List[str]:
         stripped = line.strip()
         if stripped == "[project]":
             in_pep621 = False
-        if re.match(r'^dependencies\s*=\s*\[', stripped):
+        if re.match(r"^dependencies\s*=\s*\[", stripped):
             in_pep621 = True
         if in_pep621:
             for m in _PEP621_DEP_LINE.finditer(line):
@@ -545,7 +757,7 @@ def _parse_pyproject_deps_versioned(content: str) -> List[Dict[str, Optional[str
         stripped = line.strip()
         if stripped == "[project]":
             in_pep621 = False
-        if re.match(r'^dependencies\s*=\s*\[', stripped):
+        if re.match(r"^dependencies\s*=\s*\[", stripped):
             in_pep621 = True
         if in_pep621:
             for m in _PEP621_DEP_LINE.finditer(line):
@@ -598,12 +810,8 @@ def fetch_github_manifest(github_url: str) -> Dict[str, Any]:
             pkg = json.loads(text)
             raw_deps = pkg.get("dependencies") or {}
             raw_dev = pkg.get("devDependencies") or {}
-            versioned = [
-                {"name": n, "version": _extract_version(v), "dev": False}
-                for n, v in raw_deps.items()
-            ] + [
-                {"name": n, "version": _extract_version(v), "dev": True}
-                for n, v in raw_dev.items()
+            versioned = [{"name": n, "version": _extract_version(v), "dev": False} for n, v in raw_deps.items()] + [
+                {"name": n, "version": _extract_version(v), "dev": True} for n, v in raw_dev.items()
             ]
             return {
                 "status": "found",
@@ -667,7 +875,7 @@ _CVSS_V3_PR_U = {"N": 0.85, "L": 0.62, "H": 0.27}
 _CVSS_V3_PR_C = {"N": 0.85, "L": 0.68, "H": 0.50}
 _CVSS_V3_UI = {"N": 0.85, "R": 0.62}
 _CVSS_V3_CIA = {"N": 0.00, "L": 0.22, "H": 0.56}
-_CVSS_VECTOR_RE = re.compile(r'CVSS:[23]\.\d/(.+)')
+_CVSS_VECTOR_RE = re.compile(r"CVSS:[23]\.\d/(.+)")
 
 
 def _cvss3_score(vector: str) -> Optional[float]:
@@ -753,8 +961,8 @@ def check_osv_vulns(
 
     findings: List[Dict[str, Any]] = []
     for chunk_start in range(0, len(queries), 1000):
-        chunk_queries = queries[chunk_start:chunk_start + 1000]
-        chunk_pkgs = packages[chunk_start:chunk_start + 1000]
+        chunk_queries = queries[chunk_start : chunk_start + 1000]
+        chunk_pkgs = packages[chunk_start : chunk_start + 1000]
         try:
             body = json.dumps({"queries": chunk_queries}).encode()
             req = urllib.request.Request(
@@ -774,15 +982,17 @@ def check_osv_vulns(
                 severity = _osv_severity(vuln)
                 if severity not in ("HIGH", "CRITICAL"):
                     continue
-                findings.append({
-                    "package": pkg["name"],
-                    "version": pkg.get("version"),
-                    "dev": pkg.get("dev", False),
-                    "vuln_id": vuln.get("id", ""),
-                    "severity": severity,
-                    "summary": vuln.get("summary") or "",
-                    "aliases": vuln.get("aliases", []),
-                })
+                findings.append(
+                    {
+                        "package": pkg["name"],
+                        "version": pkg.get("version"),
+                        "dev": pkg.get("dev", False),
+                        "vuln_id": vuln.get("id", ""),
+                        "severity": severity,
+                        "summary": vuln.get("summary") or "",
+                        "aliases": vuln.get("aliases", []),
+                    }
+                )
 
     return findings
 
@@ -808,7 +1018,11 @@ def _scan_pip_environment(python_executable: Optional[str] = None) -> Optional[L
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_PKG_TIMEOUT)
             if proc.returncode == 0 and proc.stdout.strip():
                 data = json.loads(proc.stdout)
-                return [{"name": p["name"], "version": p["version"], "dev": False} for p in data if p.get("name") and p.get("version")]
+                return [
+                    {"name": p["name"], "version": p["version"], "dev": False}
+                    for p in data
+                    if p.get("name") and p.get("version")
+                ]
         except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError, PermissionError, KeyError):
             pass
     return None
@@ -824,7 +1038,9 @@ def _scan_npm_environment() -> Optional[List[Dict[str, Any]]]:
     try:
         proc = subprocess.run(
             ["npm", "list", "--json", "--all"],
-            capture_output=True, text=True, timeout=_PKG_TIMEOUT * 3,
+            capture_output=True,
+            text=True,
+            timeout=_PKG_TIMEOUT * 3,
         )
         if not proc.stdout.strip():
             return None
@@ -861,6 +1077,7 @@ def get_tls_cert_fingerprint(url: str) -> Optional[str]:
     Returns None for non-HTTPS URLs or on connection failure.
     """
     from urllib.parse import urlparse
+
     parsed = urlparse(url)
     if parsed.scheme != "https":
         return None
@@ -887,6 +1104,7 @@ def resolve_host_ips(url: str) -> Dict[str, Any]:
     Stored at registration; changes indicate DNS hijacking or BGP reroute.
     """
     from urllib.parse import urlparse
+
     parsed = urlparse(url)
     host = parsed.hostname
     if not host:
@@ -927,7 +1145,7 @@ def compute_tool_fingerprint(
     return hashlib.sha256(payload).hexdigest()
 
 
-_GITHUB_HOST_RE = re.compile(r'^(?:https?://)?(?:www\.)?github\.com/', re.I)
+_GITHUB_HOST_RE = re.compile(r"^(?:https?://)?(?:www\.)?github\.com/", re.I)
 
 
 def _is_github_url(url: Optional[str]) -> bool:
@@ -935,8 +1153,8 @@ def _is_github_url(url: Optional[str]) -> bool:
 
 
 def _normalise_github_url(url: str) -> str:
-    url = re.sub(r'^git\+', '', url.strip())
-    url = re.sub(r'^git://', 'https://', url)
+    url = re.sub(r"^git\+", "", url.strip())
+    url = re.sub(r"^git://", "https://", url)
     if url.endswith(".git"):
         url = url[:-4]
     return url.rstrip("/")
@@ -960,7 +1178,7 @@ def _mcp_registry_lookup(name_hint: str) -> Optional[str]:
     )
     if not data:
         return None
-    for server in (data.get("servers") or []):
+    for server in data.get("servers") or []:
         repo = server.get("repository") or {}
         repo_url = repo.get("url", "") if isinstance(repo, dict) else ""
         if _is_github_url(repo_url):
@@ -1046,12 +1264,14 @@ def build_provenance_info(
     package_name = detection.get("package_name")
     top_level = detection.get("top_level_package") or package_name
 
-    result.update({
-        "ecosystem": ecosystem,
-        "package_name": package_name,
-        "detection_method": detection.get("detection_method"),
-        "detection_confidence": detection.get("confidence", "none"),
-    })
+    result.update(
+        {
+            "ecosystem": ecosystem,
+            "package_name": package_name,
+            "detection_method": detection.get("detection_method"),
+            "detection_confidence": detection.get("confidence", "none"),
+        }
+    )
     if detection.get("note"):
         result["note"] = detection["note"]
 
@@ -1160,6 +1380,7 @@ def build_provenance_info(
                 attest_source = (result.get("attestation") or {}).get("source_url", "")
                 if attest_source:
                     from urllib.parse import urlparse
+
                     gh_host = urlparse(github_url).netloc
                     at_host = urlparse(attest_source).netloc
                     result["attestation_source_matches_github"] = (

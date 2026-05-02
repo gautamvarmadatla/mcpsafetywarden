@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from ..graph import store as _graph_store, builder as _graph_builder, explain as _graph_explain
 from ._app import mcp
@@ -36,17 +36,23 @@ def get_risk_graph(server_id: Optional[str] = None, rebuild: bool = False) -> st
         graph = _graph_store.get_full_graph(server_id)
         if not graph["objects"]:
             if server_id and _graph_store.get_full_graph()["objects"]:
-                return json.dumps({
-                    "note": f"No graph nodes found for server '{server_id}'. Run inspect_server to populate.",
-                    "graph": graph,
-                }, indent=2)
+                return json.dumps(
+                    {
+                        "note": f"No graph nodes found for server '{server_id}'. Run inspect_server to populate.",
+                        "graph": graph,
+                    },
+                    indent=2,
+                )
             counts = _graph_builder.rebuild_from_db()
             graph = _graph_store.get_full_graph(server_id)
-            return json.dumps({
-                "note": "Graph was empty - rebuilt from existing Safety Warden data",
-                "rebuilt": counts,
-                "graph": graph,
-            }, indent=2)
+            return json.dumps(
+                {
+                    "note": "Graph was empty - rebuilt from existing Safety Warden data",
+                    "rebuilt": counts,
+                    "graph": graph,
+                },
+                indent=2,
+            )
 
         return json.dumps(graph, indent=2)
     except Exception as exc:
@@ -109,7 +115,9 @@ def export_graph(format: str = "png", server_id: Optional[str] = None, output_pa
             diagram = _graph_explain.export_as_mermaid(server_id)
             return json.dumps({"format": "mermaid", "diagram": diagram}, indent=2)
         if format != "json":
-            return json.dumps({"error": f"Unsupported format {format!r}. Supported: 'png', 'mermaid', 'json'"}, indent=2)
+            return json.dumps(
+                {"error": f"Unsupported format {format!r}. Supported: 'png', 'mermaid', 'json'"}, indent=2
+            )
         graph = _graph_store.get_full_graph(server_id)
         return json.dumps({"format": "json", **graph}, indent=2)
     except Exception as exc:
@@ -168,18 +176,22 @@ def analyze_cve_blast_radius(
             prefix = f"cve_blast::{client_id}::"
             cve_nodes = [n for n in cve_nodes if n["obj_id"].startswith(prefix)]
         if vuln_id:
-            cve_nodes = [n for n in cve_nodes if n["name"] == vuln_id or n.get("metadata", {}).get("vuln_id") == vuln_id]
+            cve_nodes = [
+                n for n in cve_nodes if n["name"] == vuln_id or n.get("metadata", {}).get("vuln_id") == vuln_id
+            ]
 
         results = []
         for n in cve_nodes:
             meta = n.get("metadata", {})
-            results.append({
-                "vuln_id": meta.get("vuln_id", n["name"]),
-                "severity": meta.get("severity", "UNKNOWN"),
-                "affected_servers": meta.get("affected_servers", []),
-                "client_id": meta.get("client_id", ""),
-                "blast_radius": len(meta.get("affected_servers", [])),
-            })
+            results.append(
+                {
+                    "vuln_id": meta.get("vuln_id", n["name"]),
+                    "severity": meta.get("severity", "UNKNOWN"),
+                    "affected_servers": meta.get("affected_servers", []),
+                    "client_id": meta.get("client_id", ""),
+                    "blast_radius": len(meta.get("affected_servers", [])),
+                }
+            )
         results.sort(
             key=lambda x: ({"CRITICAL": 3, "HIGH": 2, "MEDIUM": 1}.get(x["severity"], 0), x["blast_radius"]),
             reverse=True,

@@ -41,6 +41,7 @@ _log = logging.getLogger(__name__)
 async def _is_ssrf_hostname(url: str) -> bool:
     import socket
     from urllib.parse import urlparse
+
     try:
         hostname = urlparse(url).hostname
         if not hostname:
@@ -76,13 +77,19 @@ def _try_link_stdio_to_client(server_id: str, command: Optional[str], args: Opti
             if [str(a) for a in (entry.get("args") or [])] != args_norm:
                 continue
             did = entry["discovery_id"]
-            db.upsert_discovered_server({
-                **entry,
-                "registered_server_id": server_id,
-            })
+            db.upsert_discovered_server(
+                {
+                    **entry,
+                    "registered_server_id": server_id,
+                }
+            )
             db.mark_discovered_registered(did, server_id)
             _gh_on_server_discovered(
-                did, entry["client"], entry["client_name"], entry["server_name"], server_id,
+                did,
+                entry["client"],
+                entry["client_name"],
+                entry["server_name"],
+                server_id,
             )
             _log.info("Linked server '%s' to client '%s' via stdio fingerprint match", server_id, entry["client"])
     except Exception as exc:
@@ -178,10 +185,15 @@ async def _do_register(
 
     try:
         _prov = await asyncio.get_running_loop().run_in_executor(
-            None, lambda: _graph_provenance.build_provenance_info(
-                server_id, command, args or [], url=url, transport=transport,
+            None,
+            lambda: _graph_provenance.build_provenance_info(
+                server_id,
+                command,
+                args or [],
+                url=url,
+                transport=transport,
                 github_url=github_url,
-            )
+            ),
         )
         _gh_on_provenance_detected(server_id, _prov)
     except Exception as _pe:
@@ -206,6 +218,7 @@ async def _do_register(
         )
         try:
             from ..scan.scanner import detect_llm_provider as _detect_llm_provider
+
             tools = await cm.inspect_server_tools(
                 server_id,
                 llm_provider=classify_provider or _detect_llm_provider(),
@@ -213,7 +226,8 @@ async def _do_register(
                 llm_api_key=classify_api_key,
             )
             _gh_on_tools_inspected(
-                server_id, tools,
+                server_id,
+                tools,
                 llm_provider=classify_provider or _detect_llm_provider(),
                 llm_model=classify_model,
                 llm_api_key=classify_api_key,
@@ -221,8 +235,7 @@ async def _do_register(
             _gh_on_cross_server_analysis(server_id)
             result["tools_discovered"] = len(tools)
             result["tools"] = [
-                {"name": t["name"], "effect_class": t["effect_class"], "confidence": t["confidence"]}
-                for t in tools
+                {"name": t["name"], "effect_class": t["effect_class"], "confidence": t["confidence"]} for t in tools
             ]
         except (ValueError, RuntimeError) as exc:
             db.delete_server(server_id)
@@ -287,10 +300,18 @@ async def register_server(
     if rl:
         return json.dumps({"error": rl})
     result = await _do_register(
-        server_id=server_id, transport=transport, command=command, args=args,
-        url=url, env=env, headers=headers, auto_inspect=auto_inspect,
-        classify_provider=classify_provider, classify_model=classify_model,
-        classify_api_key=classify_api_key, github_url=github_url,
+        server_id=server_id,
+        transport=transport,
+        command=command,
+        args=args,
+        url=url,
+        env=env,
+        headers=headers,
+        auto_inspect=auto_inspect,
+        classify_provider=classify_provider,
+        classify_model=classify_model,
+        classify_api_key=classify_api_key,
+        github_url=github_url,
     )
     if "error" in result:
         return json.dumps(result)
@@ -323,6 +344,7 @@ async def inspect_server(
         return json.dumps({"error": rl})
 
     from ..scan.scanner import detect_llm_provider as _detect_llm_provider
+
     effective_provider = classify_provider or _detect_llm_provider()
     _log.info("inspect_server server_id=%s provider=%s", server_id, effective_provider or "rule_based")
 
@@ -341,11 +363,15 @@ async def inspect_server(
             _srv = db.get_server(server_id)
             if _srv:
                 _prov = await asyncio.get_running_loop().run_in_executor(
-                    None, lambda: _graph_provenance.build_provenance_info(
-                        server_id, _srv.get("command"), _srv.get("args") or [],
-                        url=_srv.get("url"), transport=_srv.get("transport"),
+                    None,
+                    lambda: _graph_provenance.build_provenance_info(
+                        server_id,
+                        _srv.get("command"),
+                        _srv.get("args") or [],
+                        url=_srv.get("url"),
+                        transport=_srv.get("transport"),
                         github_url=_srv.get("github_url"),
-                    )
+                    ),
                 )
                 _gh_on_provenance_detected(server_id, _prov)
         except Exception as _pe:
@@ -359,14 +385,18 @@ async def inspect_server(
         if old_tools:
             new_tools = {t["tool_name"]: t for t in db.list_tools(server_id)}
             drift = _compare_tool_snapshots(
-                server_id, old_tools, new_tools,
+                server_id,
+                old_tools,
+                new_tools,
                 datetime.now(timezone.utc).isoformat(),
             )
             if drift["drift_detected"]:
                 result["drift"] = drift
                 _log.warning(
                     "inspect_server: drift detected for %s severity=%s findings=%d",
-                    server_id, drift["overall_severity"], len(drift["findings"]),
+                    server_id,
+                    drift["overall_severity"],
+                    len(drift["findings"]),
                 )
         return json.dumps(result, indent=2)
     except (ValueError, RuntimeError) as exc:
@@ -474,8 +504,13 @@ async def onboard_server(
     from ._scan import security_scan_server
 
     reg_json = await register_server(
-        server_id=server_id, transport=transport,
-        command=command, args=args, url=url, env=env, headers=headers,
+        server_id=server_id,
+        transport=transport,
+        command=command,
+        args=args,
+        url=url,
+        env=env,
+        headers=headers,
         auto_inspect=True,
         classify_provider=scan_provider,
         classify_model=scan_model,
@@ -490,22 +525,28 @@ async def onboard_server(
 
     if "inspect_error" in reg_result:
         if not github_url:
-            return json.dumps({
-                "server_id": server_id,
-                "error": "Onboarding aborted - server could not be inspected and no github_url was provided.",
-                "hint": (
-                    "Fix the local setup so the server can be inspected, or pass github_url "
-                    "to run a source-only scan. Review the scan results before setting up locally "
-                    "and re-running onboard_server."
-                ),
-            })
+            return json.dumps(
+                {
+                    "server_id": server_id,
+                    "error": "Onboarding aborted - server could not be inspected and no github_url was provided.",
+                    "hint": (
+                        "Fix the local setup so the server can be inspected, or pass github_url "
+                        "to run a source-only scan. Review the scan results before setting up locally "
+                        "and re-running onboard_server."
+                    ),
+                }
+            )
         effective_provider = scan_provider or _detect_llm_provider()
         if not effective_provider:
-            return json.dumps({
-                "server_id": server_id,
-                "error": "Onboarding aborted - inspection failed.",
-                "source_scan": {"skipped": "No LLM provider detected. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY."},
-            })
+            return json.dumps(
+                {
+                    "server_id": server_id,
+                    "error": "Onboarding aborted - inspection failed.",
+                    "source_scan": {
+                        "skipped": "No LLM provider detected. Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GEMINI_API_KEY."
+                    },
+                }
+            )
         try:
             scan_json = await security_scan_server(
                 server_id=None,
@@ -516,23 +557,28 @@ async def onboard_server(
                 github_url=github_url,
                 background=False,
             )
-            return json.dumps({
-                "server_id": server_id,
-                "registered": False,
-                "reason": "Inspection failed - server not registered until tools can be discovered.",
-                "source_scan": json.loads(scan_json),
-                "next_step": (
-                    "Review the scan results above. If clean, fix local setup and re-run "
-                    "onboard_server to complete registration."
-                ),
-            }, indent=2)
+            return json.dumps(
+                {
+                    "server_id": server_id,
+                    "registered": False,
+                    "reason": "Inspection failed - server not registered until tools can be discovered.",
+                    "source_scan": json.loads(scan_json),
+                    "next_step": (
+                        "Review the scan results above. If clean, fix local setup and re-run "
+                        "onboard_server to complete registration."
+                    ),
+                },
+                indent=2,
+            )
         except Exception as exc:
             _log.error("onboard_server source scan failed for %s: %s", server_id, exc, exc_info=True)
-            return json.dumps({
-                "server_id": server_id,
-                "error": "Onboarding aborted - inspection failed and source scan errored.",
-                "detail": str(exc),
-            })
+            return json.dumps(
+                {
+                    "server_id": server_id,
+                    "error": "Onboarding aborted - inspection failed and source scan errored.",
+                    "detail": str(exc),
+                }
+            )
 
     effective_provider = scan_provider or _detect_llm_provider()
     if not effective_provider:
@@ -543,8 +589,10 @@ async def onboard_server(
 
     try:
         scan_json = await security_scan_server(
-            server_id=server_id, provider=effective_provider,
-            model_id=scan_model, api_key=scan_api_key,
+            server_id=server_id,
+            provider=effective_provider,
+            model_id=scan_model,
+            api_key=scan_api_key,
             confirm_authorized=confirm_scan_authorized,
             github_url=github_url,
             background=False,
@@ -606,7 +654,10 @@ async def discover_servers(
         try:
             db.upsert_discovered_server(entry)
             _gh_on_server_discovered(
-                entry["discovery_id"], entry["client"], entry["client_name"], entry["server_name"],
+                entry["discovery_id"],
+                entry["client"],
+                entry["client_name"],
+                entry["server_name"],
             )
         except Exception as exc:
             _log.warning("discover_servers: failed to cache entry %s: %s", entry.get("discovery_id"), exc)
@@ -617,11 +668,14 @@ async def discover_servers(
         public.append(pub)
 
     clients_found = sorted({e["client"] for e in public})
-    return json.dumps({
-        "count": len(public),
-        "clients_found": clients_found,
-        "discovered": public,
-    }, indent=2)
+    return json.dumps(
+        {
+            "count": len(public),
+            "clients_found": clients_found,
+            "discovered": public,
+        },
+        indent=2,
+    )
 
 
 @mcp.tool()
@@ -676,20 +730,43 @@ async def onboard_discovered_servers(
         suggested_id = _discovery.make_server_id(entry["client"], server_name)
 
         if entry.get("registered_server_id"):
-            results.append({"discovery_id": did, "server_name": server_name, "status": "already_registered", "server_id": entry["registered_server_id"]})
+            results.append(
+                {
+                    "discovery_id": did,
+                    "server_name": server_name,
+                    "status": "already_registered",
+                    "server_id": entry["registered_server_id"],
+                }
+            )
             continue
 
         if entry.get("activation_state_only"):
-            results.append({"discovery_id": did, "server_name": server_name, "status": "skipped", "reason": "activation_state_only - full server definition not available in config file"})
+            results.append(
+                {
+                    "discovery_id": did,
+                    "server_name": server_name,
+                    "status": "skipped",
+                    "reason": "activation_state_only - full server definition not available in config file",
+                }
+            )
             continue
 
         if not entry.get("command") and not entry.get("url"):
-            results.append({"discovery_id": did, "server_name": server_name, "status": "skipped", "reason": "no command or url in discovered config"})
+            results.append(
+                {
+                    "discovery_id": did,
+                    "server_name": server_name,
+                    "status": "skipped",
+                    "reason": "no command or url in discovered config",
+                }
+            )
             continue
 
         rl_entry = _check_mgmt_rate_limit(f"register:{suggested_id}")
         if rl_entry:
-            results.append({"discovery_id": did, "server_name": server_name, "status": "rate_limited", "reason": rl_entry})
+            results.append(
+                {"discovery_id": did, "server_name": server_name, "status": "rate_limited", "reason": rl_entry}
+            )
             continue
 
         try:
@@ -713,7 +790,15 @@ async def onboard_discovered_servers(
             continue
 
         if "error" in reg_result:
-            results.append({"discovery_id": did, "server_name": server_name, "status": "failed", "error": reg_result["error"], "hint": reg_result.get("hint")})
+            results.append(
+                {
+                    "discovery_id": did,
+                    "server_name": server_name,
+                    "status": "failed",
+                    "error": reg_result["error"],
+                    "hint": reg_result.get("hint"),
+                }
+            )
         else:
             db.mark_discovered_registered(did, suggested_id)
             _gh_on_server_discovered(did, entry["client"], entry["client_name"], server_name, suggested_id)
@@ -733,9 +818,12 @@ async def onboard_discovered_servers(
 
     registered_count = sum(1 for r in results if r["status"] == "registered")
     attempted_count = sum(1 for r in results if r["status"] in ("registered", "failed"))
-    return json.dumps({
-        "total": len(results),
-        "attempted": attempted_count,
-        "registered": registered_count,
-        "results": results,
-    }, indent=2)
+    return json.dumps(
+        {
+            "total": len(results),
+            "attempted": attempted_count,
+            "registered": registered_count,
+            "results": results,
+        },
+        indent=2,
+    )

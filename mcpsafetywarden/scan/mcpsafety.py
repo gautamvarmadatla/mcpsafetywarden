@@ -1,4 +1,4 @@
-﻿"""
+"""
 MCPSafetyScanner 3-agent framework.
 
 Stage 1 - Hacker agent: actively calls tools on the target MCP server to find vulnerabilities
@@ -38,22 +38,20 @@ import logging
 import os
 import time
 import re
-import urllib.parse as _urlparse
 from typing import Any, Dict, List, Optional
 
 from ..core import database as db
 from ..proxy.client import open_streams as _open_streams, scan_for_injection as _scan_for_injection
-from .scanner import call_llm as _call_llm_scanner
 from .source import run_source_recon as _run_source_recon
-from ..core.security_utils import normalise_arg as _normalise_probe_str
 from ..core.security_utils import redact_args as _redact_probe_args
 from ..core.security_utils import redact_text as _redact_in_text
 from ..core.security_utils import redact_findings as _redact_findings
-from ..core.security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
-from .args import SSRF_RE, scan_args_for_threats, _safe_json_dict, _safe_json_list, _inspect_probe_args, _PROMPT_INJECTION_RE
+from ..core.security_utils import sanitise_for_prompt as _sanitise_for_prompt
+from .args import _safe_json_dict, _safe_json_list, _inspect_probe_args, _PROMPT_INJECTION_RE
 from .auxiliary import (
-    kali_recon, burp_proxy_evidence, _burp_hacker,
-    _find_aux_server, _call_aux_tool, _aux_tool_exists, _extract_host_port,
+    kali_recon,
+    burp_proxy_evidence,
+    _burp_hacker,
 )
 
 _log = logging.getLogger(__name__)
@@ -396,10 +394,10 @@ Return ONLY valid JSON. No markdown. No text outside the JSON object.
 """
 
 
-HACKER_CALL_TIMEOUT_S    = 30
-HACKER_MAX_RESULT_BYTES  = 8 * 1024
+HACKER_CALL_TIMEOUT_S = 30
+HACKER_MAX_RESULT_BYTES = 8 * 1024
 HACKER_MAX_CALLS_PER_TURN = 5
-_MAX_HACKER_TURNS         = 20
+_MAX_HACKER_TURNS = 20
 
 _SAFE_HACKER_SYSTEM = """\
 You are executing a read-only penetration test of an MCP server.
@@ -849,7 +847,7 @@ async def _execute_mcp_tool(
                 return await session.call_tool(tool_name, args)
 
     try:
-        result  = await asyncio.wait_for(_do(), timeout=HACKER_CALL_TIMEOUT_S)
+        result = await asyncio.wait_for(_do(), timeout=HACKER_CALL_TIMEOUT_S)
         content = getattr(result, "content", [])
 
         raw = json.dumps(
@@ -872,7 +870,8 @@ async def _execute_mcp_tool(
         _log.warning(
             "Hacker tool call to '%s' timed out after %ds. "
             "In-flight thread is bounded by _LLM_HTTP_TIMEOUT and will complete independently.",
-            tool_name, HACKER_CALL_TIMEOUT_S,
+            tool_name,
+            HACKER_CALL_TIMEOUT_S,
         )
     except Exception as exc:
         error_msg = str(exc)
@@ -889,9 +888,12 @@ async def _execute_mcp_tool(
     if tool_row:
         try:
             notes_parts = ["mcpsafety_scan_probe"]
-            if injection_hit: notes_parts.append(f"INJECTION_DETECTED={injection_hit}")
-            if had_creds: notes_parts.append("CREDENTIALS_FOUND_AND_REDACTED")
-            if error_msg: notes_parts.append(f"error={error_msg}")
+            if injection_hit:
+                notes_parts.append(f"INJECTION_DETECTED={injection_hit}")
+            if had_creds:
+                notes_parts.append("CREDENTIALS_FOUND_AND_REDACTED")
+            if error_msg:
+                notes_parts.append(f"error={error_msg}")
 
             run_id = db.record_run(
                 tool_id=tool_row["tool_id"],
@@ -962,8 +964,12 @@ async def _hacker_anthropic(
 ) -> str:
     import anthropic
     from .scanner import _LLM_HTTP_TIMEOUT
-    client = anthropic.Anthropic(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT) if api_key \
+
+    client = (
+        anthropic.Anthropic(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT)
+        if api_key
         else anthropic.Anthropic(timeout=_LLM_HTTP_TIMEOUT)
+    )
     ant_tools = _tools_to_anthropic(tools)
     seed = {"role": "user", "content": "Begin the security audit. Probe all available tools."}
     messages = [seed]
@@ -983,28 +989,37 @@ async def _hacker_anthropic(
         )
         messages.append({"role": "assistant", "content": response.content})
 
-        if response.stop_reason == "end_turn": return next((b.text for b in response.content if hasattr(b, "text")), "")
+        if response.stop_reason == "end_turn":
+            return next((b.text for b in response.content if hasattr(b, "text")), "")
 
         tool_results = []
         calls_this_turn = 0
         for block in response.content:
             if block.type == "tool_use":
                 if calls_this_turn >= max_calls_per_turn:
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": "[BLOCKED: per-turn call limit reached]",
-                    })
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": "[BLOCKED: per-turn call limit reached]",
+                        }
+                    )
                     continue
                 result = await _execute_mcp_tool(
-                    server_id, server_config, block.name, block.input,
-                    call_counter, allow_destructive_probes,
+                    server_id,
+                    server_config,
+                    block.name,
+                    block.input,
+                    call_counter,
+                    allow_destructive_probes,
                 )
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": result,
-                })
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result,
+                    }
+                )
                 calls_this_turn += 1
 
         if tool_results:
@@ -1058,16 +1073,19 @@ async def _hacker_openai_compat(
         msg = response.choices[0].message
         messages.append(msg)
 
-        if not msg.tool_calls: return msg.content or ""
+        if not msg.tool_calls:
+            return msg.content or ""
 
         calls_this_turn = 0
         for tc in msg.tool_calls:
             if calls_this_turn >= max_calls_per_turn:
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": "[BLOCKED: per-turn call limit reached]",
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": "[BLOCKED: per-turn call limit reached]",
+                    }
+                )
                 continue
             try:
                 args = json.loads(tc.function.arguments)
@@ -1075,8 +1093,12 @@ async def _hacker_openai_compat(
                 _log.warning("malformed tool args from LLM: %s", _e)
                 args = {}
             result = await _execute_mcp_tool(
-                server_id, server_config, tc.function.name, args,
-                call_counter, allow_destructive_probes,
+                server_id,
+                server_config,
+                tc.function.name,
+                args,
+                call_counter,
+                allow_destructive_probes,
             )
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
             calls_this_turn += 1
@@ -1090,7 +1112,8 @@ async def _hacker_openai_compat(
             return msg.content
         if isinstance(msg, dict) and msg.get("role") == "assistant":
             content = msg.get("content")
-            if isinstance(content, str) and content: return content
+            if isinstance(content, str) and content:
+                return content
     return "Max turns reached"
 
 
@@ -1108,11 +1131,23 @@ async def _hacker_openai(
 ) -> str:
     import openai
     from .scanner import _LLM_HTTP_TIMEOUT
-    client = openai.OpenAI(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT) if api_key \
+
+    client = (
+        openai.OpenAI(api_key=api_key, timeout=_LLM_HTTP_TIMEOUT)
+        if api_key
         else openai.OpenAI(timeout=_LLM_HTTP_TIMEOUT)
+    )
     return await _hacker_openai_compat(
-        server_id, tools, server_config, client, model_id or "gpt-4o",
-        max_turns, hacker_system, call_counter, max_calls_per_turn, allow_destructive_probes,
+        server_id,
+        tools,
+        server_config,
+        client,
+        model_id or "gpt-4o",
+        max_turns,
+        hacker_system,
+        call_counter,
+        max_calls_per_turn,
+        allow_destructive_probes,
     )
 
 
@@ -1131,12 +1166,21 @@ async def _hacker_ollama(
     """Hacker agent using a local Ollama model via its OpenAI-compatible API."""
     import openai
     from .scanner import _LLM_HTTP_TIMEOUT, _OLLAMA_BASE_URL
+
     base_url = os.environ.get("OLLAMA_BASE_URL", _OLLAMA_BASE_URL)
-    model    = model_id or os.environ.get("OLLAMA_MODEL", "llama3.1")
-    client   = openai.OpenAI(api_key="ollama", base_url=base_url, timeout=_LLM_HTTP_TIMEOUT)
+    model = model_id or os.environ.get("OLLAMA_MODEL", "llama3.1")
+    client = openai.OpenAI(api_key="ollama", base_url=base_url, timeout=_LLM_HTTP_TIMEOUT)
     return await _hacker_openai_compat(
-        server_id, tools, server_config, client, model,
-        max_turns, hacker_system, call_counter, max_calls_per_turn, allow_destructive_probes,
+        server_id,
+        tools,
+        server_config,
+        client,
+        model,
+        max_turns,
+        hacker_system,
+        call_counter,
+        max_calls_per_turn,
+        allow_destructive_probes,
     )
 
 
@@ -1161,36 +1205,43 @@ async def _hacker_gemini(
         pass
     else:
         from .scanner import _LLM_HTTP_TIMEOUT
+
         client = genai.Client(api_key=key, http_options={"timeout": int(_LLM_HTTP_TIMEOUT * 1000)})
 
         func_decls = []
         type_map = _get_genai_type_map(types)
         for t in tools:
             schema = t.get("schema") or {}
-            props  = schema.get("properties", {})
-            func_decls.append(types.FunctionDeclaration(
-                name=t.get("tool_name") or t.get("name", "unknown"),
-                description=_sanitise_for_prompt(t.get("description", ""), 300),
-                parameters=types.Schema(
-                    type=types.Type.OBJECT,
-                    properties={
-                        k: types.Schema(
-                            type=type_map.get(
-                                (v.get("type") if isinstance(v, dict) else "string"),
-                                types.Type.STRING,
-                            ),
-                            description=v.get("description", "") if isinstance(v, dict) else "",
-                        )
-                        for k, v in props.items()
-                    },
-                ) if props else None,
-            ))
+            props = schema.get("properties", {})
+            func_decls.append(
+                types.FunctionDeclaration(
+                    name=t.get("tool_name") or t.get("name", "unknown"),
+                    description=_sanitise_for_prompt(t.get("description", ""), 300),
+                    parameters=types.Schema(
+                        type=types.Type.OBJECT,
+                        properties={
+                            k: types.Schema(
+                                type=type_map.get(
+                                    (v.get("type") if isinstance(v, dict) else "string"),
+                                    types.Type.STRING,
+                                ),
+                                description=v.get("description", "") if isinstance(v, dict) else "",
+                            )
+                            for k, v in props.items()
+                        },
+                    )
+                    if props
+                    else None,
+                )
+            )
 
         gemini_tools = [types.Tool(function_declarations=func_decls)]
-        contents = [types.Content(
-            role="user",
-            parts=[types.Part(text=hacker_system + "\n\nBegin the security audit. Probe all available tools.")],
-        )]
+        contents = [
+            types.Content(
+                role="user",
+                parts=[types.Part(text=hacker_system + "\n\nBegin the security audit. Probe all available tools.")],
+            )
+        ]
         loop = asyncio.get_running_loop()
         model_name = model_id or "gemini-2.5-flash"
 
@@ -1199,7 +1250,9 @@ async def _hacker_gemini(
             response = await loop.run_in_executor(
                 None,
                 lambda c=contents_snap: client.models.generate_content(
-                    model=model_name, contents=c, tools=gemini_tools,
+                    model=model_name,
+                    contents=c,
+                    tools=gemini_tools,
                 ),
             )
             if not response.candidates:
@@ -1209,8 +1262,7 @@ async def _hacker_gemini(
                 break
             contents.append(types.Content(role="model", parts=candidate.content.parts))
 
-            fn_calls = [p for p in candidate.content.parts
-                        if hasattr(p, "function_call") and p.function_call]
+            fn_calls = [p for p in candidate.content.parts if hasattr(p, "function_call") and p.function_call]
             if not fn_calls:
                 text_parts = [p.text for p in candidate.content.parts if hasattr(p, "text")]
                 return " ".join(text_parts)
@@ -1220,23 +1272,31 @@ async def _hacker_gemini(
             for part in fn_calls:
                 fc = part.function_call
                 if calls_this_turn >= max_calls_per_turn:
-                    fn_responses.append(types.Part(
-                        function_response=types.FunctionResponse(
-                            name=fc.name,
-                            response={"result": "[BLOCKED: per-turn call limit reached]"},
+                    fn_responses.append(
+                        types.Part(
+                            function_response=types.FunctionResponse(
+                                name=fc.name,
+                                response={"result": "[BLOCKED: per-turn call limit reached]"},
+                            )
                         )
-                    ))
+                    )
                     continue
                 result = await _execute_mcp_tool(
-                    server_id, server_config, fc.name, dict(fc.args or {}),
-                    call_counter, allow_destructive_probes,
+                    server_id,
+                    server_config,
+                    fc.name,
+                    dict(fc.args or {}),
+                    call_counter,
+                    allow_destructive_probes,
                 )
-                fn_responses.append(types.Part(
-                    function_response=types.FunctionResponse(
-                        name=fc.name,
-                        response={"result": result},
+                fn_responses.append(
+                    types.Part(
+                        function_response=types.FunctionResponse(
+                            name=fc.name,
+                            response={"result": result},
+                        )
                     )
-                ))
+                )
                 calls_this_turn += 1
             contents.append(types.Content(role="user", parts=fn_responses))
 
@@ -1244,24 +1304,32 @@ async def _hacker_gemini(
 
     try:
         import google.generativeai as genai_legacy
+
         _log.warning(
             "google-genai not installed; falling back to google-generativeai for server %s. "
             "Live tool probing is unavailable - hacker stage will produce a description-only report.",
             server_id,
         )
-        if key: genai_legacy.configure(api_key=key)
+        if key:
+            genai_legacy.configure(api_key=key)
         model = genai_legacy.GenerativeModel(
             model_id or "gemini-2.5-flash",
             system_instruction=hacker_system,
         )
-        tools_str = json.dumps([
-            {"name": t.get("tool_name") or t.get("name"),
-             "description": _sanitise_for_prompt(t.get("description", ""), 300)}
-            for t in tools
-        ], indent=2)
+        tools_str = json.dumps(
+            [
+                {
+                    "name": t.get("tool_name") or t.get("name"),
+                    "description": _sanitise_for_prompt(t.get("description", ""), 300),
+                }
+                for t in tools
+            ],
+            indent=2,
+        )
         response = model.generate_content(f"Available tools:\n{tools_str}\n\nBegin the security audit.")
         return response.text or ""
-    except ImportError: raise ImportError("Run: pip install google-genai  OR  pip install google-generativeai")
+    except ImportError:
+        raise ImportError("Run: pip install google-genai  OR  pip install google-generativeai")
 
 
 _GENAI_TYPE_MAP: Optional[Dict[str, Any]] = None
@@ -1271,18 +1339,21 @@ def _get_genai_type_map(types: Any) -> Dict[str, Any]:
     global _GENAI_TYPE_MAP
     if _GENAI_TYPE_MAP is None:
         _GENAI_TYPE_MAP = {
-            "string": types.Type.STRING, "integer": types.Type.INTEGER,
-            "number": types.Type.NUMBER,  "boolean": types.Type.BOOLEAN,
-            "array": types.Type.ARRAY,    "object": types.Type.OBJECT,
+            "string": types.Type.STRING,
+            "integer": types.Type.INTEGER,
+            "number": types.Type.NUMBER,
+            "boolean": types.Type.BOOLEAN,
+            "array": types.Type.ARRAY,
+            "object": types.Type.OBJECT,
         }
     return _GENAI_TYPE_MAP
 
 
 _HACKER_DISPATCH = {
     "anthropic": _hacker_anthropic,
-    "openai":    _hacker_openai,
-    "gemini":    _hacker_gemini,
-    "ollama":    _hacker_ollama,
+    "openai": _hacker_openai,
+    "gemini": _hacker_gemini,
+    "ollama": _hacker_ollama,
 }
 
 
@@ -1293,8 +1364,16 @@ def _sanitise_finding_texts(findings: List[Dict]) -> List[Dict]:
     and truncate to prevent injection payloads in observation/finding text from manipulating
     the auditor or supervisor LLMs.
     """
-    _FIELDS = ("finding", "observation", "input_summary", "untested_reason",
-               "auditor_notes", "validation_notes", "severity_change_reason", "remediation")
+    _FIELDS = (
+        "finding",
+        "observation",
+        "input_summary",
+        "untested_reason",
+        "auditor_notes",
+        "validation_notes",
+        "severity_change_reason",
+        "remediation",
+    )
     result = []
     for f in findings:
         clean = dict(f)
@@ -1303,8 +1382,7 @@ def _sanitise_finding_texts(findings: List[Dict]) -> List[Dict]:
                 clean[field] = _sanitise_for_prompt(clean[field], 500)
         if isinstance(clean.get("probes"), list):
             clean["probes"] = [
-                {k: _sanitise_for_prompt(v, 500) if isinstance(v, str) else v
-                 for k, v in p.items()}
+                {k: _sanitise_for_prompt(v, 500) if isinstance(v, str) else v for k, v in p.items()}
                 for p in clean["probes"]
             ]
         result.append(clean)
@@ -1316,10 +1394,9 @@ async def _web_research(query: str) -> List[str]:
 
     try:
         from duckduckgo_search import DDGS
+
         loop = asyncio.get_running_loop()
-        ddg_results = await loop.run_in_executor(
-            None, lambda: list(DDGS().text(query, max_results=3))
-        )
+        ddg_results = await loop.run_in_executor(None, lambda: list(DDGS().text(query, max_results=3)))
         for r in ddg_results:
             results.append(f"{r['title']}: {r['body'][:250]}")
     except Exception as _e:
@@ -1327,22 +1404,27 @@ async def _web_research(query: str) -> List[str]:
 
     try:
         import httpx
+
         async with httpx.AsyncClient(timeout=8) as client:
             resp = await client.get(
                 "https://hn.algolia.com/api/v1/search",
                 params={"query": query, "tags": "story", "hitsPerPage": 3},
             )
-            for h in resp.json().get("hits", []): results.append(f"HN: {h.get('title', '')} - {h.get('url') or ''}")
+            for h in resp.json().get("hits", []):
+                results.append(f"HN: {h.get('title', '')} - {h.get('url') or ''}")
     except Exception as _e:
         _log.debug("HackerNews search failed: %s", _e)
 
     try:
         import arxiv as _arxiv
+
         loop = asyncio.get_running_loop()
+
         def _arxiv_search():
             client = _arxiv.Client()
             search = _arxiv.Search(query=query, max_results=3, sort_by=_arxiv.SortCriterion.Relevance)
             return list(client.results(search))
+
         papers = await loop.run_in_executor(None, _arxiv_search)
         for p in papers:
             results.append(f"Arxiv [{p.entry_id}]: {p.title} - {p.summary[:200]}")
@@ -1362,29 +1444,29 @@ async def _run_auditor(
 ) -> List[Dict]:
     from .scanner import call_llm
 
-    if not hacker_findings: return []
+    if not hacker_findings:
+        return []
 
-    indexed_actionable = [
-        (orig_idx, f)
-        for orig_idx, f in enumerate(hacker_findings)
-        if f.get("finding") is not None
-    ]
-    if not indexed_actionable: return []
+    indexed_actionable = [(orig_idx, f) for orig_idx, f in enumerate(hacker_findings) if f.get("finding") is not None]
+    if not indexed_actionable:
+        return []
 
     research = []
     for orig_idx, finding in indexed_actionable[:10]:
         web: List[str] = []
         if not skip_web_research:
-            query = (
-                f"MCP server security {finding.get('risk_type', '')} "
-                f"{finding.get('tool', '')} vulnerability CVE"
-            )
+            query = f"MCP server security {finding.get('risk_type', '')} {finding.get('tool', '')} vulnerability CVE"
             web = await _web_research(query)
         research.append({"finding_idx": orig_idx, "finding": finding, "web_results": web})
 
     actionable_findings = _sanitise_finding_texts([f for _, f in indexed_actionable[:10]])
     safe_research = [
-        {**r, "finding": _sanitise_finding_texts([r["finding"]])[0] if isinstance(r.get("finding"), dict) else r.get("finding")}
+        {
+            **r,
+            "finding": _sanitise_finding_texts([r["finding"]])[0]
+            if isinstance(r.get("finding"), dict)
+            else r.get("finding"),
+        }
         for r in research
     ]
     burp_block = f"\n\nBurp Suite proxy traffic evidence:\n{burp_evidence}" if burp_evidence else ""
@@ -1411,8 +1493,8 @@ async def _run_supervisor(
 ) -> Dict[str, Any]:
     from .scanner import call_llm
 
-    safe_hacker   = _sanitise_finding_texts(hacker_findings)
-    safe_auditor  = _sanitise_finding_texts(auditor_findings)
+    safe_hacker = _sanitise_finding_texts(hacker_findings)
+    safe_auditor = _sanitise_finding_texts(auditor_findings)
 
     source_recon_section = ""
     if source_recon_findings:
@@ -1424,8 +1506,7 @@ async def _run_supervisor(
             "Do NOT require live probing evidence to include them in tool_findings.\n"
         )
         source_recon_section = (
-            f"{source_only_note}"
-            f"Source code analysis findings:\n{json.dumps(source_recon_findings, indent=2)}\n\n"
+            f"{source_only_note}Source code analysis findings:\n{json.dumps(source_recon_findings, indent=2)}\n\n"
         )
 
     prompt = (
@@ -1435,8 +1516,8 @@ async def _run_supervisor(
         f"{source_recon_section}"
         "Produce the final security report JSON."
     )
-    loop   = asyncio.get_running_loop()
-    raw    = await loop.run_in_executor(None, lambda: call_llm(provider, model_id, api_key, prompt))
+    loop = asyncio.get_running_loop()
+    raw = await loop.run_in_executor(None, lambda: call_llm(provider, model_id, api_key, prompt))
     report = _safe_json_dict(raw)
     if not report:
         return {
@@ -1507,13 +1588,9 @@ async def _run_recon(
             "parameters": {
                 k: {
                     "type": v.get("type", "unknown") if isinstance(v, dict) else "unknown",
-                    "description": _sanitise_for_prompt(
-                        v.get("description", "") if isinstance(v, dict) else "", 150
-                    ),
+                    "description": _sanitise_for_prompt(v.get("description", "") if isinstance(v, dict) else "", 150),
                 }
-                for k, v in (
-                    (t.get("schema") or {}).get("properties", {})
-                ).items()
+                for k, v in ((t.get("schema") or {}).get("properties", {})).items()
             },
         }
         for t in tools
@@ -1570,8 +1647,7 @@ async def _run_planner(
         "DESTRUCTIVE PROBES ENABLED: include hypotheses requiring path traversal, "
         "command injection, credential file reads, and write probes."
         if allow_destructive
-        else
-        "SAFE MODE: exclude hypotheses requiring path traversal, command injection, credential "
+        else "SAFE MODE: exclude hypotheses requiring path traversal, command injection, credential "
         "file reads, or write/delete operations. Mark such hypotheses requires_allow_destructive=true "
         "but still include them so coverage gaps are visible - the probe agent will skip them."
     )
@@ -1665,14 +1741,12 @@ async def run_mcpsafety_scan(
         )
 
     if llm_provider not in _HACKER_DISPATCH:
-        raise ValueError(
-            f"llm_provider must be one of {list(_HACKER_DISPATCH.keys())}, got '{llm_provider}'"
-        )
+        raise ValueError(f"llm_provider must be one of {list(_HACKER_DISPATCH.keys())}, got '{llm_provider}'")
 
     max_hacker_turns = max(1, min(max_hacker_turns, _MAX_HACKER_TURNS))
-    scan_timeout_s   = max(10, min(scan_timeout_s, 3600))
-    hacker_template  = _FULL_HACKER_SYSTEM if allow_destructive_probes else _SAFE_HACKER_SYSTEM
-    call_counter     = [0]
+    scan_timeout_s = max(10, min(scan_timeout_s, 3600))
+    hacker_template = _FULL_HACKER_SYSTEM if allow_destructive_probes else _SAFE_HACKER_SYSTEM
+    call_counter = [0]
 
     async def _pipeline() -> Dict[str, Any]:
         network_scan = await kali_recon(server_config)
@@ -1687,9 +1761,13 @@ async def run_mcpsafety_scan(
         try:
             source_recon = await asyncio.wait_for(
                 _run_source_recon(
-                    server_id, server_config, tools,
+                    server_id,
+                    server_config,
+                    tools,
                     github_url or server_config.get("github_url"),
-                    llm_provider, model_id, api_key,
+                    llm_provider,
+                    model_id,
+                    api_key,
                     local_source_path=local_source_path,
                 ),
                 timeout=150,
@@ -1707,7 +1785,12 @@ async def run_mcpsafety_scan(
 
         _log.info("mcpsafety Stage 0b: Planning (server=%s)", server_id)
         attack_plan = await _run_planner(
-            tools, recon, allow_destructive_probes, llm_provider, model_id, api_key,
+            tools,
+            recon,
+            allow_destructive_probes,
+            llm_provider,
+            model_id,
+            api_key,
         )
 
         hacker_system = hacker_template.format(
@@ -1716,13 +1799,22 @@ async def run_mcpsafety_scan(
 
         _log.info(
             "mcpsafety Stage 1: Hacker (server=%s turns=%d destructive=%s)",
-            server_id, max_hacker_turns, allow_destructive_probes,
+            server_id,
+            max_hacker_turns,
+            allow_destructive_probes,
         )
-        hacker_fn  = _HACKER_DISPATCH[llm_provider]
+        hacker_fn = _HACKER_DISPATCH[llm_provider]
         hacker_raw = await hacker_fn(
-            server_id, tools, server_config, model_id, api_key,
-            max_hacker_turns, hacker_system, call_counter,
-            max_calls_per_turn, allow_destructive_probes,
+            server_id,
+            tools,
+            server_config,
+            model_id,
+            api_key,
+            max_hacker_turns,
+            hacker_system,
+            call_counter,
+            max_calls_per_turn,
+            allow_destructive_probes,
         )
         hacker_findings = _redact_findings(_safe_json_list(hacker_raw))
 
@@ -1735,13 +1827,23 @@ async def run_mcpsafety_scan(
 
         _log.info("mcpsafety Stage 2: Auditor (server=%s findings=%d)", server_id, len(hacker_findings))
         auditor_findings = await _run_auditor(
-            hacker_findings, llm_provider, model_id, api_key, skip_web_research, burp_evidence=burp_evidence,
+            hacker_findings,
+            llm_provider,
+            model_id,
+            api_key,
+            skip_web_research,
+            burp_evidence=burp_evidence,
         )
 
         _log.info("mcpsafety Stage 3: Supervisor (server=%s)", server_id)
         sr_findings = source_recon.get("findings") if source_recon else None
         report = await _run_supervisor(
-            server_id, hacker_findings, auditor_findings, llm_provider, model_id, api_key,
+            server_id,
+            hacker_findings,
+            auditor_findings,
+            llm_provider,
+            model_id,
+            api_key,
             source_recon_findings=sr_findings if sr_findings else None,
         )
         report["tool_findings"] = _redact_findings(report.get("tool_findings", []))
@@ -1775,19 +1877,21 @@ async def run_mcpsafety_scan(
                 hyp = plan_index.get(uid, {})
                 steps = hyp.get("steps") or []
                 tool = hyp.get("tool") or (steps[0].get("tool", "") if steps else "")
-                existing_gaps.append({
-                    "hypothesis_id": uid,
-                    "title": hyp.get("title", ""),
-                    "tool": tool,
-                    "reason_not_tested": "not_executed",
-                    "risk_if_untested": hyp.get("priority", "UNKNOWN"),
-                })
+                existing_gaps.append(
+                    {
+                        "hypothesis_id": uid,
+                        "title": hyp.get("title", ""),
+                        "tool": tool,
+                        "reason_not_tested": "not_executed",
+                        "risk_if_untested": hyp.get("priority", "UNKNOWN"),
+                    }
+                )
             report["coverage_gaps"] = existing_gaps
 
-        report["recon_summary"]    = recon.get("recon_summary", "")
-        report["plan_summary"]     = attack_plan.get("plan_summary", "")
+        report["recon_summary"] = recon.get("recon_summary", "")
+        report["plan_summary"] = attack_plan.get("plan_summary", "")
         report["hypotheses_total"] = len(plan_ids)
-        report["hypotheses_tested"]   = len(tested_ids & plan_ids)
+        report["hypotheses_tested"] = len(tested_ids & plan_ids)
         report["hypotheses_untested"] = len(untested_ids)
         if network_scan:
             report["network_scan"] = network_scan
@@ -1804,13 +1908,21 @@ async def run_mcpsafety_scan(
             )
         return report
 
-    try: report = await asyncio.wait_for(_pipeline(), timeout=scan_timeout_s)
+    try:
+        report = await asyncio.wait_for(_pipeline(), timeout=scan_timeout_s)
     except asyncio.TimeoutError:
         report = {
             "overall_risk_level": "UNKNOWN",
             "summary": f"Scan timed out after {scan_timeout_s}s.",
             "tool_findings": [],
-            "server_level_risks": [{"risk": f"Scan did not complete - exceeded {scan_timeout_s}s timeout.", "risk_level": "UNKNOWN", "tools_involved": [], "basis": "timeout"}],
+            "server_level_risks": [
+                {
+                    "risk": f"Scan did not complete - exceeded {scan_timeout_s}s timeout.",
+                    "risk_level": "UNKNOWN",
+                    "tools_involved": [],
+                    "basis": "timeout",
+                }
+            ],
             "false_positives": [],
             "unconfirmed_findings": [],
             "audit_metadata": {},
@@ -1818,10 +1930,10 @@ async def run_mcpsafety_scan(
             "server_id": server_id,
         }
 
-    report["provider"]             = f"mcpsafety+{llm_provider}"
-    report["model"]                = model_id or "default"
-    report["total_hacker_calls"]   = call_counter[0]
-    report["destructive_probes"]   = allow_destructive_probes
+    report["provider"] = f"mcpsafety+{llm_provider}"
+    report["model"] = model_id or "default"
+    report["total_hacker_calls"] = call_counter[0]
+    report["destructive_probes"] = allow_destructive_probes
     report["web_research_skipped"] = skip_web_research
     return report
 
@@ -1868,10 +1980,7 @@ async def run_mcpsafety_scan_multi(
     for entry in servers:
         sid = entry["server_id"]
         _log.info("mcpsafety multi-scan: starting server '%s' (%d/%d)", sid, len(per_server) + 1, len(servers))
-        entry_github_url = (
-            entry.get("github_url")
-            or (entry.get("server_config") or {}).get("github_url")
-        )
+        entry_github_url = entry.get("github_url") or (entry.get("server_config") or {}).get("github_url")
         try:
             result = await run_mcpsafety_scan(
                 server_id=sid,
@@ -1908,7 +2017,7 @@ async def run_mcpsafety_scan_multi(
         for f in r.get("tool_findings", [])
         if f.get("risk_level") in ("HIGH", "MEDIUM")
     ]
-    high   = sum(1 for f in all_findings if f.get("risk_level") == "HIGH")
+    high = sum(1 for f in all_findings if f.get("risk_level") == "HIGH")
     medium = sum(1 for f in all_findings if f.get("risk_level") == "MEDIUM")
 
     return {
@@ -2013,12 +2122,14 @@ def run_deterministic_scan(
         seen_names[name] = seen_names.get(name, 0) + 1
 
         if issues:
-            tool_findings.append({
-                "name": name,
-                "risk_level": risk_level,
-                "finding": "; ".join(issues),
-                "categories": ["deterministic"],
-            })
+            tool_findings.append(
+                {
+                    "name": name,
+                    "risk_level": risk_level,
+                    "finding": "; ".join(issues),
+                    "categories": ["deterministic"],
+                }
+            )
             if _RISK_ORDER_DET.get(risk_level, 0) > _RISK_ORDER_DET.get(worst, 0):
                 worst = risk_level
 

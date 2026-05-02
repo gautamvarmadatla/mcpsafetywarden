@@ -8,17 +8,28 @@ import unicodedata
 from typing import Any, Dict, List, Tuple
 from urllib.parse import unquote
 
-_ZERO_WIDTH_RE  = re.compile("[" + "".join(chr(c) for c in [
-    0x200b, 0x200c, 0x200d, 0x200e, 0x200f,
-    *range(0x202a, 0x202f),
-    *range(0x2060, 0x2065),
-    0xfeff,
-    0x00ad,
-]) + "]")
+_ZERO_WIDTH_RE = re.compile(
+    "["
+    + "".join(
+        chr(c)
+        for c in [
+            0x200B,
+            0x200C,
+            0x200D,
+            0x200E,
+            0x200F,
+            *range(0x202A, 0x202F),
+            *range(0x2060, 0x2065),
+            0xFEFF,
+            0x00AD,
+        ]
+    )
+    + "]"
+)
 
-_MARKDOWN_RE    = re.compile(r"[*_`~\[\]|\\]")
+_MARKDOWN_RE = re.compile(r"[*_`~\[\]|\\]")
 _MULTI_SPACE_RE = re.compile(r"\s+")
-_CTRL_CHARS_RE  = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_CTRL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 def strip_json_fence(text: str) -> str:
@@ -70,7 +81,8 @@ def normalise_arg(s: str) -> str:
     s = _ZERO_WIDTH_RE.sub("", s)
     for _ in range(3):
         decoded = unquote(s)
-        if decoded == s: break
+        if decoded == s:
+            break
         s = decoded
     s = _html.unescape(s)
     s = re.sub(r"\s+", " ", s)
@@ -133,8 +145,10 @@ def looks_like_secret(value: Any) -> bool:
 def _redact_value(v: Any) -> Any:
     if isinstance(v, dict):
         return redact_args(v)
-    if isinstance(v, list): return [_redact_value(i) for i in v]
-    if looks_like_secret(v): return "[REDACTED]"
+    if isinstance(v, list):
+        return [_redact_value(i) for i in v]
+    if looks_like_secret(v):
+        return "[REDACTED]"
     return v
 
 
@@ -143,7 +157,8 @@ def redact_args(args: Dict[str, Any]) -> Dict[str, Any]:
     for k, v in args.items():
         if _SENSITIVE_KEY_RE.search(str(k)):
             redacted[k] = "[REDACTED]"
-        else: redacted[k] = _redact_value(v)
+        else:
+            redacted[k] = _redact_value(v)
     return redacted
 
 
@@ -160,19 +175,20 @@ def redact_findings(findings: List[Dict]) -> List[Dict]:
     for f in findings:
         entry = dict(f)
         for field in _TEXT_FIELDS:
-            if isinstance(entry.get(field), str): entry[field], _ = redact_text(entry[field])
+            if isinstance(entry.get(field), str):
+                entry[field], _ = redact_text(entry[field])
         if isinstance(entry.get("probes"), list):
             redacted_probes = []
             for p in entry["probes"]:
                 p = dict(p)
                 for field in ("observation", "input_summary"):
-                    if isinstance(p.get(field), str): p[field], _ = redact_text(p[field])
+                    if isinstance(p.get(field), str):
+                        p[field], _ = redact_text(p[field])
                 redacted_probes.append(p)
             entry["probes"] = redacted_probes
         if isinstance(entry.get("state_changes_made"), list):
             entry["state_changes_made"] = [
-                redact_text(s)[0] if isinstance(s, str) else s
-                for s in entry["state_changes_made"]
+                redact_text(s)[0] if isinstance(s, str) else s for s in entry["state_changes_made"]
             ]
         clean.append(entry)
     return clean

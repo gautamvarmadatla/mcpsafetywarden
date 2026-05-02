@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Command-line interface for MCP Behavior Wrapper."""
+
 import asyncio
 import json
 import sys
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -118,23 +119,22 @@ def _parse_json_opt(s: Optional[str], name: str) -> Optional[dict]:
 
 def _risk_badge(risk: str) -> str:
     return {
-        "high":       "[bold red]HIGH[/bold red]",
-        "medium":     "[bold yellow]MEDIUM[/bold yellow]",
+        "high": "[bold red]HIGH[/bold red]",
+        "medium": "[bold yellow]MEDIUM[/bold yellow]",
         "medium-low": "[yellow]MEDIUM-LOW[/yellow]",
-        "low":        "[green]LOW[/green]",
-        "none":       "[dim]NONE[/dim]",
+        "low": "[green]LOW[/green]",
+        "none": "[dim]NONE[/dim]",
     }.get(risk.lower() if risk else "", risk or "unknown")
 
 
 def _effect_badge(effect: str) -> str:
     return {
-        "read_only":      "[green]read_only[/green]",
+        "read_only": "[green]read_only[/green]",
         "additive_write": "[yellow]additive_write[/yellow]",
         "mutating_write": "[yellow]mutating_write[/yellow]",
-        "external_action":"[red]external_action[/red]",
-        "destructive":    "[bold red]destructive[/bold red]",
+        "external_action": "[red]external_action[/red]",
+        "destructive": "[bold red]destructive[/bold red]",
     }.get(effect, effect)
-
 
 
 @app.command("list")
@@ -189,7 +189,9 @@ def cmd_onboard(
     url: Optional[str] = typer.Option(None, "--url", help="sse/streamable_http: server URL"),
     env: Optional[str] = typer.Option(None, "--env", help="JSON object of env vars"),
     headers: Optional[str] = typer.Option(None, "--headers", help="JSON object of HTTP headers"),
-    scan_provider: Optional[str] = typer.Option(None, "--scan-provider", help="anthropic | openai | gemini | ollama | cisco | snyk"),
+    scan_provider: Optional[str] = typer.Option(
+        None, "--scan-provider", help="anthropic | openai | gemini | ollama | cisco | snyk"
+    ),
     scan_model: Optional[str] = typer.Option(None, "--scan-model"),
     scan_api_key: Optional[str] = typer.Option(None, "--scan-api-key"),
     github_url: Optional[str] = typer.Option(None, "--github-url", help="GitHub repo URL for source code analysis"),
@@ -198,26 +200,32 @@ def cmd_onboard(
 ):
     """Register + security scan + inspect in one shot."""
     confirm_scan = yes or (
-        scan_provider is not None and Confirm.ask(
+        scan_provider is not None
+        and Confirm.ask(
             f"Active security probing will be sent to [cyan]{server_id}[/cyan]. "
             "Confirm you own and are authorized to test it?"
         )
     )
 
     with console.status(f"Onboarding [cyan]{server_id}[/cyan]..."):
-        result = _load(_run(_onboard_server(
-            server_id=server_id, transport=transport,
-            command=command,
-            args=_parse_json_array(args, "--args"),
-            url=url,
-            env=_parse_json_opt(env, "--env"),
-            headers=_parse_json_opt(headers, "--headers"),
-            scan_provider=scan_provider,
-            scan_model=scan_model,
-            scan_api_key=scan_api_key,
-            confirm_scan_authorized=bool(confirm_scan),
-            github_url=github_url,
-        )))
+        result = _load(
+            _run(
+                _onboard_server(
+                    server_id=server_id,
+                    transport=transport,
+                    command=command,
+                    args=_parse_json_array(args, "--args"),
+                    url=url,
+                    env=_parse_json_opt(env, "--env"),
+                    headers=_parse_json_opt(headers, "--headers"),
+                    scan_provider=scan_provider,
+                    scan_model=scan_model,
+                    scan_api_key=scan_api_key,
+                    confirm_scan_authorized=bool(confirm_scan),
+                    github_url=github_url,
+                )
+            )
+        )
     _die(result)
     if json_output:
         console.print_json(json.dumps(result))
@@ -228,7 +236,9 @@ def cmd_onboard(
     console.print(f"[green]+[/green] Registered [cyan]{server_id}[/cyan] - {tools_found} tool(s) discovered")
     if reg.get("credential_refs"):
         n = sum(len(v) for v in reg["credential_refs"].values())
-        console.print(f"[yellow]~[/yellow] {n} secret(s) detected in headers/env and stored securely as cref_ refs (run with --json to see mappings)")
+        console.print(
+            f"[yellow]~[/yellow] {n} secret(s) detected in headers/env and stored securely as cref_ refs (run with --json to see mappings)"
+        )
 
     scan = result.get("security_scan") or {}
     if scan.get("skipped"):
@@ -257,19 +267,24 @@ def cmd_register(
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Register a server (with optional immediate inspect)."""
-    result = _load(_run(_register_server(
-        server_id=server_id, transport=transport,
-        command=command,
-        args=_parse_json_array(args, "--args"),
-        url=url,
-        env=_parse_json_opt(env, "--env"),
-        headers=_parse_json_opt(headers, "--headers"),
-        auto_inspect=not no_inspect,
-        classify_provider=provider,
-        classify_model=model,
-        classify_api_key=api_key,
-        github_url=github_url,
-    )))
+    result = _load(
+        _run(
+            _register_server(
+                server_id=server_id,
+                transport=transport,
+                command=command,
+                args=_parse_json_array(args, "--args"),
+                url=url,
+                env=_parse_json_opt(env, "--env"),
+                headers=_parse_json_opt(headers, "--headers"),
+                auto_inspect=not no_inspect,
+                classify_provider=provider,
+                classify_model=model,
+                classify_api_key=api_key,
+                github_url=github_url,
+            )
+        )
+    )
     _die(result)
     if json_output:
         console.print_json(json.dumps(result))
@@ -277,7 +292,9 @@ def cmd_register(
     console.print(f"[green]+[/green] Registered [cyan]{server_id}[/cyan] - {result.get('tools_discovered', 0)} tool(s)")
     if result.get("credential_refs"):
         n = sum(len(v) for v in result["credential_refs"].values())
-        console.print(f"[yellow]~[/yellow] {n} secret(s) detected in headers/env and stored securely as cref_ refs (run with --json to see mappings)")
+        console.print(
+            f"[yellow]~[/yellow] {n} secret(s) detected in headers/env and stored securely as cref_ refs (run with --json to see mappings)"
+        )
 
 
 @app.command("inspect")
@@ -290,10 +307,16 @@ def cmd_inspect(
 ):
     """Refresh tool list and behavior profiles for a registered server."""
     with console.status(f"Inspecting [cyan]{server_id}[/cyan]..."):
-        result = _load(_run(_inspect_server(
-            server_id, classify_provider=provider,
-            classify_model=model, classify_api_key=api_key,
-        )))
+        result = _load(
+            _run(
+                _inspect_server(
+                    server_id,
+                    classify_provider=provider,
+                    classify_model=model,
+                    classify_api_key=api_key,
+                )
+            )
+        )
     _die(result)
     if json_output:
         console.print_json(json.dumps(result))
@@ -304,7 +327,9 @@ def cmd_inspect(
         sev = drift.get("overall_severity", "")
         _SEV_COLOR = {"CRITICAL": "bold red", "HIGH": "red", "MEDIUM": "yellow", "LOW": "cyan"}
         color = _SEV_COLOR.get(sev, "white")
-        console.print(f"  [{color}]Drift detected[/{color}] ({sev}): {len(drift.get('findings', []))} change(s) - run [dim]mcpsafetywarden drift {server_id}[/dim] for details")
+        console.print(
+            f"  [{color}]Drift detected[/{color}] ({sev}): {len(drift.get('findings', []))} change(s) - run [dim]mcpsafetywarden drift {server_id}[/dim] for details"
+        )
 
 
 @app.command("drift")
@@ -358,14 +383,27 @@ def cmd_drift(
 @app.command("scan")
 def cmd_scan(
     server_id: Optional[str] = typer.Argument(None),
-    provider: Optional[str] = typer.Option(None, "--provider", "-p", help="anthropic | openai | gemini | ollama | cisco | snyk | all  (default: auto-detect)"),
+    provider: Optional[str] = typer.Option(
+        None,
+        "--provider",
+        "-p",
+        help="anthropic | openai | gemini | ollama | cisco | snyk | all  (default: auto-detect)",
+    ),
     model: Optional[str] = typer.Option(None, "--model"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
     destructive: bool = typer.Option(False, "--destructive", help="Enable path traversal / command injection probes"),
-    skip_web_research: bool = typer.Option(True, "--skip-web-research/--web-research", help="Skip DuckDuckGo/HackerNews/Arxiv CVE research (default: skip to avoid leaking findings)"),
+    skip_web_research: bool = typer.Option(
+        True,
+        "--skip-web-research/--web-research",
+        help="Skip DuckDuckGo/HackerNews/Arxiv CVE research (default: skip to avoid leaking findings)",
+    ),
     timeout: int = typer.Option(900, "--timeout", help="Scan timeout in seconds"),
-    github_url: Optional[str] = typer.Option(None, "--github-url", help="GitHub repo URL for source code analysis (auto-detected if omitted)"),
-    background: bool = typer.Option(False, "--background", help="Return immediately; retrieve results later with get-scan"),
+    github_url: Optional[str] = typer.Option(
+        None, "--github-url", help="GitHub repo URL for source code analysis (auto-detected if omitted)"
+    ),
+    background: bool = typer.Option(
+        False, "--background", help="Return immediately; retrieve results later with get-scan"
+    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip authorization prompt"),
     json_output: bool = typer.Option(False, "--json"),
 ):
@@ -381,16 +419,22 @@ def cmd_scan(
             raise typer.Exit(0)
 
     with console.status("Scanning..."):
-        result = _load(_run(_security_scan_server(
-            server_id=server_id, provider=provider,
-            model_id=model, api_key=api_key,
-            confirm_authorized=True,
-            allow_destructive_probes=destructive,
-            skip_web_research=skip_web_research,
-            scan_timeout_s=timeout,
-            background=background,
-            github_url=github_url,
-        )))
+        result = _load(
+            _run(
+                _security_scan_server(
+                    server_id=server_id,
+                    provider=provider,
+                    model_id=model,
+                    api_key=api_key,
+                    confirm_authorized=True,
+                    allow_destructive_probes=destructive,
+                    skip_web_research=skip_web_research,
+                    scan_timeout_s=timeout,
+                    background=background,
+                    github_url=github_url,
+                )
+            )
+        )
     _die(result)
     if json_output:
         console.print_json(json.dumps(result))
@@ -432,7 +476,9 @@ def cmd_scan(
 
     burp_count = result.get("burp_findings_count", 0)
     if burp_count:
-        console.print(f"\n[bold]Burp Suite[/bold] added [cyan]{burp_count}[/cyan] HTTP-layer finding(s) - use [dim]--json[/dim] for full detail")
+        console.print(
+            f"\n[bold]Burp Suite[/bold] added [cyan]{burp_count}[/cyan] HTTP-layer finding(s) - use [dim]--json[/dim] for full detail"
+        )
 
 
 @app.command("call")
@@ -441,7 +487,9 @@ def cmd_call(
     tool_name: str = typer.Argument(...),
     args: Optional[str] = typer.Option(None, "--args", "-a", help="JSON object of tool arguments"),
     approved: bool = typer.Option(False, "--approved", help="Bypass risk gate (for scripting)"),
-    args_scan_override: bool = typer.Option(False, "--args-scan-override", help="Skip arg safety scan (use only when you have verified the args are safe)"),
+    args_scan_override: bool = typer.Option(
+        False, "--args-scan-override", help="Skip arg safety scan (use only when you have verified the args are safe)"
+    ),
     provider: Optional[str] = typer.Option(None, "--provider", help="LLM for alternatives"),
     model: Optional[str] = typer.Option(None, "--model"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
@@ -450,14 +498,18 @@ def cmd_call(
     """Execute a tool safely with interactive risk gating."""
     parsed_args = _parse_args(args)
 
-    result = _run(_safe_tool_call(
-        server_id=server_id, tool_name=tool_name,
-        args=parsed_args, approved=approved,
-        args_scan_override=args_scan_override,
-        llm_provider=provider,
-        llm_model=model,
-        llm_api_key=api_key,
-    ))
+    result = _run(
+        _safe_tool_call(
+            server_id=server_id,
+            tool_name=tool_name,
+            args=parsed_args,
+            approved=approved,
+            args_scan_override=args_scan_override,
+            llm_provider=provider,
+            llm_model=model,
+            llm_api_key=api_key,
+        )
+    )
     result = _load(result)
 
     if not result.get("blocked"):
@@ -469,24 +521,34 @@ def cmd_call(
         raise typer.Exit(1)
 
     if result.get("reason") == "arg_scan_blocked":
-        console.print(Panel(
-            f"[red]x Arg scan blocked[/red]\n"
-            f"  Arg:        [yellow]{result.get('flagged_arg', '?')}[/yellow]\n"
-            f"  Value:      [yellow]{result.get('flagged_value', '')[:120]}[/yellow]\n"
-            f"  Categories: {', '.join(result.get('categories', []))}\n"
-            f"  Verified:   {'LLM (confidence ' + str(result.get('llm_confidence', '')) + ')' if result.get('llm_verified') else 'pattern only'}",
-            title="Security: argument scan",
-        ))
+        console.print(
+            Panel(
+                f"[red]x Arg scan blocked[/red]\n"
+                f"  Arg:        [yellow]{result.get('flagged_arg', '?')}[/yellow]\n"
+                f"  Value:      [yellow]{result.get('flagged_value', '')[:120]}[/yellow]\n"
+                f"  Categories: {', '.join(result.get('categories', []))}\n"
+                f"  Verified:   {'LLM (confidence ' + str(result.get('llm_confidence', '')) + ')' if result.get('llm_verified') else 'pattern only'}",
+                title="Security: argument scan",
+            )
+        )
         if result.get("llm_verified"):
             err.print(f"[red]LLM confirmed threat:[/red] {result.get('llm_reason', '')}")
             raise typer.Exit(1)
         if Confirm.ask("[yellow]LLM not available - proceed anyway?[/yellow] (only if you trust these args)"):
-            result = _load(_run(_safe_tool_call(
-                server_id=server_id, tool_name=tool_name,
-                args=parsed_args, approved=approved,
-                args_scan_override=True,
-                llm_provider=provider, llm_model=model, llm_api_key=api_key,
-            )))
+            result = _load(
+                _run(
+                    _safe_tool_call(
+                        server_id=server_id,
+                        tool_name=tool_name,
+                        args=parsed_args,
+                        approved=approved,
+                        args_scan_override=True,
+                        llm_provider=provider,
+                        llm_model=model,
+                        llm_api_key=api_key,
+                    )
+                )
+            )
             _print_call_result(result, json_output)
         else:
             console.print("[yellow]Aborted.[/yellow]")
@@ -495,10 +557,12 @@ def cmd_call(
 
     alternatives = result.get("alternatives", [])
     risk = result.get("risk_level", "unknown")
-    console.print(Panel(
-        f"[yellow]! Blocked[/yellow]  risk: {_risk_badge(risk)}",
-        title=f"{tool_name}",
-    ))
+    console.print(
+        Panel(
+            f"[yellow]! Blocked[/yellow]  risk: {_risk_badge(risk)}",
+            title=f"{tool_name}",
+        )
+    )
     for alt in alternatives:
         name = alt.get("tool", "")
         if name == "More options":
@@ -514,11 +578,19 @@ def cmd_call(
     more_idx = str(len(alternatives))
 
     if choice == more_idx:
-        more = _load(_run(_safe_tool_call(
-            server_id=server_id, tool_name=tool_name,
-            args=parsed_args, show_more_options=True,
-            llm_provider=provider, llm_model=model, llm_api_key=api_key,
-        )))
+        more = _load(
+            _run(
+                _safe_tool_call(
+                    server_id=server_id,
+                    tool_name=tool_name,
+                    args=parsed_args,
+                    show_more_options=True,
+                    llm_provider=provider,
+                    llm_model=model,
+                    llm_api_key=api_key,
+                )
+            )
+        )
         for opt in more.get("options", []):
             console.print(f"  [cyan]{opt.get('choice', '')}.[/cyan]  {opt.get('action', '')}")
 
@@ -527,12 +599,20 @@ def cmd_call(
             console.print("[yellow]Aborted.[/yellow]")
             raise typer.Exit(0)
 
-        result = _load(_run(_safe_tool_call(
-            server_id=server_id, tool_name=tool_name,
-            args=parsed_args, approved=True,
-            args_scan_override=args_scan_override,
-            llm_provider=provider, llm_model=model, llm_api_key=api_key,
-        )))
+        result = _load(
+            _run(
+                _safe_tool_call(
+                    server_id=server_id,
+                    tool_name=tool_name,
+                    args=parsed_args,
+                    approved=True,
+                    args_scan_override=args_scan_override,
+                    llm_provider=provider,
+                    llm_model=model,
+                    llm_api_key=api_key,
+                )
+            )
+        )
         _print_call_result(result, json_output)
         return
 
@@ -542,23 +622,40 @@ def cmd_call(
         err.print("[red]Invalid choice.[/red]")
         raise typer.Exit(1)
 
-    result = _load(_run(_safe_tool_call(
-        server_id=server_id, tool_name=tool_name,
-        args=parsed_args, use_alternative=chosen.get("tool", ""),
-        args_scan_override=args_scan_override,
-        llm_provider=provider, llm_model=model, llm_api_key=api_key,
-    )))
+    result = _load(
+        _run(
+            _safe_tool_call(
+                server_id=server_id,
+                tool_name=tool_name,
+                args=parsed_args,
+                use_alternative=chosen.get("tool", ""),
+                args_scan_override=args_scan_override,
+                llm_provider=provider,
+                llm_model=model,
+                llm_api_key=api_key,
+            )
+        )
+    )
 
     if result.get("blocked"):
         if result.get("reason") == "alternative_also_requires_approval":
             console.print(f"'{chosen.get('tool', '')}' also requires approval.")
             if Confirm.ask("Proceed anyway?"):
-                result = _load(_run(_safe_tool_call(
-                    server_id=server_id, tool_name=tool_name,
-                    args=parsed_args, use_alternative=chosen.get("tool", ""),
-                    approved=True, args_scan_override=args_scan_override,
-                    llm_provider=provider, llm_model=model, llm_api_key=api_key,
-                )))
+                result = _load(
+                    _run(
+                        _safe_tool_call(
+                            server_id=server_id,
+                            tool_name=tool_name,
+                            args=parsed_args,
+                            use_alternative=chosen.get("tool", ""),
+                            approved=True,
+                            args_scan_override=args_scan_override,
+                            llm_provider=provider,
+                            llm_model=model,
+                            llm_api_key=api_key,
+                        )
+                    )
+                )
             else:
                 console.print("[yellow]Aborted.[/yellow]")
                 raise typer.Exit(0)
@@ -577,17 +674,16 @@ def _print_call_result(result: dict, json_output: bool):
         console.print_json(json.dumps(result))
         return
     if result.get("quarantined"):
-        console.print(Panel(
-            f"[red]! Output quarantined - possible injection attack[/red]\n{result.get('message', '')}",
-            title="Security Warning",
-        ))
+        console.print(
+            Panel(
+                f"[red]! Output quarantined - possible injection attack[/red]\n{result.get('message', '')}",
+                title="Security Warning",
+            )
+        )
         return
     tel = result.get("telemetry", {})
     items = result.get("result", [])
-    text = "\n".join(
-        i.get("text", str(i)) if isinstance(i, dict) else str(i)
-        for i in items
-    )
+    text = "\n".join(i.get("text", str(i)) if isinstance(i, dict) else str(i) for i in items)
     executed_with = result.get("executed_with") or result.get("executed_tool")
     title = f"+  {tel.get('latency_ms', '?')}ms"
     if executed_with:
@@ -606,17 +702,28 @@ def cmd_preflight(
     provider: Optional[str] = typer.Option(None, "--provider", "-p", help="LLM provider for classification fallback"),
     model: Optional[str] = typer.Option(None, "--model"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
-    scan_provider: Optional[str] = typer.Option(None, "--scan-provider", help="Provider for auto-scan when no scan exists yet"),
+    scan_provider: Optional[str] = typer.Option(
+        None, "--scan-provider", help="Provider for auto-scan when no scan exists yet"
+    ),
     scan_model: Optional[str] = typer.Option(None, "--scan-model"),
     scan_api_key: Optional[str] = typer.Option(None, "--scan-api-key"),
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Risk assessment for a tool without executing it."""
-    result = _load(_run(_preflight_tool_call(
-        server_id=server_id, tool_name=tool_name,
-        llm_provider=provider, llm_model=model, llm_api_key=api_key,
-        auto_scan_provider=scan_provider, auto_scan_model=scan_model, auto_scan_api_key=scan_api_key,
-    )))
+    result = _load(
+        _run(
+            _preflight_tool_call(
+                server_id=server_id,
+                tool_name=tool_name,
+                llm_provider=provider,
+                llm_model=model,
+                llm_api_key=api_key,
+                auto_scan_provider=scan_provider,
+                auto_scan_model=scan_model,
+                auto_scan_api_key=scan_api_key,
+            )
+        )
+    )
     _die(result)
     if json_output:
         console.print_json(json.dumps(result))
@@ -634,9 +741,7 @@ def cmd_preflight(
     console.print(Panel("\n".join(lines), title=f"Preflight - {tool_name}"))
     if result.get("security"):
         sec = result["security"]
-        console.print(
-            f"[red]Security:[/red] {sec.get('risk_level')} - {(sec.get('finding') or '')[:100]}"
-        )
+        console.print(f"[red]Security:[/red] {sec.get('risk_level')} - {(sec.get('finding') or '')[:100]}")
     if result.get("warning"):
         console.print(f"[yellow]![/yellow]  {result['warning']}")
 
@@ -666,22 +771,29 @@ def cmd_retry_policy(
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Retry and timeout recommendations for a tool."""
-    result = _load(_get_retry_policy(
-        server_id=server_id, tool_name=tool_name,
-        llm_provider=provider, llm_model=model, llm_api_key=api_key,
-    ))
+    result = _load(
+        _get_retry_policy(
+            server_id=server_id,
+            tool_name=tool_name,
+            llm_provider=provider,
+            llm_model=model,
+            llm_api_key=api_key,
+        )
+    )
     _die(result)
     if json_output:
         console.print_json(json.dumps(result))
         return
-    console.print(Panel(
-        f"Policy:      {result.get('recommended_policy')}\n"
-        f"Max retries: {result.get('max_retries')}\n"
-        f"Backoff:     {result.get('backoff_strategy')}\n"
-        f"Timeout:     {result.get('suggested_timeout_ms') or 'N/A'}{'ms' if result.get('suggested_timeout_ms') else ''}\n"
-        f"Retry safety:{result.get('retry_safety', 'unknown')}",
-        title=f"Retry Policy - {tool_name}",
-    ))
+    console.print(
+        Panel(
+            f"Policy:      {result.get('recommended_policy')}\n"
+            f"Max retries: {result.get('max_retries')}\n"
+            f"Backoff:     {result.get('backoff_strategy')}\n"
+            f"Timeout:     {result.get('suggested_timeout_ms') or 'N/A'}{'ms' if result.get('suggested_timeout_ms') else ''}\n"
+            f"Retry safety:{result.get('retry_safety', 'unknown')}",
+            title=f"Retry Policy - {tool_name}",
+        )
+    )
 
 
 @app.command("alternatives")
@@ -694,10 +806,15 @@ def cmd_alternatives(
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Find lower-risk alternatives for a tool on the same server."""
-    result = _load(_suggest_safer_alternative(
-        server_id=server_id, tool_name=tool_name,
-        llm_provider=provider, llm_model=model, llm_api_key=api_key,
-    ))
+    result = _load(
+        _suggest_safer_alternative(
+            server_id=server_id,
+            tool_name=tool_name,
+            llm_provider=provider,
+            llm_model=model,
+            llm_api_key=api_key,
+        )
+    )
     _die(result)
     if json_output:
         console.print_json(json.dumps(result))
@@ -730,16 +847,20 @@ def cmd_replay(
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Test idempotency by running a tool twice with identical args."""
-    confirmed = yes or Confirm.ask(
-        f"This will execute [cyan]{tool_name}[/cyan] TWICE. Confirm?"
-    )
+    confirmed = yes or Confirm.ask(f"This will execute [cyan]{tool_name}[/cyan] TWICE. Confirm?")
     if not confirmed:
         raise typer.Exit(0)
 
-    result = _load(_run(_run_replay_test(
-        server_id=server_id, tool_name=tool_name,
-        args=_parse_args(args), approved=True,
-    )))
+    result = _load(
+        _run(
+            _run_replay_test(
+                server_id=server_id,
+                tool_name=tool_name,
+                args=_parse_args(args),
+                approved=True,
+            )
+        )
+    )
     _die(result)
     if json_output:
         console.print_json(json.dumps(result))
@@ -773,9 +894,13 @@ def cmd_policy(
         return
 
     policy_val = None if set_policy == "clear" else set_policy
-    result = _load(_set_tool_policy(
-        server_id=server_id, tool_name=tool_name, policy=policy_val,
-    ))
+    result = _load(
+        _set_tool_policy(
+            server_id=server_id,
+            tool_name=tool_name,
+            policy=policy_val,
+        )
+    )
     _die(result)
     if json_output:
         console.print_json(json.dumps(result))
@@ -888,9 +1013,15 @@ def cmd_scan_all(
     provider: str = typer.Option(..., "--provider", "-p", help="anthropic | openai | gemini | ollama"),
     model: Optional[str] = typer.Option(None, "--model"),
     api_key: Optional[str] = typer.Option(None, "--api-key"),
-    server_ids: Optional[str] = typer.Option(None, "--servers", help="Comma-separated server IDs to scan; omit for all"),
+    server_ids: Optional[str] = typer.Option(
+        None, "--servers", help="Comma-separated server IDs to scan; omit for all"
+    ),
     destructive: bool = typer.Option(False, "--destructive", help="Enable path traversal / command injection probes"),
-    skip_web_research: bool = typer.Option(True, "--skip-web-research/--web-research", help="Skip DuckDuckGo/HackerNews/Arxiv CVE research (default: skip to avoid leaking findings)"),
+    skip_web_research: bool = typer.Option(
+        True,
+        "--skip-web-research/--web-research",
+        help="Skip DuckDuckGo/HackerNews/Arxiv CVE research (default: skip to avoid leaking findings)",
+    ),
     timeout: int = typer.Option(900, "--timeout", help="Timeout per server in seconds"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip authorization prompt"),
     json_output: bool = typer.Option(False, "--json"),
@@ -900,23 +1031,26 @@ def cmd_scan_all(
     target = f"[cyan]{', '.join(sid_list)}[/cyan]" if sid_list else "all registered servers"
 
     confirmed = yes or Confirm.ask(
-        f"Active security probing will be sent to {target}. "
-        "Confirm you own and are authorized to test them?"
+        f"Active security probing will be sent to {target}. Confirm you own and are authorized to test them?"
     )
     if not confirmed:
         raise typer.Exit(0)
 
     with console.status(f"Scanning {target}..."):
-        result = _load(_run(_scan_all_servers(
-            provider=provider,
-            model_id=model,
-            api_key=api_key,
-            confirm_authorized=True,
-            allow_destructive_probes=destructive,
-            skip_web_research=skip_web_research,
-            scan_timeout_s=timeout,
-            server_ids=sid_list,
-        )))
+        result = _load(
+            _run(
+                _scan_all_servers(
+                    provider=provider,
+                    model_id=model,
+                    api_key=api_key,
+                    confirm_authorized=True,
+                    allow_destructive_probes=destructive,
+                    skip_web_research=skip_web_research,
+                    scan_timeout_s=timeout,
+                    server_ids=sid_list,
+                )
+            )
+        )
     _die(result)
     if json_output:
         console.print_json(json.dumps(result))
@@ -949,18 +1083,24 @@ def cmd_scan_all(
 
 @app.command("discover")
 def cmd_discover(
-    client: Optional[str] = typer.Option(None, "--client", "-c", help="Filter to a specific client ID (e.g. cursor, vscode, claude-desktop)"),
+    client: Optional[str] = typer.Option(
+        None, "--client", "-c", help="Filter to a specific client ID (e.g. cursor, vscode, claude-desktop)"
+    ),
     no_project: bool = typer.Option(False, "--no-project", help="Skip project-level config files in current directory"),
     no_community: bool = typer.Option(False, "--no-community", help="Skip community-verified paths"),
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Scan local MCP client configs to find installed MCP servers."""
     with console.status("Scanning MCP client configs..."):
-        result = _load(_run(_discover_servers(
-            client=client,
-            include_project=not no_project,
-            include_community_paths=not no_community,
-        )))
+        result = _load(
+            _run(
+                _discover_servers(
+                    client=client,
+                    include_project=not no_project,
+                    include_community_paths=not no_community,
+                )
+            )
+        )
     _die(result)
     if json_output:
         console.print_json(json.dumps(result))
@@ -986,7 +1126,7 @@ def cmd_discover(
         if args:
             cmd_display += " " + " ".join(str(a) for a in args[:3])
             if len(args) > 3:
-                cmd_display += f" (+{len(args)-3})"
+                cmd_display += f" (+{len(args) - 3})"
         registered = "[green]yes[/green]" if entry.get("registered") else "[dim]no[/dim]"
         activation_only = entry.get("activation_state_only")
         reg_display = "[yellow]state only[/yellow]" if activation_only else registered
@@ -1006,13 +1146,17 @@ def cmd_discover(
         console.print(f"[dim]Clients scanned: {', '.join(clients_found)}[/dim]")
     unregistered = sum(1 for e in discovered if not e.get("registered") and not e.get("activation_state_only"))
     if unregistered:
-        console.print(f"\n[cyan]{unregistered}[/cyan] server(s) not yet registered. Run [dim]mcpsafetywarden onboard-discovered --all[/dim] to register them.")
+        console.print(
+            f"\n[cyan]{unregistered}[/cyan] server(s) not yet registered. Run [dim]mcpsafetywarden onboard-discovered --all[/dim] to register them."
+        )
 
 
 @app.command("onboard-discovered")
 def cmd_onboard_discovered(
     discovery_ids: Optional[str] = typer.Option(None, "--ids", help="Comma-separated discovery_id values"),
-    client: Optional[str] = typer.Option(None, "--client", "-c", help="Onboard all discovered servers from a specific client"),
+    client: Optional[str] = typer.Option(
+        None, "--client", "-c", help="Onboard all discovered servers from a specific client"
+    ),
     all_found: bool = typer.Option(False, "--all", help="Onboard all unregistered discovered servers"),
     no_inspect: bool = typer.Option(False, "--no-inspect", help="Skip auto-inspect after registration"),
     provider: Optional[str] = typer.Option(None, "--provider", help="LLM for tool classification"),
@@ -1027,25 +1171,27 @@ def cmd_onboard_discovered(
         err.print("[red]Provide --ids, --client, or --all[/red]")
         raise typer.Exit(1)
 
-    confirmed = yes or Confirm.ask(
-        "This will register and inspect discovered MCP servers. Confirm?"
-    )
+    confirmed = yes or Confirm.ask("This will register and inspect discovered MCP servers. Confirm?")
     if not confirmed:
         raise typer.Exit(0)
 
     ids_list = [i.strip() for i in discovery_ids.split(",")] if discovery_ids else None
 
     with console.status("Onboarding discovered servers..."):
-        result = _load(_run(_onboard_discovered_servers(
-            discovery_ids=ids_list,
-            client=client,
-            all_found=all_found,
-            auto_inspect=not no_inspect,
-            classify_provider=provider,
-            classify_model=model,
-            classify_api_key=api_key,
-            github_url=github_url,
-        )))
+        result = _load(
+            _run(
+                _onboard_discovered_servers(
+                    discovery_ids=ids_list,
+                    client=client,
+                    all_found=all_found,
+                    auto_inspect=not no_inspect,
+                    classify_provider=provider,
+                    classify_model=model,
+                    classify_api_key=api_key,
+                    github_url=github_url,
+                )
+            )
+        )
     _die(result)
     if json_output:
         console.print_json(json.dumps(result))
@@ -1065,7 +1211,9 @@ def cmd_onboard_discovered(
             console.print(f"  [green]+[/green] {name} -> [cyan]{r.get('server_id')}[/cyan] ({tools} tool(s))")
             if r.get("credential_refs"):
                 n = sum(len(v) for v in r["credential_refs"].values())
-                console.print(f"    [yellow]~[/yellow] {n} secret(s) stored as cref_ refs (run with --json to see mappings)")
+                console.print(
+                    f"    [yellow]~[/yellow] {n} secret(s) stored as cref_ refs (run with --json to see mappings)"
+                )
         elif status == "already_registered":
             console.print(f"  [dim]=[/dim] {name} already registered as [cyan]{r.get('server_id')}[/cyan]")
         elif status == "skipped":
@@ -1080,7 +1228,9 @@ def cmd_onboard_discovered(
 @app.command("graph")
 def cmd_graph(
     server_id: Optional[str] = typer.Argument(None, help="Scope to one server; omit for the full workspace graph"),
-    rebuild: bool = typer.Option(False, "--rebuild", "-r", help="Rebuild graph from all stored Safety Warden data before returning"),
+    rebuild: bool = typer.Option(
+        False, "--rebuild", "-r", help="Rebuild graph from all stored Safety Warden data before returning"
+    ),
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Show the inventory risk graph: node counts by type, relation count, and build status."""
@@ -1118,7 +1268,9 @@ def cmd_graph(
     console.print(tbl)
     console.print(f"Relations: {len(relations)}")
     if objects:
-        console.print("[dim]Run [bold]explain-risk <server_id> <tool_name>[/bold] for a full tool risk breakdown.[/dim]")
+        console.print(
+            "[dim]Run [bold]explain-risk <server_id> <tool_name>[/bold] for a full tool risk breakdown.[/dim]"
+        )
 
 
 @app.command("explain-risk")
@@ -1170,7 +1322,7 @@ def cmd_explain_risk(
         if verified:
             prov_str = f"[green]{eco}:{pkg}@{ver}[/green] (verified)"
         elif status == "unresolvable":
-            prov_str = f"[dim]unresolvable - manual verification recommended[/dim]"
+            prov_str = "[dim]unresolvable - manual verification recommended[/dim]"
         elif status == "not_found":
             prov_str = f"[yellow]{eco}:{pkg} - not found locally[/yellow]"
         else:
@@ -1197,8 +1349,7 @@ def cmd_explain_risk(
     mitigated = result.get("mitigated_composition_risks_count", 0)
     if live or mitigated:
         console.print(
-            f"Composition risks: [red]{live} live[/red]"
-            + (f", [dim]{mitigated} mitigated[/dim]" if mitigated else "")
+            f"Composition risks: [red]{live} live[/red]" + (f", [dim]{mitigated} mitigated[/dim]" if mitigated else "")
         )
 
     paths = result.get("risk_paths", [])
@@ -1213,7 +1364,9 @@ def cmd_explain_risk(
     if irs:
         console.print("[bold]Interaction risks:[/bold]")
         for ir in irs:
-            console.print(f"  [{ir.get('risk_score', 0.0):.1f}] {ir.get('pattern')}: {(ir.get('description') or '')[:100]}")
+            console.print(
+                f"  [{ir.get('risk_score', 0.0):.1f}] {ir.get('pattern')}: {(ir.get('description') or '')[:100]}"
+            )
 
     if result.get("note"):
         console.print(f"[dim]{result['note']}[/dim]")
@@ -1267,7 +1420,7 @@ def cmd_cve_blast(
         return
     entries = result.get("cve_blast_radius", [])
     if not entries:
-        console.print(f"[green]No shared CVEs found.[/green]")
+        console.print("[green]No shared CVEs found.[/green]")
         hint = result.get("hint", "")
         if hint:
             console.print(f"[dim]{hint}[/dim]")
