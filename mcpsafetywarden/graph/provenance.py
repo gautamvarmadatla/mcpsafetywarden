@@ -534,7 +534,7 @@ def _http_get_text(url: str) -> Optional[str]:
         return None
     try:
         req = urllib.request.Request(url, headers={"User-Agent": _UA})
-        with urllib.request.urlopen(req, timeout=_PKG_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=_PKG_TIMEOUT) as resp:  # nosec B310
             return resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
@@ -551,7 +551,7 @@ def _http_get_json(url: str) -> Optional[Dict[str, Any]]:
         return None
     try:
         req = urllib.request.Request(url, headers={"User-Agent": _UA})
-        with urllib.request.urlopen(req, timeout=_PKG_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=_PKG_TIMEOUT) as resp:  # nosec B310
             return json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
@@ -1093,6 +1093,7 @@ def get_tls_cert_fingerprint(url: str) -> Optional[str]:
         ctx = ssl.create_default_context()
         ctx.check_hostname = True
         ctx.verify_mode = ssl.CERT_REQUIRED
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         with socket.create_connection((host, port), timeout=_PKG_TIMEOUT) as sock:
             with ctx.wrap_socket(sock, server_hostname=host) as ssock:
                 cert_der = ssock.getpeercert(binary_form=True)
