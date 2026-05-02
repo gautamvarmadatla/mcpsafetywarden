@@ -45,6 +45,7 @@ def _is_github_url(s: str) -> bool:
     except Exception:
         return False
 
+
 _MAX_FILES = 40
 _MAX_FILE_BYTES = 50 * 1024
 _GITHUB_FETCH_TIMEOUT = 60
