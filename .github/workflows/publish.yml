@@ -81,13 +81,35 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          TAG="${{ github.ref_name }}"
+          PREV_TAG=$(gh release list --limit 2 --json tagName -q '.[1].tagName' 2>/dev/null || echo "")
+
           NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes \
-            -f tag_name="${{ github.ref_name }}" \
+            -f tag_name="$TAG" \
             --jq '.body' | \
             sed 's/ by @[^ ]* in #[0-9]*//g' | \
             grep -v "^## New Contributors" | \
             grep -v "made their first contribution")
-          gh release create "${{ github.ref_name }}" dist/* --notes "$NOTES" --title "${{ github.ref_name }}"
+
+          if [ -n "$PREV_TAG" ]; then
+            LOGINS=$(gh api "repos/${{ github.repository }}/compare/${PREV_TAG}...${TAG}" \
+              --jq '[.commits[].author | select(. != null) | .login] | unique | .[]' 2>/dev/null || echo "")
+          else
+            LOGINS=$(gh api "repos/${{ github.repository }}/commits?per_page=100" \
+              --jq '[.[].author | select(. != null) | .login] | unique | .[]' 2>/dev/null || echo "")
+          fi
+
+          if [ -n "$LOGINS" ]; then
+            AVATARS=""
+            while IFS= read -r login; do
+              [ -z "$login" ] && continue
+              USER_ID=$(gh api "users/$login" --jq '.id' 2>/dev/null || echo "")
+              [ -n "$USER_ID" ] && AVATARS+="[![@${login}](https://avatars.githubusercontent.com/u/${USER_ID}?s=64&v=4)](https://github.com/${login}) "
+            done <<< "$LOGINS"
+            [ -n "$AVATARS" ] && NOTES+=$'\n\n## Contributors\n\n'"$AVATARS"
+          fi
+
+          gh release create "$TAG" dist/* --notes "$NOTES" --title "$TAG"
 
   publish-docker:
     needs: build-and-publish
