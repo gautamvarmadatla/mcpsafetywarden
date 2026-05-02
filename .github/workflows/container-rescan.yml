@@ -76,7 +76,7 @@ jobs:
 
       - name: Upload SARIF to Security tab
         if: always() && hashFiles(format('image-scan-{0}.sarif', matrix.registry)) != ''
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: image-scan-${{ matrix.registry }}.sarif
           category: container-${{ matrix.registry }}
