@@ -23,7 +23,7 @@ jobs:
         registry: [ghcr, dockerhub]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Log in to GHCR
         if: matrix.registry == 'ghcr'
