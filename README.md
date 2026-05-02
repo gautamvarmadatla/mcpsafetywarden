@@ -14,6 +14,7 @@ MCP safety warden is a proxy server that wraps any MCP server and adds behaviora
 [![MCP Registry](https://img.shields.io/badge/MCP%20Registry-listed-blue)](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.gautamvarmadatla%2Fmcpsafetywarden)
 [![Docker](https://img.shields.io/badge/docker-hub-blue)](https://hub.docker.com/r/gautamdatla1999/mcpsafetywarden)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/gautamvarmadatla/mcpsafetywarden/badge)](https://scorecard.dev/viewer/?uri=github.com/gautamvarmadatla/mcpsafetywarden)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12730/badge)](https://www.bestpractices.dev/projects/12730)
 [![GitHub Stars](https://img.shields.io/github/stars/gautamvarmadatla/mcpsafetywarden?style=social)](https://github.com/gautamvarmadatla/mcpsafetywarden)
 
 
