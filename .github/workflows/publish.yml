@@ -82,14 +82,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ github.ref_name }}"
-          PREV_TAG=$(gh release list --limit 2 --json tagName -q '.[1].tagName' 2>/dev/null || echo "")
 
-          NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes \
-            -f tag_name="$TAG" \
-            --jq '.body' | \
-            sed 's/ by @[^ ]* in #[0-9]*//g' | \
-            grep -v "^## New Contributors" | \
-            grep -v "made their first contribution")
+          NOTES=$(git tag -l --format='%(contents)' "$TAG" | sed '/^-----BEGIN SSH SIGNATURE-----/,/^-----END SSH SIGNATURE-----/d' | sed '/^-----BEGIN PGP SIGNATURE-----/,/^-----END PGP SIGNATURE-----/d')
+          PREV_TAG=$(gh release list --limit 2 --json tagName -q '.[1].tagName' 2>/dev/null || echo "")
+          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
+            [ -n "$PREV_TAG" ] && NOTES="**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}"
+          fi
 
           if [ -n "$PREV_TAG" ]; then
             LOGINS=$(gh api "repos/${{ github.repository }}/compare/${PREV_TAG}...${TAG}" \
