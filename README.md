@@ -6,8 +6,16 @@
 MCP safety warden is a proxy server that wraps any MCP server and adds behavioral profiling, security scanning, risk gating, and safe execution to its tools.
 
 [![PyPI](https://img.shields.io/pypi/v/mcpsafetywarden)](https://pypi.org/project/mcpsafetywarden/)
-[![MCP Registry](https://img.shields.io/badge/MCP%20Registry-listed-blue)](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.gautamvarmadatla%2Fmcpsafetywarden)
+[![Python](https://img.shields.io/pypi/pyversions/mcpsafetywarden)](https://pypi.org/project/mcpsafetywarden/)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/mcpsafetywarden)](https://pypi.org/project/mcpsafetywarden/)
+[![License](https://img.shields.io/github/license/gautamvarmadatla/mcpsafetywarden)](LICENSE)
 [![CI](https://github.com/gautamvarmadatla/mcpsafetywarden/actions/workflows/ci.yml/badge.svg)](https://github.com/gautamvarmadatla/mcpsafetywarden/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/gautamvarmadatla/mcpsafetywarden/actions/workflows/codeql.yml/badge.svg)](https://github.com/gautamvarmadatla/mcpsafetywarden/actions/workflows/codeql.yml)
+[![MCP Registry](https://img.shields.io/badge/MCP%20Registry-listed-blue)](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.gautamvarmadatla%2Fmcpsafetywarden)
+[![Docker Image](https://img.shields.io/docker/v/gautamdatla1999/mcpsafetywarden?label=docker)](https://hub.docker.com/r/gautamdatla1999/mcpsafetywarden)
+[![Docker Pulls](https://img.shields.io/docker/pulls/gautamdatla1999/mcpsafetywarden)](https://hub.docker.com/r/gautamdatla1999/mcpsafetywarden)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/gautamvarmadatla/mcpsafetywarden/badge)](https://scorecard.dev/viewer/?uri=github.com/gautamvarmadatla/mcpsafetywarden)
+[![GitHub Stars](https://img.shields.io/github/stars/gautamvarmadatla/mcpsafetywarden?style=social)](https://github.com/gautamvarmadatla/mcpsafetywarden)
 
 
 ## Contents
