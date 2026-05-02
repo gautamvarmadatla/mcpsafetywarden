@@ -31,6 +31,9 @@ MCP safety warden is a proxy server that wraps any MCP server and adds behaviora
 - [Testing](#testing)
 - [Further reading](#further-reading)
 
+> [!IMPORTANT]
+> MCP security is an active research area. Recent surveys catalog a lot of protocol-specific threat categories spanning tool poisoning, prompt injection, rug-pull attacks, supply chain compromise, credential exfiltration, and composition attacks across the full server lifecycle. See [Securing the MCP (OpenReview)](https://openreview.net/pdf?id=Aqn9Wdr2wN), [Landscape & Threats (arXiv)](https://arxiv.org/abs/2503.23278), [When MCP Servers Attack (arXiv)](https://arxiv.org/abs/2509.24272), and [MCP-38 Taxonomy (arXiv)](https://arxiv.org/abs/2603.18063).
+
 ## Overview
 
 Use as a proxy to add safety gating to any MCP server, or point it at a server you don't own and run a full security audit without making a single tool call.
