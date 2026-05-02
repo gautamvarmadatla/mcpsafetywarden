@@ -140,6 +140,18 @@ def _gh_on_scan_stored(server_id: str, findings: Dict[str, Any]) -> None:
         _log.debug("graph hook on_scan_stored failed: %s", _ge)
 
 
+def _gh_on_composition_analysis(
+    server_id: str,
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    llm_api_key: Optional[str] = None,
+) -> None:
+    try:
+        _graph_builder.on_composition_analysis(server_id, llm_provider, llm_model, llm_api_key)
+    except Exception as _ge:
+        _log.debug("graph hook on_composition_analysis failed: %s", _ge)
+
+
 def _gh_on_provenance_detected(server_id: str, prov_info: Dict[str, Any]) -> None:
     try:
         _graph_builder.on_provenance_detected(server_id, prov_info)
@@ -1415,6 +1427,11 @@ async def _execute_scan_core(
 
     scan_id = db.store_security_scan(server_id, findings)
     _gh_on_scan_stored(server_id, findings)
+    _llm_prov = next(
+        (p.split("+", 1)[1] for p in providers_to_run if p.startswith("mcpsafety+")),
+        None,
+    )
+    _gh_on_composition_analysis(server_id, _llm_prov, model_id, api_key)
     findings["scan_id"] = scan_id
     if "providers" not in findings:
         findings["providers"] = [findings.pop("provider", providers_to_run[0])]
@@ -2552,23 +2569,29 @@ def explain_tool_risk(server_id: str, tool_name: str) -> str:
 
 
 @mcp.tool()
-def export_graph(format: str = "json", server_id: Optional[str] = None) -> str:
+def export_graph(format: str = "png", server_id: Optional[str] = None, output_path: Optional[str] = None) -> str:
     """
     Export the risk graph in the requested format.
 
-    format: "json" (default) - structured objects and relations list.
-            "mermaid" - Mermaid LR diagram with color-coded node types for pasting into docs.
+    format: "png" (default) - PNG image rendered via mmdc (requires: npm install -g @mermaid-js/mermaid-cli).
+            "mermaid" - Mermaid LR diagram source for pasting into mermaid.live.
+            "json" - structured objects and relations list.
 
     server_id: scope export to one server; omit for full workspace graph.
+    output_path: file path for PNG output; defaults to <server_id>_graph.png in the current directory.
 
-    BEFORE: get_risk_graph (graph must be populated).
+    Graph is rebuilt automatically before export.
     """
     try:
+        _graph_builder.rebuild_from_db()
+        if format == "png":
+            path = _graph_explain.export_as_png(server_id, output_path)
+            return json.dumps({"format": "png", "path": path}, indent=2)
         if format == "mermaid":
             diagram = _graph_explain.export_as_mermaid(server_id)
             return json.dumps({"format": "mermaid", "diagram": diagram}, indent=2)
         if format != "json":
-            return json.dumps({"error": f"Unsupported format {format!r}. Supported: 'json', 'mermaid'"}, indent=2)
+            return json.dumps({"error": f"Unsupported format {format!r}. Supported: 'png', 'mermaid', 'json'"}, indent=2)
         graph = _graph_store.get_full_graph(server_id)
         return json.dumps({"format": "json", **graph}, indent=2)
     except Exception as exc:

@@ -665,6 +665,7 @@ def on_tools_inspected(
     llm_provider: Optional[str] = None,
     llm_model: Optional[str] = None,
     llm_api_key: Optional[str] = None,
+    tamper_check: bool = True,
 ) -> None:
     try:
         for t in tools:
@@ -684,7 +685,7 @@ def on_tools_inspected(
             fingerprint = _provenance.compute_tool_fingerprint(tool_name, description, raw_schema)
 
             existing = store.get_object(tool_id)
-            if existing:
+            if tamper_check and existing:
                 old_fp = existing.get("metadata", {}).get("schema_fingerprint")
                 if old_fp and old_fp != fingerprint:
                     tamper_id = f"finding::tamper::{server_id}::{tool_name}"
@@ -826,6 +827,23 @@ def on_scan_stored(server_id: str, findings: Dict[str, Any]) -> None:
         _log.debug("graph on_scan_stored failed for %s: %s", server_id, exc)
 
 
+def on_composition_analysis(
+    server_id: str,
+    llm_provider: Optional[str] = None,
+    llm_model: Optional[str] = None,
+    llm_api_key: Optional[str] = None,
+) -> None:
+    try:
+        tools_raw = _db.list_tools(server_id)
+        if not tools_raw:
+            return
+        profiles = _db.get_profiles_batch([t["tool_id"] for t in tools_raw])
+        enriched = [{**t, **(profiles.get(t["tool_id"]) or {})} for t in tools_raw]
+        _add_composition_edges(server_id, enriched, llm_provider, llm_model, llm_api_key)
+    except Exception as exc:
+        _log.debug("graph on_composition_analysis failed for %s: %s", server_id, exc)
+
+
 def on_server_discovered(
     discovery_id: str,
     client: str,
@@ -955,8 +973,7 @@ def _add_composition_edges(
             for ev in evaluated
         }
     else:
-        confirmed = None
-        confidence_map = {}
+        return
 
     for r, e in all_pairs:
         r_name = r.get("tool_name") or r.get("name", "")
@@ -1104,7 +1121,7 @@ def rebuild_from_db() -> Dict[str, int]:
             for t in tools_raw:
                 p = profiles.get(t["tool_id"]) or {}
                 enriched.append({**t, **p})
-            on_tools_inspected(sid, enriched)
+            on_tools_inspected(sid, enriched, tamper_check=False)
             counts["tools"] += len(enriched)
 
         scan = _db.get_latest_security_scan(sid)

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
+import shutil
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -667,9 +671,16 @@ def export_as_mermaid(server_id: Optional[str] = None) -> str:
     def _clean(s: str) -> str:
         return s.replace("\n", " ").replace("\r", "").replace('"', "'").replace("[", "(").replace("]", ")").replace("{", "(").replace("}", ")").replace("#", "-").replace("|", "-")
 
+    skip_ids = {
+        obj["obj_id"] for obj in graph["objects"]
+        if obj["obj_type"] == "package_provenance" and obj.get("name") == "unresolvable"
+    }
+
     lines = ["graph LR"]
     node_ids: Dict[str, str] = {}
     for i, obj in enumerate(graph["objects"]):
+        if obj["obj_id"] in skip_ids:
+            continue
         nid = f"N{i}"
         node_ids[obj["obj_id"]] = nid
         meta = obj.get("metadata", {})
@@ -712,3 +723,29 @@ def export_as_mermaid(server_id: Optional[str] = None) -> str:
             lines.append(f"    {src} -->|{label}| {tgt}")
 
     return "\n".join(lines)
+
+
+def export_as_png(server_id: Optional[str] = None, output_path: Optional[str] = None) -> str:
+    if not shutil.which("mmdc"):
+        raise RuntimeError(
+            "mmdc not found. Install it with: npm install -g @mermaid-js/mermaid-cli"
+        )
+    diagram = export_as_mermaid(server_id)
+    if output_path is None:
+        stem = server_id or "graph"
+        output_path = os.path.join(os.getcwd(), f"{stem}_graph.png")
+    with tempfile.NamedTemporaryFile(suffix=".mmd", mode="w", delete=False) as f:
+        f.write(diagram)
+        tmp_mmd = f.name
+    try:
+        result = subprocess.run(
+            ["mmdc", "-i", tmp_mmd, "-o", output_path, "--backgroundColor", "white"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"mmdc failed: {result.stderr.strip()}")
+    finally:
+        os.unlink(tmp_mmd)
+    return output_path

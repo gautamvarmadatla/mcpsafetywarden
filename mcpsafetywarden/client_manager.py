@@ -619,7 +619,8 @@ async def inspect_server_tools(
         discovered.append({
             "tool_id":     tool_id,
             "name":        t["name"],
-            "description": t["description"][:120],
+            "description": t["description"],
+            "schema":      t["schema"],
             "effect_class":prior["effect_class"],
             "confidence":  prior["confidence"].get("effect_class", 0.0),
         })

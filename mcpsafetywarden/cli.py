@@ -1292,16 +1292,20 @@ def cmd_cve_blast(
 @app.command("export-graph")
 def cmd_export_graph(
     server_id: Optional[str] = typer.Argument(None, help="Scope to one server; omit for the full workspace graph"),
-    fmt: str = typer.Option("mermaid", "--format", "-f", help="Output format: json | mermaid (default: mermaid)"),
+    fmt: str = typer.Option("png", "--format", "-f", help="Output format: png (default) | mermaid | json"),
+    output_path: Optional[str] = typer.Option(None, "--output", "-o", help="Output file path (PNG only)"),
     json_output: bool = typer.Option(False, "--json"),
 ):
-    """Export the risk graph as a Mermaid diagram or structured JSON."""
-    result = _load(_export_graph(format=fmt, server_id=server_id))
+    """Export the risk graph as a PNG image (default), Mermaid source, or structured JSON."""
+    result = _load(_export_graph(format=fmt, server_id=server_id, output_path=output_path))
     _die(result)
     if json_output:
         console.print_json(json.dumps(result))
         return
-    if fmt == "mermaid":
+    if fmt == "png":
+        path = result.get("path", "")
+        console.print(f"[green]+ Graph saved to {path}[/green]")
+    elif fmt == "mermaid":
         diagram = result.get("diagram", "")
         console.print(Panel(diagram, title="Risk Graph (Mermaid)", expand=False))
         console.print("[dim]Paste the diagram content into https://mermaid.live to render it.[/dim]")

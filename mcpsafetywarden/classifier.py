@@ -592,14 +592,16 @@ def _classify_with_llm(
     result["evidence"] = list(result["evidence"]) + [f"llm_provider={provider}"]
 
     risk_level = parsed.get("risk_level", "LOW")
-    result["_security_finding"] = {
-        "name": tool_name,
-        "risk_level": risk_level,
-        "risk_tags": [t for t in (parsed.get("risk_tags") if isinstance(parsed.get("risk_tags"), list) else ([parsed["risk_tags"]] if isinstance(parsed.get("risk_tags"), str) else [])) if t in _VALID_RISK_TAGS],
-        "finding": "; ".join(parsed.get("evidence", [])),
-        "exploitation_scenario": parsed.get("exploitation_scenario"),
-        "remediation": parsed.get("remediation"),
-    }
+    risk_tags = [t for t in (parsed.get("risk_tags") if isinstance(parsed.get("risk_tags"), list) else ([parsed["risk_tags"]] if isinstance(parsed.get("risk_tags"), str) else [])) if t in _VALID_RISK_TAGS]
+    if risk_level in ("MEDIUM", "HIGH", "CRITICAL") or risk_tags:
+        result["_security_finding"] = {
+            "name": tool_name,
+            "risk_level": risk_level,
+            "risk_tags": risk_tags,
+            "finding": "; ".join(parsed.get("evidence", [])),
+            "exploitation_scenario": parsed.get("exploitation_scenario"),
+            "remediation": parsed.get("remediation"),
+        }
 
     return result
 
