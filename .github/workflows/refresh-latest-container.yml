@@ -23,7 +23,7 @@ jobs:
           git ls-remote --tags --sort=-v:refname https://github.com/${{ github.repository }}.git 'refs/tags/v*' \
             | grep -v '\^{}' | head -1 | sed 's|.*refs/tags/||' | xargs -I{} echo "tag={}" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ steps.tag.outputs.tag }}
 
