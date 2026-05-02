@@ -49,6 +49,7 @@ jobs:
         with:
           fail-on-severity: high
           retry-on-snapshot-warnings: true
+          fail-on-snapshot-warnings: false
           allow-licenses: >-
             Apache-2.0, MIT, MIT-0, MIT-CMU, BSD-2-Clause, BSD-3-Clause,
             ISC, PSF-2.0, Python-2.0, Python-2.0.1, 0BSD, Unlicense,
