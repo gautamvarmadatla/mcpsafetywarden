@@ -35,7 +35,7 @@ jobs:
         continue-on-error: true
 
       - name: Codespell
-        run: codespell mcpsafetywarden tests docs README.md
+        run: codespell mcpsafetywarden tests docs README.md --skip="mcpsafetywarden/static"
 
   test:
     name: Test (Python ${{ matrix.python-version }})
