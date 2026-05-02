@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -665,7 +666,56 @@ _REGISTRY: List[Dict[str, Any]] = [
             },
         ],
     },
+    {
+        "id": "docker-desktop-mcp",
+        "name": "Docker Desktop MCP Toolkit",
+        "paths": [
+            {
+                "path": _u(".docker", "mcp", "catalogs", "docker-mcp.yaml"),
+                "key": "servers",
+                "scope": "user",
+                "confidence": "verified",
+                "os": None,
+                "format": "yaml",
+                "activation_state_only": True,
+            },
+        ],
+    },
 ]
+
+
+_MCP_IMAGE_PREFIXES = (
+    "mcp/",
+    "mcp-server",
+    "modelcontextprotocol/",
+    "ghcr.io/github/github-mcp-server",
+)
+_MCP_CMD_RE = re.compile(
+    r"@modelcontextprotocol/|mcp-server[-_]|\bmcp\b.{0,30}server|uvx\s+mcp|python\s+-m\s+mcp",
+    re.IGNORECASE,
+)
+_MCP_ENV_PREFIXES = ("MCP_", "ANTHROPIC_API_KEY", "OPENAI_API_KEY")
+_COMPOSE_FILENAMES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
+_DYNAMIC_FILENAMES = frozenset({"mcp.json", ".mcp.json", "mcp-config.json", "mcp-servers.json"})
+_DYNAMIC_MAX_DEPTH = 3
+_DYNAMIC_MAX_FILE_BYTES = 256 * 1024
+_DYNAMIC_SKIP_DIRS = frozenset(
+    {
+        "node_modules",
+        ".git",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".mypy_cache",
+        "dist",
+        "build",
+        ".next",
+        ".nuxt",
+        "target",
+        ".gradle",
+        ".tox",
+    }
+)
 
 
 def _read_text(path: Path) -> Optional[str]:
@@ -843,8 +893,13 @@ def _normalize_entry(
     headers_raw = raw.get("headers")
     headers: Dict[str, str] = {str(k): str(v) for k, v in headers_raw.items()} if isinstance(headers_raw, dict) else {}
 
-    if not command and not url and not activation_state_only:
-        return None
+    if not command and not url:
+        image = raw.get("image")
+        if image:
+            command = "docker"
+            args = ["run", "--rm", "-i", str(image)]
+        elif not activation_state_only:
+            return None
 
     raw_type = raw.get("type") or raw.get("transport") or ""
     if url:
@@ -879,6 +934,340 @@ def make_server_id(client_id: str, server_name: str) -> str:
     safe_name = re.sub(r"[^a-zA-Z0-9_-]", "_", server_name)
     sid = f"{safe_client}__{safe_name}"
     return sid[:256]
+
+
+def _make_infra_entry(
+    client_id: str,
+    client_name: str,
+    server_name: str,
+    transport: str,
+    command: Optional[str],
+    args: List[str],
+    url: Optional[str],
+    env: Dict[str, str],
+    config_path: str,
+    scope: str,
+    confidence: str,
+    registered_server_ids: Optional[Set[str]],
+) -> Dict[str, Any]:
+    suggested_id = make_server_id(client_id, server_name)
+    return {
+        "discovery_id": f"{client_id}:{scope}:{server_name}",
+        "client": client_id,
+        "client_name": client_name,
+        "scope": scope,
+        "config_path": config_path,
+        "server_name": server_name,
+        "transport": transport,
+        "command": command,
+        "args": args,
+        "url": url,
+        "env": env,
+        "env_keys": sorted(env.keys()),
+        "headers": {},
+        "headers_keys": [],
+        "confidence": confidence,
+        "activation_state_only": False,
+        "suggested_server_id": suggested_id,
+        "registered": suggested_id in registered_server_ids if registered_server_ids is not None else False,
+    }
+
+
+def _discover_compose(cwd: Path, registered_server_ids: Optional[Set[str]]) -> List[Dict[str, Any]]:
+    for filename in _COMPOSE_FILENAMES:
+        compose_path = cwd / filename
+        if not compose_path.exists():
+            continue
+        text = _read_text(compose_path)
+        if not text:
+            continue
+        data = _parse_yaml(text)
+        if not isinstance(data, dict):
+            continue
+        services = data.get("services") or {}
+        if not isinstance(services, dict):
+            break
+        results: List[Dict[str, Any]] = []
+        for svc_name, svc in services.items():
+            if not isinstance(svc, dict):
+                continue
+            image = svc.get("image") or ""
+            cmd_parts = svc.get("command") or svc.get("entrypoint") or []
+            if isinstance(cmd_parts, str):
+                cmd_parts = cmd_parts.split()
+            cmd_str = " ".join(str(c) for c in cmd_parts)
+            env_raw = svc.get("environment") or {}
+            if isinstance(env_raw, list):
+                env: Dict[str, str] = {}
+                for item in env_raw:
+                    if isinstance(item, str) and "=" in item:
+                        k, _, v = item.partition("=")
+                        env[k] = v
+            elif isinstance(env_raw, dict):
+                env = {str(k): str(v) for k, v in env_raw.items() if v is not None}
+            else:
+                env = {}
+            is_mcp = (
+                any(image.lower().startswith(p) for p in _MCP_IMAGE_PREFIXES)
+                or bool(_MCP_CMD_RE.search(cmd_str))
+                or any(k.startswith("MCP_") for k in env)
+            )
+            if not is_mcp:
+                continue
+            ports = svc.get("ports") or []
+            url: Optional[str] = None
+            if ports:
+                first = ports[0]
+                if isinstance(first, str) and ":" in first:
+                    url = f"http://localhost:{first.split(':')[0]}/mcp"
+                elif isinstance(first, int):
+                    url = f"http://localhost:{first}/mcp"
+            transport = "streamable_http" if url else "stdio"
+            command: Optional[str] = None
+            svc_args: List[str] = []
+            if not url and cmd_parts:
+                command = str(cmd_parts[0])
+                svc_args = [str(c) for c in cmd_parts[1:]]
+            results.append(
+                _make_infra_entry(
+                    "docker-compose",
+                    "Docker Compose",
+                    svc_name,
+                    transport,
+                    command,
+                    svc_args,
+                    url,
+                    env,
+                    str(compose_path),
+                    "project",
+                    "inferred",
+                    registered_server_ids,
+                )
+            )
+        return results
+    return []
+
+
+def _process_server_name(cmdline: List[Any]) -> str:
+    cmd_str = " ".join(str(c) for c in cmdline)
+    m = re.search(r"@modelcontextprotocol/([\w-]+)", cmd_str)
+    if m:
+        return m.group(1)
+    m = re.search(r"mcp[-_]server[-_]([\w-]+)", cmd_str, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    m = re.search(r"uvx\s+(mcp[\w-]+)", cmd_str, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    return Path(str(cmdline[0])).stem or "unknown"
+
+
+def _discover_processes(registered_server_ids: Optional[Set[str]]) -> List[Dict[str, Any]]:
+    try:
+        import psutil  # type: ignore
+    except ImportError:
+        return []
+    results: List[Dict[str, Any]] = []
+    seen: Set[str] = set()
+    for proc in psutil.process_iter(["pid", "cmdline"]):
+        try:
+            cmdline = proc.info.get("cmdline") or []
+            if not cmdline:
+                continue
+            cmd_str = " ".join(str(c) for c in cmdline)
+            if not _MCP_CMD_RE.search(cmd_str):
+                continue
+            norm = " ".join(str(c) for c in cmdline[:6])
+            if norm in seen:
+                continue
+            seen.add(norm)
+            transport = "stdio"
+            url: Optional[str] = None
+            for i, arg in enumerate(cmdline):
+                if str(arg) == "--transport" and i + 1 < len(cmdline):
+                    t = str(cmdline[i + 1])
+                    if t in ("sse", "streamable_http"):
+                        transport = t
+                elif str(arg).startswith("--port="):
+                    url = f"http://localhost:{str(arg).split('=', 1)[1]}/mcp"
+                    transport = "streamable_http"
+                elif str(arg) == "--port" and i + 1 < len(cmdline):
+                    url = f"http://localhost:{cmdline[i + 1]}/mcp"
+                    transport = "streamable_http"
+            try:
+                raw_env = proc.environ() or {}
+            except (psutil.AccessDenied, psutil.NoSuchProcess):
+                raw_env = {}
+            env = {k: v for k, v in raw_env.items() if any(k.startswith(p) for p in _MCP_ENV_PREFIXES)}
+            server_name = _process_server_name(cmdline)
+            results.append(
+                _make_infra_entry(
+                    "process",
+                    "Running Process",
+                    server_name,
+                    transport,
+                    str(cmdline[0]) if not url else None,
+                    [str(c) for c in cmdline[1:]] if not url else [],
+                    url,
+                    env,
+                    f"pid:{proc.info['pid']}",
+                    "runtime",
+                    "inferred",
+                    registered_server_ids,
+                )
+            )
+        except Exception:
+            continue
+    return results
+
+
+def _discover_docker_containers(registered_server_ids: Optional[Set[str]]) -> List[Dict[str, Any]]:
+    try:
+        ids_result = subprocess.run(
+            ["docker", "ps", "-q"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if ids_result.returncode != 0 or not ids_result.stdout.strip():
+            return []
+    except Exception:
+        return []
+    container_ids = ids_result.stdout.strip().splitlines()
+    try:
+        inspect_result = subprocess.run(
+            ["docker", "inspect"] + container_ids,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if inspect_result.returncode != 0:
+            return []
+        inspected = json.loads(inspect_result.stdout)
+    except Exception as exc:
+        _log.debug("discovery: docker inspect failed: %s", exc)
+        return []
+    results: List[Dict[str, Any]] = []
+    for container in inspected:
+        try:
+            cfg = container.get("Config") or {}
+            image = cfg.get("Image") or ""
+            labels = cfg.get("Labels") or {}
+            cmd = cfg.get("Cmd") or []
+            entrypoint = cfg.get("Entrypoint") or []
+            env_list = cfg.get("Env") or []
+            name = (container.get("Name") or "").lstrip("/")
+            cmd_str = " ".join(str(c) for c in (entrypoint + cmd))
+            env: Dict[str, str] = {}
+            for item in env_list:
+                if isinstance(item, str) and "=" in item:
+                    k, _, v = item.partition("=")
+                    if k.startswith("MCP_") or any(k.startswith(p) for p in _MCP_ENV_PREFIXES):
+                        env[k] = v
+            is_mcp = (
+                any(image.lower().startswith(p) for p in _MCP_IMAGE_PREFIXES)
+                or any("mcp" in str(v).lower() for v in labels.values())
+                or any("mcp" in k.lower() for k in labels)
+                or bool(_MCP_CMD_RE.search(cmd_str))
+                or bool(env)
+            )
+            if not is_mcp:
+                continue
+            ports = (container.get("NetworkSettings") or {}).get("Ports") or {}
+            url: Optional[str] = None
+            for bindings in ports.values():
+                if bindings:
+                    host_port = bindings[0].get("HostPort")
+                    if host_port:
+                        url = f"http://localhost:{host_port}/mcp"
+                        break
+            transport = "streamable_http" if url else "stdio"
+            server_name = name or image.split("/")[-1].split(":")[0]
+            results.append(
+                _make_infra_entry(
+                    "docker",
+                    "Docker Container",
+                    server_name,
+                    transport,
+                    None,
+                    [],
+                    url,
+                    env,
+                    f"container:{(container.get('Id') or '')[:12]}",
+                    "runtime",
+                    "inferred",
+                    registered_server_ids,
+                )
+            )
+        except Exception as exc:
+            _log.debug("discovery: container parse error: %s", exc)
+    return results
+
+
+def _discover_dynamic(cwd: Path, registered_server_ids: Optional[Set[str]]) -> List[Dict[str, Any]]:
+    candidates: List[Path] = []
+    seen_paths: Set[str] = set()
+
+    def _scan(base: Path, depth: int) -> None:
+        if depth > _DYNAMIC_MAX_DEPTH:
+            return
+        try:
+            for entry in base.iterdir():
+                if entry.is_dir() and entry.name not in _DYNAMIC_SKIP_DIRS:
+                    _scan(entry, depth + 1)
+                elif entry.is_file() and (
+                    entry.name in _DYNAMIC_FILENAMES or (entry.suffix == ".json" and "mcp" in entry.stem.lower())
+                ):
+                    candidates.append(entry)
+        except PermissionError:
+            pass
+
+    _scan(cwd, 0)
+
+    for key, val in os.environ.items():
+        if any(key.startswith(p) for p in ("MCP_CONFIG", "MCP_SERVERS", "CLAUDE_MCP", "CURSOR_MCP")) and val:
+            p = Path(val)
+            if p.exists() and p.is_file():
+                candidates.append(p)
+
+    results: List[Dict[str, Any]] = []
+    for f in candidates:
+        path_str = str(f.resolve())
+        if path_str in seen_paths:
+            continue
+        seen_paths.add(path_str)
+        try:
+            if f.stat().st_size > _DYNAMIC_MAX_FILE_BYTES:
+                continue
+        except OSError:
+            continue
+        text = _read_text(f)
+        if not text:
+            continue
+        data = _parse_json(text)
+        if not isinstance(data, dict):
+            continue
+        for key in ("mcpServers", "mcp_servers", "servers", "context_servers"):
+            for sname, entry in _extract_servers(data, key).items():
+                norm = _normalize_entry(
+                    "dynamic",
+                    "Config File",
+                    sname,
+                    entry,
+                    path_str,
+                    "project",
+                    "inferred",
+                    False,
+                )
+                if norm is None:
+                    continue
+                suggested_id = make_server_id("dynamic", sname)
+                norm["suggested_server_id"] = suggested_id
+                norm["registered"] = (
+                    suggested_id in registered_server_ids if registered_server_ids is not None else False
+                )
+                results.append(norm)
+    return results
 
 
 def _load_path(
@@ -955,11 +1344,11 @@ def discover_mcp_servers(
     include_community: bool = True,
     cwd: Optional[Path] = None,
     registered_server_ids: Optional[Set[str]] = None,
+    include_compose: bool = True,
+    include_dynamic: bool = True,
+    include_processes: bool = False,
+    include_containers: bool = False,
 ) -> List[Dict[str, Any]]:
-    """Scan known MCP client config files and return discovered server entries.
-
-    Returns full env dicts (not redacted). Callers should redact before returning to users.
-    """
     if cwd is None:
         cwd = Path.cwd()
 
@@ -998,5 +1387,21 @@ def discover_mcp_servers(
                         suggested_id in registered_server_ids if registered_server_ids is not None else False
                     )
                     seen[did] = normalised
+
+    if include_compose:
+        for entry in _discover_compose(cwd, registered_server_ids):
+            seen.setdefault(entry["discovery_id"], entry)
+
+    if include_dynamic:
+        for entry in _discover_dynamic(cwd, registered_server_ids):
+            seen.setdefault(entry["discovery_id"], entry)
+
+    if include_processes:
+        for entry in _discover_processes(registered_server_ids):
+            seen.setdefault(entry["discovery_id"], entry)
+
+    if include_containers:
+        for entry in _discover_docker_containers(registered_server_ids):
+            seen.setdefault(entry["discovery_id"], entry)
 
     return list(seen.values())
