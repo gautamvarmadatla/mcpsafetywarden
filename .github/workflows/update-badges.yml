@@ -34,7 +34,7 @@ jobs:
         run: |
           PAYLOAD=$(jq -n \
             --arg msg "${{ steps.pulls.outputs.message }}" \
-            '{"schemaVersion":1,"label":"docker pulls","message":$msg,"color":"blue"}')
+            '{"schemaVersion":1,"label":"docker pulls","message":$msg,"color":"blue","cacheSeconds":300}')
           curl -s -X PATCH \
             -H "Authorization: token $GIST_TOKEN" \
             -H "Content-Type: application/json" \
