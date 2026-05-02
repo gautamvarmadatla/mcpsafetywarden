@@ -38,7 +38,7 @@ Use as a proxy to add safety gating to any MCP server, or point it at a server y
 **Security scanning**: mcpsafety+ five-stage pipeline (Recon, Planner, Hacker, Auditor, Supervisor). Cisco AI Defense (AST/YARA). Snyk (metadata analysis). Kali and Burp Suite integrations enrich the pipeline with real network data and HTTP-layer probes. Source code scanning from GitHub with entropy, AST, taint flow, and rug-pull detection.
 
 <p align="center">
-  <img src="assets/pipeline.png" alt="mcpsafety+ five-stage pipeline" width="900"/>
+  <img width="1983" height="793" alt="3e457b83-6980-49fc-b812-350ab94f5633" src="https://github.com/user-attachments/assets/bb0c479b-32a9-464c-9b80-b7f295924266" />
   <br/>
   <em>Fig 2. mcpsafety+ five-stage pipeline, triggered when you run a full security audit on any MCP server</em>
 </p>
@@ -46,7 +46,7 @@ Use as a proxy to add safety gating to any MCP server, or point it at a server y
 **Safe execution**: Argument scanning (20+ attack categories, LLM second-pass). Two-layer output injection scanning. Risk gating with alternatives and per-tool policies. Drift detection on every call and standalone check.
 
 <p align="center">
-  <img src="assets/safe_execution_pipeline.jpg" alt="Safe execution pipeline" width="900"/>
+  <img src="assets/safe_execution_pipeline.jpg" alt="Safe execution pipeline">
   <br/>
   <em>Fig 3. Safe execution pipeline: the five checks every proxied tool call passes through</em>
 </p>
