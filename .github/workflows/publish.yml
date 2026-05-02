@@ -80,7 +80,14 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "${{ github.ref_name }}" dist/* --generate-notes --title "${{ github.ref_name }}"
+        run: |
+          NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes \
+            -f tag_name="${{ github.ref_name }}" \
+            --jq '.body' | \
+            sed 's/ by @[^ ]* in #[0-9]*//g' | \
+            grep -v "^## New Contributors" | \
+            grep -v "made their first contribution")
+          gh release create "${{ github.ref_name }}" dist/* --notes "$NOTES" --title "${{ github.ref_name }}"
 
   publish-docker:
     needs: build-and-publish
