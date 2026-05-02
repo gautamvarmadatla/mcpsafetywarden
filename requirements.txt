@@ -12,4 +12,4 @@ cisco-ai-mcp-scanner>=4.0.0
 snyk-agent-scan>=0.4.0
 duckduckgo-search>=6.0.0
 arxiv>=2.0.0
-cryptography>=42.0.0
+cryptography>=46.0.6
