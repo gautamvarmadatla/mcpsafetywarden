@@ -18,13 +18,15 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   cleanup:
     name: Clean up old GHCR versions
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Delete old package versions
         env:
