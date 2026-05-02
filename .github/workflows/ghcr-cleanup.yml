@@ -1,0 +1,73 @@
+name: GHCR Cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep_count:
+        description: "Number of recent version tags to keep (besides latest)"
+        required: false
+        default: "10"
+      dry_run:
+        description: "Dry run - list versions to delete without deleting"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  cleanup:
+    name: Clean up old GHCR versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Delete old package versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP_COUNT: ${{ inputs.keep_count }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          OWNER="${{ github.repository_owner }}"
+          PKG="$(echo '${{ github.repository }}' | cut -d/ -f2)"
+
+          VERSIONS=$(gh api "/users/${OWNER}/packages/container/${PKG}/versions" --paginate \
+            --jq '.[] | {id: .id, name: .metadata.container.tags[0] // "untagged", updated: .updated_at}')
+
+          TAGGED=$(echo "$VERSIONS" | jq -r 'select(.name != "untagged" and .name != "latest") | .name' | sort -Vr)
+          KEEP=$(echo "$TAGGED" | head -n "$KEEP_COUNT")
+
+          echo "=== Keeping ==="
+          echo "  latest (always)"
+          echo "$KEEP" | sed 's/^/  /'
+
+          echo ""
+          echo "=== $([ "$DRY_RUN" = "true" ] && echo "Would delete" || echo "Deleting") ==="
+
+          DELETE_COUNT=0
+          while IFS= read -r name; do
+            [ -z "$name" ] && continue
+            [ "$name" = "latest" ] && continue
+            echo "$KEEP" | grep -qxF "$name" && continue
+
+            VERSION_ID=$(echo "$VERSIONS" | jq -r "select(.name == \"$name\") | .id")
+            echo "  $name (id: $VERSION_ID)"
+            DELETE_COUNT=$((DELETE_COUNT + 1))
+
+            if [ "$DRY_RUN" = "false" ]; then
+              gh api --method DELETE "/users/${OWNER}/packages/container/${PKG}/versions/${VERSION_ID}" \
+                && echo "    deleted" || echo "    failed"
+            fi
+          done < <(echo "$VERSIONS" | jq -r '.name')
+
+          echo ""
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "DRY RUN: would delete $DELETE_COUNT versions. Re-run with dry_run=false to execute."
+          else
+            echo "Deleted $DELETE_COUNT versions."
+          fi
