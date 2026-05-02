@@ -80,7 +80,7 @@ One-shot onboarding: registers the server, inspects its tools, and runs a securi
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `server_id` | string | Yes | Unique identifier for this server |
-| `transport` | string | Yes | `"stdio"`, `"sse"`, or `"streamable_http"` |
+| `transport` | string | No | `"stdio"`, `"sse"`, or `"streamable_http"`. Auto-detected if omitted: `stdio` when `command` is set, HTTP transport probed via POST/GET when `url` is set. |
 | `command` | string | stdio only | Executable to launch (e.g. `"python"`) |
 | `args` | list | No | Arguments for the command (e.g. `["server.py"]`) |
 | `url` | string | sse/http only | Server URL |
@@ -115,7 +115,7 @@ Register a server for proxying without running a security scan. `auto_inspect` (
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `server_id` | string | Yes | Unique identifier. Must not contain `"::"`. Max 256 chars. |
-| `transport` | string | Yes | `"stdio"`, `"sse"`, or `"streamable_http"` |
+| `transport` | string | No | `"stdio"`, `"sse"`, or `"streamable_http"`. Auto-detected if omitted: `stdio` when `command` is set, HTTP transport probed via POST/GET when `url` is set. |
 | `command` | string | stdio only | Executable path or name |
 | `args` | list | No | Command arguments. Max 50 entries, each max 1024 chars. |
 | `url` | string | sse/http only | Server URL. SSRF-checked; private IPs and cloud metadata endpoints are blocked. |
