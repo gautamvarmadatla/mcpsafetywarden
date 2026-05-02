@@ -530,6 +530,8 @@ def _query_npm(package_name: str) -> Dict[str, Any]:
 
 
 def _http_get_text(url: str) -> Optional[str]:
+    if not url.startswith(("https://", "http://")):
+        return None
     try:
         req = urllib.request.Request(url, headers={"User-Agent": _UA})
         with urllib.request.urlopen(req, timeout=_PKG_TIMEOUT) as resp:
@@ -545,6 +547,8 @@ def _http_get_text(url: str) -> Optional[str]:
 
 
 def _http_get_json(url: str) -> Optional[Dict[str, Any]]:
+    if not url.startswith(("https://", "http://")):
+        return None
     try:
         req = urllib.request.Request(url, headers={"User-Agent": _UA})
         with urllib.request.urlopen(req, timeout=_PKG_TIMEOUT) as resp:
@@ -971,7 +975,7 @@ def check_osv_vulns(
                 headers={"Content-Type": "application/json", "User-Agent": _UA},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=_OSV_TIMEOUT) as resp:
+            with urllib.request.urlopen(req, timeout=_OSV_TIMEOUT) as resp:  # nosec B310
                 data = json.loads(resp.read())
         except Exception as exc:
             _log.debug("OSV batch query failed: %s", exc)
@@ -1087,6 +1091,8 @@ def get_tls_cert_fingerprint(url: str) -> Optional[str]:
     port = parsed.port or 443
     try:
         ctx = ssl.create_default_context()
+        ctx.check_hostname = True
+        ctx.verify_mode = ssl.CERT_REQUIRED
         with socket.create_connection((host, port), timeout=_PKG_TIMEOUT) as sock:
             with ctx.wrap_socket(sock, server_hostname=host) as ssock:
                 cert_der = ssock.getpeercert(binary_form=True)

@@ -563,7 +563,7 @@ def get_profiles_batch(tool_ids: List[str]) -> Dict[str, Dict[str, Any]]:
     try:
         placeholders = ",".join("?" * len(tool_ids))
         rows = conn.execute(
-            f"SELECT * FROM behavior_profiles WHERE tool_id IN ({placeholders})",
+            f"SELECT * FROM behavior_profiles WHERE tool_id IN ({placeholders})",  # nosec B608
             tool_ids,
         ).fetchall()
         result: Dict[str, Dict[str, Any]] = {}
@@ -869,7 +869,7 @@ def list_tools_multi(server_ids: List[str]) -> Dict[str, List[Dict[str, Any]]]:
                 FROM tools t
                 LEFT JOIN behavior_profiles bp ON bp.tool_id = t.tool_id
                 WHERE t.server_id IN ({ph})
-                ORDER BY t.server_id, t.tool_name""",
+                ORDER BY t.server_id, t.tool_name""",  # nosec B608
             server_ids,
         ).fetchall()
         result: Dict[str, List[Dict[str, Any]]] = {}
@@ -920,7 +920,7 @@ def delete_credential_refs(ref_ids: List[str]) -> None:
     conn = get_connection()
     try:
         placeholders = ",".join("?" * len(ref_ids))
-        conn.execute(f"DELETE FROM credential_refs WHERE ref_id IN ({placeholders})", ref_ids)
+        conn.execute(f"DELETE FROM credential_refs WHERE ref_id IN ({placeholders})", ref_ids)  # nosec B608
         conn.commit()
     finally:
         conn.close()

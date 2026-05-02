@@ -238,7 +238,7 @@ def _schema_fingerprint(schema: Any) -> str:
             return [_strip(i) for i in obj]
         return obj
 
-    return hashlib.md5(json.dumps(_strip(schema or {}), sort_keys=True).encode()).hexdigest()
+    return hashlib.md5(json.dumps(_strip(schema or {}), sort_keys=True).encode(), usedforsecurity=False).hexdigest()
 
 
 def _detect_exact_name_shadows(
@@ -449,10 +449,10 @@ def on_credentials_detected(
             if stale_ids:
                 ph = ",".join("?" * len(stale_ids))
                 conn.execute(
-                    f"DELETE FROM inventory_relations WHERE source_id IN ({ph}) OR target_id IN ({ph})",
+                    f"DELETE FROM inventory_relations WHERE source_id IN ({ph}) OR target_id IN ({ph})",  # nosec B608
                     stale_ids * 2,
                 )
-                conn.execute(f"DELETE FROM inventory_objects WHERE obj_id IN ({ph})", stale_ids)
+                conn.execute(f"DELETE FROM inventory_objects WHERE obj_id IN ({ph})", stale_ids)  # nosec B608
                 conn.commit()
         finally:
             conn.close()
@@ -747,10 +747,10 @@ def _prune_stale_tool_nodes(server_id: str, current_tool_ids: set) -> None:
         if stale:
             ph = ",".join("?" * len(stale))
             conn.execute(
-                f"DELETE FROM inventory_relations WHERE source_id IN ({ph}) OR target_id IN ({ph})",
+                f"DELETE FROM inventory_relations WHERE source_id IN ({ph}) OR target_id IN ({ph})",  # nosec B608
                 stale * 2,
             )
-            conn.execute(f"DELETE FROM inventory_objects WHERE obj_id IN ({ph})", stale)
+            conn.execute(f"DELETE FROM inventory_objects WHERE obj_id IN ({ph})", stale)  # nosec B608
             conn.commit()
     finally:
         conn.close()
@@ -1077,7 +1077,7 @@ def _add_composition_edges(
             ph = ",".join("?" * len(all_tool_ids))
             conn.execute(
                 f"DELETE FROM inventory_relations WHERE relation = 'can_exfiltrate'"
-                f" AND (source_id IN ({ph}) OR target_id IN ({ph}))",
+                f" AND (source_id IN ({ph}) OR target_id IN ({ph}))",  # nosec B608
                 all_tool_ids * 2,
             )
             conn.commit()
@@ -1203,10 +1203,10 @@ def cleanup_server_graph(server_id: str) -> None:
             )
             ph = ",".join("?" * len(ids_to_delete))
             conn.execute(
-                f"DELETE FROM inventory_relations WHERE source_id IN ({ph}) OR target_id IN ({ph})",
+                f"DELETE FROM inventory_relations WHERE source_id IN ({ph}) OR target_id IN ({ph})",  # nosec B608
                 ids_to_delete * 2,
             )
-            conn.execute(f"DELETE FROM inventory_objects WHERE obj_id IN ({ph})", ids_to_delete)
+            conn.execute(f"DELETE FROM inventory_objects WHERE obj_id IN ({ph})", ids_to_delete)  # nosec B608
             conn.commit()
         finally:
             conn.close()
@@ -1289,7 +1289,7 @@ def on_cross_server_analysis(client_id: str) -> None:
             if stale_source_ids:
                 ph = ",".join("?" * len(stale_source_ids))
                 conn.execute(
-                    f"DELETE FROM inventory_relations WHERE relation = 'cross_server_exfil' AND source_id IN ({ph})",
+                    f"DELETE FROM inventory_relations WHERE relation = 'cross_server_exfil' AND source_id IN ({ph})",  # nosec B608
                     stale_source_ids,
                 )
                 conn.commit()

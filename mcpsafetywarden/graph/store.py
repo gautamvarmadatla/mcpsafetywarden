@@ -156,18 +156,18 @@ def get_full_graph(server_id: Optional[str] = None) -> Dict[str, Any]:
             )
             ph = ",".join("?" * len(relevant_ids))
             obj_rows = conn.execute(
-                f"SELECT * FROM inventory_objects WHERE obj_id IN ({ph})",
+                f"SELECT * FROM inventory_objects WHERE obj_id IN ({ph})",  # nosec B608
                 relevant_ids,
             ).fetchall()
             rel_rows = conn.execute(
-                f"SELECT * FROM inventory_relations WHERE source_id IN ({ph}) OR target_id IN ({ph})",
+                f"SELECT * FROM inventory_relations WHERE source_id IN ({ph}) OR target_id IN ({ph})",  # nosec B608
                 relevant_ids * 2,
             ).fetchall()
             technique_ids = list({r["target_id"] for r in rel_rows if r["relation"] == "maps_to"})
             if technique_ids:
                 tph = ",".join("?" * len(technique_ids))
                 tech_rows = conn.execute(
-                    f"SELECT * FROM inventory_objects WHERE obj_id IN ({tph})",
+                    f"SELECT * FROM inventory_objects WHERE obj_id IN ({tph})",  # nosec B608
                     technique_ids,
                 ).fetchall()
                 obj_rows = list(obj_rows) + list(tech_rows)

@@ -26,6 +26,7 @@ import shutil
 import stat
 import tempfile
 from typing import Any, Dict, List, Optional, Set, Tuple
+from urllib.parse import urlparse
 
 import httpx
 
@@ -33,6 +34,16 @@ from ..core import database as db
 from ..core.security_utils import _SENSITIVE_KEY_RE, sanitise_for_prompt, strip_json_fence
 
 _log = logging.getLogger(__name__)
+
+
+def _is_github_url(s: str) -> bool:
+    if not s:
+        return False
+    try:
+        netloc = urlparse(s if "://" in s else f"https://{s}").netloc.lower()
+        return netloc == "github.com" or netloc.endswith(".github.com")
+    except Exception:
+        return False
 
 _MAX_FILES = 40
 _MAX_FILE_BYTES = 50 * 1024
@@ -251,7 +262,7 @@ def _detect_github_url(
         return github_url
     for key in ("github_url", "source_url", "repo_url"):
         val = server_config.get(key)
-        if val and "github.com" in str(val):
+        if val and _is_github_url(str(val)):
             return val
     return None
 
@@ -269,10 +280,10 @@ async def _detect_github_url_from_pypi(server_config: Dict[str, Any]) -> Optiona
                     continue
                 info = resp.json().get("info", {})
                 for url in (info.get("project_urls") or {}).values():
-                    if "github.com" in (url or ""):
+                    if _is_github_url(url or ""):
                         return re.sub(r"^git\+", "", url).rstrip(".git").split("#")[0]
                 home = info.get("home_page") or ""
-                if "github.com" in home:
+                if _is_github_url(home):
                     return re.sub(r"^git\+", "", home).rstrip(".git").split("#")[0]
             except Exception:
                 pass
