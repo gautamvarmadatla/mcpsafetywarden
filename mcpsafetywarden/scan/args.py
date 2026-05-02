@@ -13,9 +13,9 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from .scanner import call_llm as _call_llm_scanner
-from .security_utils import normalise_arg as _normalise_probe_str
-from .security_utils import sanitise_for_prompt as _sanitise_for_prompt
-from .security_utils import strip_json_fence as _strip_json_fence
+from ..core.security_utils import normalise_arg as _normalise_probe_str
+from ..core.security_utils import sanitise_for_prompt as _sanitise_for_prompt
+from ..core.security_utils import strip_json_fence as _strip_json_fence
 
 _log = logging.getLogger(__name__)
 

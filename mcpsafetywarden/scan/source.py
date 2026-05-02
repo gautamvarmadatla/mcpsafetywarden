@@ -29,8 +29,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
 
-from . import database as db
-from .security_utils import _SENSITIVE_KEY_RE, sanitise_for_prompt, strip_json_fence
+from ..core import database as db
+from ..core.security_utils import _SENSITIVE_KEY_RE, sanitise_for_prompt, strip_json_fence
 
 _log = logging.getLogger(__name__)
 

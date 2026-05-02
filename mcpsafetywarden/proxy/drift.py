@@ -5,8 +5,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from . import database as db
-from .client_manager import _list_tools_raw
+from ..core import database as db
+from .client import _list_tools_raw
 
 _log = logging.getLogger(__name__)
 

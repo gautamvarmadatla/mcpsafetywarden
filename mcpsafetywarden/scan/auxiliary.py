@@ -4,8 +4,8 @@ import logging
 import urllib.parse as _urlparse
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import database as db
-from .client_manager import open_streams as _open_streams
+from ..core import database as db
+from ..proxy.client import open_streams as _open_streams
 
 _log = logging.getLogger(__name__)
 

@@ -41,17 +41,17 @@ import re
 import urllib.parse as _urlparse
 from typing import Any, Dict, List, Optional
 
-from . import database as db
-from .client_manager import open_streams as _open_streams, scan_for_injection as _scan_for_injection
+from ..core import database as db
+from ..proxy.client import open_streams as _open_streams, scan_for_injection as _scan_for_injection
 from .scanner import call_llm as _call_llm_scanner
-from .source_recon import run_source_recon as _run_source_recon
-from .security_utils import normalise_arg as _normalise_probe_str
-from .security_utils import redact_args as _redact_probe_args
-from .security_utils import redact_text as _redact_in_text
-from .security_utils import redact_findings as _redact_findings
-from .security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
-from .arg_scanner import SSRF_RE, scan_args_for_threats, _safe_json_dict, _safe_json_list, _inspect_probe_args, _PROMPT_INJECTION_RE
-from .aux_integrations import (
+from .source import run_source_recon as _run_source_recon
+from ..core.security_utils import normalise_arg as _normalise_probe_str
+from ..core.security_utils import redact_args as _redact_probe_args
+from ..core.security_utils import redact_text as _redact_in_text
+from ..core.security_utils import redact_findings as _redact_findings
+from ..core.security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
+from .args import SSRF_RE, scan_args_for_threats, _safe_json_dict, _safe_json_list, _inspect_probe_args, _PROMPT_INJECTION_RE
+from .auxiliary import (
     kali_recon, burp_proxy_evidence, _burp_hacker,
     _find_aux_server, _call_aux_tool, _aux_tool_exists, _extract_host_port,
 )

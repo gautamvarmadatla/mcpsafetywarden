@@ -22,9 +22,9 @@ from typing import Any, Dict, List, Optional
 
 _log = logging.getLogger(__name__)
 
-from .security_utils import sanitise_for_prompt as _sanitise_for_prompt
-from .security_utils import redact_text as _redact_text
-from .security_utils import strip_json_fence as _strip_json_fence
+from ..core.security_utils import sanitise_for_prompt as _sanitise_for_prompt
+from ..core.security_utils import redact_text as _redact_text
+from ..core.security_utils import strip_json_fence as _strip_json_fence
 
 SECURITY_PROMPT = """\
 You are performing a static security analysis of an MCP (Model Context Protocol) server.

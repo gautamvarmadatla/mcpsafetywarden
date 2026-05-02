@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from .. import database as _db
+from ..core import database as _db
 from ..inventory.models import InventoryObject, InventoryRelation
 
 _log = logging.getLogger(__name__)

@@ -16,7 +16,7 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from . import database as _db
+from .core import database as _db
 from .server import (
     analyze_cve_blast_radius as _analyze_cve_blast_radius,
     check_server_drift as _check_server_drift,

@@ -8,7 +8,7 @@ import tempfile
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from .. import database as _db
+from ..core import database as _db
 from . import store
 from ._constants import EXTERNAL_EFFECTS as _EXTERNAL_EFFECTS, READ_EFFECTS as _READ_EFFECTS, RISK_TAG_TO_MITRE as _RISK_TAG_TO_MITRE
 from . import provenance as _provenance

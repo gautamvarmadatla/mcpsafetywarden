@@ -14,8 +14,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 _log = logging.getLogger(__name__)
 
-from .security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
-from .graph._constants import RISK_TAG_TO_MITRE as _RISK_TAG_TO_MITRE
+from ..core.security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
+from ..graph._constants import RISK_TAG_TO_MITRE as _RISK_TAG_TO_MITRE
 
 _VALID_RISK_TAGS: frozenset = frozenset(_RISK_TAG_TO_MITRE.keys())
 

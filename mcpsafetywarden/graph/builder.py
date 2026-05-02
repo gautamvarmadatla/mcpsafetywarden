@@ -5,7 +5,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from .. import database as _db
+from ..core import database as _db
 from ..inventory.models import InventoryObject, InventoryRelation
 from . import store
 from . import provenance as _provenance
@@ -909,8 +909,8 @@ def _llm_evaluate_composition_pairs(
     model_id: Optional[str],
     api_key: Optional[str],
 ) -> List[Dict[str, Any]]:
-    from ..scanner import call_llm
-    from ..security_utils import strip_json_fence as _strip_json_fence
+    from ..scan.scanner import call_llm
+    from ..core.security_utils import strip_json_fence as _strip_json_fence
     slim = [
         {
             "read_tool": r.get("tool_name") or r.get("name", ""),
