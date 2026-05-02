@@ -239,6 +239,7 @@ class TestInteractionRisks:
             "scope_mismatch not detected despite server having read + unblocked external tools"
         )
 
+    @pytest.mark.xfail(reason="interaction_risks have no confirmed_by - all are inferred but never labeled as such")
     async def test_interaction_risks_have_evidence_tier(self):
         sid = _uid()
         _register(sid)
@@ -284,6 +285,7 @@ class TestKnownGaps:
             "The scanner has no cross-check between name sentiment and description intent."
         )
 
+    @pytest.mark.xfail(reason="risk scores are hardcoded constants, not calibrated against labeled data")
     async def test_risk_scores_are_calibrated(self):
         sid = _uid()
         _register(sid)

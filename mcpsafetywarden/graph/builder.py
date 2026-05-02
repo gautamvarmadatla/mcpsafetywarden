@@ -973,7 +973,8 @@ def _add_composition_edges(
             for ev in evaluated
         }
     else:
-        return
+        confirmed = None
+        confidence_map = {}
 
     for r, e in all_pairs:
         r_name = r.get("tool_name") or r.get("name", "")
