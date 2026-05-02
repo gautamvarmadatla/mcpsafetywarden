@@ -1,0 +1,65 @@
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect bootstrap PR
+        id: bootstrap
+        shell: bash
+        run: |
+          if git rev-parse --verify HEAD^1 >/dev/null 2>&1 && git rev-parse --verify HEAD^2 >/dev/null 2>&1; then
+            CHANGED="$(git diff --name-only HEAD^1 HEAD^2)"
+          else
+            git fetch --no-tags --prune origin \
+              "${{ github.event.pull_request.base.sha }}" \
+              "${{ github.event.pull_request.head.sha }}"
+            CHANGED="$(git diff --name-only \
+              "${{ github.event.pull_request.base.sha }}" \
+              "${{ github.event.pull_request.head.sha }}")"
+          fi
+          if echo "$CHANGED" | grep -qx ".github/workflows/dependency-review.yml"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip for bootstrap workflow change
+        if: steps.bootstrap.outputs.skip == 'true'
+        run: echo "Skipping dependency review for workflow bootstrap change."
+
+      - name: Review dependency changes
+        if: steps.bootstrap.outputs.skip != 'true'
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          retry-on-snapshot-warnings: true
+          allow-licenses: >-
+            Apache-2.0, MIT, MIT-0, MIT-CMU, BSD-2-Clause, BSD-3-Clause,
+            ISC, PSF-2.0, Python-2.0, Python-2.0.1, 0BSD, Unlicense,
+            CC0-1.0, MPL-2.0, LGPL-3.0-only
+          allow-dependencies-licenses: >-
+            pkg:pypi/jinja2,
+            pkg:pypi/werkzeug,
+            pkg:pypi/flask,
+            pkg:pypi/requests,
+            pkg:pypi/aiohappyeyeballs,
+            pkg:pypi/fonttools,
+            pkg:pypi/protobuf,
+            pkg:pypi/typing-extensions,
+            pkg:pypi/wcwidth
