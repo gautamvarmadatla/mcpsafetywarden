@@ -665,7 +665,7 @@ def export_as_mermaid(server_id: Optional[str] = None) -> str:
     }
 
     def _clean(s: str) -> str:
-        return s[:30].replace("\n", " ").replace("\r", "").replace('"', "'").replace("[", "(").replace("]", ")").replace("{", "(").replace("}", ")").replace("#", "-").replace("|", "-")
+        return s.replace("\n", " ").replace("\r", "").replace('"', "'").replace("[", "(").replace("]", ")").replace("{", "(").replace("}", ")").replace("#", "-").replace("|", "-")
 
     lines = ["graph LR"]
     node_ids: Dict[str, str] = {}

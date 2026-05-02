@@ -730,7 +730,7 @@ def on_tools_inspected(
                     "effect_class": t.get("effect_class", "unknown"),
                     "destructiveness": t.get("destructiveness", "unknown"),
                     "open_world": bool(t.get("open_world", False)),
-                    "description": description[:200],
+                    "description": description,
                     "schema_fingerprint": fingerprint,
                     "cve_impacted": (existing or {}).get("metadata", {}).get("cve_impacted", False),
                     "impacting_cves": (existing or {}).get("metadata", {}).get("impacting_cves", []),
@@ -784,13 +784,13 @@ def on_scan_stored(server_id: str, findings: Dict[str, Any]) -> None:
             store.upsert_object(InventoryObject(
                 id=finding_id,
                 type="finding",
-                name=(finding.get("finding") or tool_name)[:120],
+                name=(finding.get("finding") or tool_name),
                 source="security_scan",
                 metadata={
                     "risk_level": finding.get("risk_level"),
                     "risk_tags": risk_tags,
-                    "exploitation_scenario": (finding.get("exploitation_scenario") or "")[:300],
-                    "remediation": (finding.get("remediation") or "")[:300],
+                    "exploitation_scenario": finding.get("exploitation_scenario") or "",
+                    "remediation": finding.get("remediation") or "",
                     "confirmed_by": confirmed_by,
                     "confidence": finding.get("confidence"),
                 },
@@ -896,9 +896,9 @@ def _llm_evaluate_composition_pairs(
     slim = [
         {
             "read_tool": r.get("tool_name") or r.get("name", ""),
-            "read_description": (r.get("description") or "")[:150],
+            "read_description": r.get("description") or "",
             "external_tool": e.get("tool_name") or e.get("name", ""),
-            "external_description": (e.get("description") or "")[:150],
+            "external_description": e.get("description") or "",
         }
         for r, e in pairs
     ]

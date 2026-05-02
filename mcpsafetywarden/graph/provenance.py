@@ -254,7 +254,7 @@ def _parse_pip_show(output: str) -> Dict[str, Any]:
         "version": fields.get("version", ""),
         "location": fields.get("location", ""),
         "home_page": fields.get("home_page", ""),
-        "summary": (fields.get("summary") or "")[:200],
+        "summary": fields.get("summary") or "",
         "author": fields.get("author", ""),
         "license": fields.get("license", ""),
         "requires": requires,
@@ -303,7 +303,7 @@ def _query_npm(package_name: str) -> Dict[str, Any]:
                         "name": data2.get("name", package_name),
                         "version": data2.get("version", ""),
                         "home_page": data2.get("homepage", ""),
-                        "description": (data2.get("description") or "")[:200],
+                        "description": data2.get("description") or "",
                         "note": "registry metadata; locally installed version may differ",
                     }
             except json.JSONDecodeError:
@@ -780,8 +780,8 @@ def check_osv_vulns(
                     "dev": pkg.get("dev", False),
                     "vuln_id": vuln.get("id", ""),
                     "severity": severity,
-                    "summary": (vuln.get("summary") or "")[:200],
-                    "aliases": vuln.get("aliases", [])[:5],
+                    "summary": vuln.get("summary") or "",
+                    "aliases": vuln.get("aliases", []),
                 })
 
     return findings
