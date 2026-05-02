@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 import os as _os
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -94,6 +96,50 @@ def _try_link_stdio_to_client(server_id: str, command: Optional[str], args: Opti
             _log.info("Linked server '%s' to client '%s' via stdio fingerprint match", server_id, entry["client"])
     except Exception as exc:
         _log.debug("_try_link_stdio_to_client failed for %s: %s", server_id, exc)
+
+
+def _probe_http_transport(url: str) -> str:
+    """Return 'streamable_http' or 'sse' by probing the URL per the MCP backwards-compat spec.
+
+    POST → 2xx means streamable_http.
+    POST → 404/405, then GET → text/event-stream means sse.
+    Defaults to streamable_http when inconclusive.
+    """
+    try:
+        req = urllib.request.Request(
+            url,
+            data=b"{}",
+            method="POST",
+            headers={"Accept": "application/json, text/event-stream", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310
+            if 200 <= resp.status < 300:
+                return "streamable_http"
+    except urllib.error.HTTPError as exc:
+        if exc.code in (404, 405):
+            try:
+                get_req = urllib.request.Request(url, headers={"Accept": "text/event-stream"})
+                with urllib.request.urlopen(get_req, timeout=5) as gresp:  # nosec B310
+                    if "text/event-stream" in gresp.headers.get("Content-Type", ""):
+                        return "sse"
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return "streamable_http"
+
+
+def _resolve_transport(transport: Optional[str], command: Optional[str], url: Optional[str]) -> Optional[str]:
+    """Infer transport from available parameters; returns None if inputs are ambiguous."""
+    if transport:
+        return transport
+    if command and not url:
+        return "stdio"
+    if url and not command:
+        detected = _probe_http_transport(url)
+        _log.debug("auto-detected transport for %s: %s", url, detected)
+        return detected
+    return None
 
 
 async def _do_register(
@@ -265,7 +311,7 @@ async def _do_register(
 @mcp.tool()
 async def register_server(
     server_id: str,
-    transport: str,
+    transport: Optional[str] = None,
     command: Optional[str] = None,
     args: Optional[list] = None,
     url: Optional[str] = None,
@@ -299,9 +345,14 @@ async def register_server(
     rl = _check_mgmt_rate_limit(f"register:{server_id}")
     if rl:
         return json.dumps({"error": rl})
+    resolved = _resolve_transport(transport, command, url)
+    if not resolved:
+        return json.dumps(
+            {"error": "cannot infer transport: provide --command (stdio) or --url (http), or pass transport explicitly"}
+        )
     result = await _do_register(
         server_id=server_id,
-        transport=transport,
+        transport=resolved,
         command=command,
         args=args,
         url=url,
@@ -467,7 +518,7 @@ async def check_server_drift(
 @mcp.tool()
 async def onboard_server(
     server_id: str,
-    transport: str,
+    transport: Optional[str] = None,
     command: Optional[str] = None,
     args: Optional[list] = None,
     url: Optional[str] = None,
