@@ -4,6 +4,7 @@
 import asyncio
 import json
 import sys
+import urllib.request
 from importlib.metadata import version as _pkg_version
 from typing import Optional, Union
 
@@ -65,6 +66,50 @@ def _app_callback(
     ),
 ) -> None:
     pass
+
+
+def _probe_http_transport(url: str) -> str:
+    """Probe a URL to distinguish streamable_http from legacy SSE.
+
+    POST → 2xx  means streamable_http.
+    POST → 404/405, then GET → text/event-stream means sse.
+    Defaults to streamable_http when inconclusive.
+    """
+    try:
+        req = urllib.request.Request(
+            url,
+            data=b"{}",
+            method="POST",
+            headers={"Accept": "application/json, text/event-stream", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310
+            if 200 <= resp.status < 300:
+                return "streamable_http"
+    except urllib.error.HTTPError as exc:
+        if exc.code in (404, 405):
+            try:
+                get_req = urllib.request.Request(url, headers={"Accept": "text/event-stream"})
+                with urllib.request.urlopen(get_req, timeout=5) as gresp:  # nosec B310
+                    ct = gresp.headers.get("Content-Type", "")
+                    if "text/event-stream" in ct:
+                        return "sse"
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return "streamable_http"
+
+
+def _resolve_transport(transport: Optional[str], command: Optional[str], url: Optional[str]) -> str:
+    if transport:
+        return transport
+    if command and not url:
+        return "stdio"
+    if url and not command:
+        detected = _probe_http_transport(url)
+        console.print(f"[dim]auto-detected transport: {detected}[/dim]")
+        return detected
+    raise typer.BadParameter("provide either --command (stdio) or --url (http), or set --transport explicitly")
 
 
 def _run(coro):
@@ -199,7 +244,9 @@ def cmd_list(
 @app.command("onboard")
 def cmd_onboard(
     server_id: str = typer.Argument(...),
-    transport: str = typer.Option(..., "--transport", "-t", help="stdio | sse | streamable_http"),
+    transport: Optional[str] = typer.Option(
+        None, "--transport", "-t", help="stdio | sse | streamable_http (auto-detected if omitted)"
+    ),
     command: Optional[str] = typer.Option(None, "--command", "-c", help="stdio: executable path"),
     args: Optional[str] = typer.Option(None, "--args", help="stdio: JSON array of arguments"),
     url: Optional[str] = typer.Option(None, "--url", help="sse/streamable_http: server URL"),
@@ -215,6 +262,7 @@ def cmd_onboard(
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Register + security scan + inspect in one shot."""
+    transport = _resolve_transport(transport, command, url)
     confirm_scan = yes or (
         scan_provider is not None
         and Confirm.ask(
@@ -269,7 +317,9 @@ def cmd_onboard(
 @app.command("register")
 def cmd_register(
     server_id: str = typer.Argument(...),
-    transport: str = typer.Option(..., "--transport", "-t"),
+    transport: Optional[str] = typer.Option(
+        None, "--transport", "-t", help="stdio | sse | streamable_http (auto-detected if omitted)"
+    ),
     command: Optional[str] = typer.Option(None, "--command", "-c"),
     args: Optional[str] = typer.Option(None, "--args", help="JSON array"),
     url: Optional[str] = typer.Option(None, "--url"),
@@ -283,6 +333,7 @@ def cmd_register(
     json_output: bool = typer.Option(False, "--json"),
 ):
     """Register a server (with optional immediate inspect)."""
+    transport = _resolve_transport(transport, command, url)
     result = _load(
         _run(
             _register_server(
