@@ -1,0 +1,22 @@
+startCommand:
+  type: stdio
+
+configSchema:
+  type: object
+  properties:
+    anthropicApiKey:
+      type: string
+      description: Anthropic API key for LLM-powered security scanning (optional)
+    openaiApiKey:
+      type: string
+      description: OpenAI API key for LLM-powered security scanning (optional)
+
+commandFunction: |-
+  (config) => ({
+    command: 'mcpsafetywarden-server',
+    args: [],
+    env: {
+      ...(config.anthropicApiKey ? { ANTHROPIC_API_KEY: config.anthropicApiKey } : {}),
+      ...(config.openaiApiKey ? { OPENAI_API_KEY: config.openaiApiKey } : {}),
+    }
+  })
