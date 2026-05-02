@@ -1,0 +1,26 @@
+graph LR
+    N0["analyze_document"]
+    N1["exec_command"]
+    N2["get_env_var"]
+    N3["hidden_exfil"]
+    N4["read_workspace_file"]
+    N5["safe_cleanup"]
+    N6["send_to_webhook"]
+    N7["unresolvable"]
+    style N0 fill:#7ED321,color:#fff
+    style N1 fill:#7ED321,color:#fff
+    style N2 fill:#7ED321,color:#fff
+    style N3 fill:#7ED321,color:#fff
+    style N4 fill:#7ED321,color:#fff
+    style N5 fill:#7ED321,color:#fff
+    style N6 fill:#7ED321,color:#fff
+    style N7 fill:#27AE60,color:#fff
+    N2 -->|exfil risk| N6
+    N2 -->|exfil risk| N0
+    N2 -->|exfil risk| N1
+    N3 -->|exfil risk| N6
+    N3 -->|exfil risk| N0
+    N3 -->|exfil risk| N1
+    N4 -->|exfil risk| N6
+    N4 -->|exfil risk| N0
+    N4 -->|exfil risk| N1

@@ -12,7 +12,7 @@ MCP safety warden is a proxy server that wraps any MCP server and adds behaviora
 [![CI](https://github.com/gautamvarmadatla/mcpsafetywarden/actions/workflows/ci.yml/badge.svg)](https://github.com/gautamvarmadatla/mcpsafetywarden/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/gautamvarmadatla/mcpsafetywarden/actions/workflows/codeql.yml/badge.svg)](https://github.com/gautamvarmadatla/mcpsafetywarden/actions/workflows/codeql.yml)
 [![MCP Registry](https://img.shields.io/badge/MCP%20Registry-listed-blue)](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.gautamvarmadatla%2Fmcpsafetywarden)
-[![Docker Pulls](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/gautamvarmadatla/9d29645dd68b33643ffbfb92c0df02f4/raw/mcpsafetywarden_docker.json&cacheSeconds=300)](https://hub.docker.com/r/gautamdatla1999/mcpsafetywarden)
+[![Docker Pulls](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhub.docker.com%2Fv2%2Frepositories%2Fgautamdatla1999%2Fmcpsafetywarden%2F&query=%24.pull_count&label=docker%20pulls&color=blue&cacheSeconds=300)](https://hub.docker.com/r/gautamdatla1999/mcpsafetywarden)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/gautamvarmadatla/mcpsafetywarden/badge)](https://scorecard.dev/viewer/?uri=github.com/gautamvarmadatla/mcpsafetywarden)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12730/badge)](https://www.bestpractices.dev/projects/12730)
 [![GitHub Stars](https://img.shields.io/github/stars/gautamvarmadatla/mcpsafetywarden?style=social)](https://github.com/gautamvarmadatla/mcpsafetywarden)
