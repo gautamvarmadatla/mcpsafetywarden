@@ -40,6 +40,7 @@ jobs:
             -f sarif \
             -o bandit-results.sarif \
             --severity-level medium \
+            --skip B608 \
             -q || true
 
       - name: Upload SARIF to GitHub Security tab

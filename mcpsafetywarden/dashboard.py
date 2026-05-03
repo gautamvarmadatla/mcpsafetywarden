@@ -179,7 +179,7 @@ def graph_rebuild(server_id: Optional[str] = None):
         return {"rebuilt": True}
     except Exception as e:
         _log.error("graph rebuild error: %s", e)
-        return {"rebuilt": False, "error": str(e)}
+        return {"rebuilt": False, "error": "rebuild failed"}
 
 
 # ---------------------------------------------------------------------------

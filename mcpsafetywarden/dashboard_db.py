@@ -29,8 +29,8 @@ def get_health() -> Dict[str, Any]:
         finally:
             conn.close()
         return {"ok": True, "db_path": path, "db_size_bytes": size, "server_count": server_count}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    except Exception:
+        return {"ok": False, "error": "database unavailable"}
 
 
 def get_overview() -> Dict[str, Any]:
