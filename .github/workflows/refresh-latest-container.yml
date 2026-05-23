@@ -50,7 +50,7 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
 
       - name: Build candidate image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
           push: false
@@ -73,7 +73,7 @@ jobs:
           exit-code: "1"
 
       - name: Push refreshed latest to GHCR and Docker Hub
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
           push: true
