@@ -5,9 +5,10 @@ import sqlite3
 import json
 import hashlib
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
+from typing import Iterator, Optional, Dict, Any, List
 
 _log = logging.getLogger(__name__)
 
@@ -91,6 +92,15 @@ def get_connection() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn
+
+
+@contextmanager
+def db_conn() -> Iterator[sqlite3.Connection]:
+    conn = get_connection()
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def init_db() -> None:
@@ -290,8 +300,7 @@ def upsert_server(
     headers: Optional[Dict[str, str]] = None,
     github_url: Optional[str] = None,
 ) -> None:
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute(
             """
             INSERT INTO servers
@@ -318,24 +327,18 @@ def upsert_server(
             ),
         )
         conn.commit()
-    finally:
-        conn.close()
 
 
 def delete_server(server_id: str) -> None:
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute("DELETE FROM tools WHERE server_id=?", (server_id,))
         conn.execute("DELETE FROM security_scans WHERE server_id=?", (server_id,))
         conn.execute("DELETE FROM servers WHERE server_id=?", (server_id,))
         conn.commit()
-    finally:
-        conn.close()
 
 
 def get_server(server_id: str) -> Optional[Dict[str, Any]]:
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute("SELECT * FROM servers WHERE server_id = ?", (server_id,)).fetchone()
         if row is None:
             return None
@@ -344,13 +347,10 @@ def get_server(server_id: str) -> Optional[Dict[str, Any]]:
         d["env"] = _jloads(_decrypt_field(d.pop("env_json", None) or "{}"), {})
         d["headers"] = _jloads(_decrypt_field(d.pop("headers_json", None) or "{}"), {})
         return d
-    finally:
-        conn.close()
 
 
 def list_servers(include_credentials: bool = False) -> List[Dict[str, Any]]:
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         rows = conn.execute(
             """
             SELECT s.*, COUNT(t.tool_id) AS tool_count
@@ -372,8 +372,6 @@ def list_servers(include_credentials: bool = False) -> List[Dict[str, Any]]:
                 d.pop("headers_json", None)
             result.append(d)
         return result
-    finally:
-        conn.close()
 
 
 def upsert_tool(
@@ -399,8 +397,7 @@ def upsert_tool(
         schema_hash = "OVERSIZED"
 
     tool_id = f"{server_id}::{tool_name}"
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute(
             """
             INSERT INTO tools
@@ -422,14 +419,11 @@ def upsert_tool(
             ),
         )
         conn.commit()
-    finally:
-        conn.close()
     return tool_id
 
 
 def get_tool(server_id: str, tool_name: str) -> Optional[Dict[str, Any]]:
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute(
             "SELECT * FROM tools WHERE server_id = ? AND tool_name = ?",
             (server_id, tool_name),
@@ -440,13 +434,10 @@ def get_tool(server_id: str, tool_name: str) -> Optional[Dict[str, Any]]:
         d["schema"] = _jloads(d.pop("schema_json", "{}"), {})
         d["annotations"] = _jloads(d.pop("annotations_json", "{}"), {})
         return d
-    finally:
-        conn.close()
 
 
 def list_tools(server_id: str) -> List[Dict[str, Any]]:
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         rows = conn.execute("SELECT * FROM tools WHERE server_id = ? ORDER BY tool_name", (server_id,)).fetchall()
         result = []
         for row in rows:
@@ -455,8 +446,6 @@ def list_tools(server_id: str) -> List[Dict[str, Any]]:
             d["annotations"] = _jloads(d.pop("annotations_json", "{}"), {})
             result.append(d)
         return result
-    finally:
-        conn.close()
 
 
 def record_run(
@@ -471,8 +460,7 @@ def record_run(
     notes: str = "",
 ) -> int:
     args_hash = make_hash(args)
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         cursor = conn.execute(
             """
             INSERT INTO tool_runs
@@ -496,25 +484,19 @@ def record_run(
         )
         conn.commit()
         return cursor.lastrowid
-    finally:
-        conn.close()
 
 
 def get_runs(tool_id: str, limit: int = 500) -> List[Dict[str, Any]]:
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM tool_runs WHERE tool_id = ? ORDER BY timestamp DESC LIMIT ?",
             (tool_id, limit),
         ).fetchall()
         return [dict(r) for r in rows]
-    finally:
-        conn.close()
 
 
 def upsert_profile(tool_id: str, profile: Dict[str, Any]) -> None:
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         conn.execute(
             """
             INSERT INTO behavior_profiles
@@ -552,15 +534,12 @@ def upsert_profile(tool_id: str, profile: Dict[str, Any]) -> None:
             ),
         )
         conn.commit()
-    finally:
-        conn.close()
 
 
 def get_profiles_batch(tool_ids: List[str]) -> Dict[str, Dict[str, Any]]:
     if not tool_ids:
         return {}
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         placeholders = ",".join("?" * len(tool_ids))
         rows = conn.execute(
             f"SELECT * FROM behavior_profiles WHERE tool_id IN ({placeholders})",  # nosec B608
@@ -574,13 +553,10 @@ def get_profiles_batch(tool_ids: List[str]) -> Dict[str, Dict[str, Any]]:
             d["open_world"] = bool(d["open_world"])
             result[d["tool_id"]] = d
         return result
-    finally:
-        conn.close()
 
 
 def get_profile(tool_id: str) -> Optional[Dict[str, Any]]:
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute("SELECT * FROM behavior_profiles WHERE tool_id = ?", (tool_id,)).fetchone()
         if row is None:
             return None
@@ -589,13 +565,10 @@ def get_profile(tool_id: str) -> Optional[Dict[str, Any]]:
         d["evidence"] = _jloads(d.pop("evidence_json", "[]"), [])
         d["open_world"] = bool(d["open_world"])
         return d
-    finally:
-        conn.close()
 
 
 def store_security_scan(server_id: str, findings: Dict[str, Any]) -> int:
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         cursor = conn.execute(
             """
             INSERT INTO security_scans
@@ -617,13 +590,10 @@ def store_security_scan(server_id: str, findings: Dict[str, Any]) -> int:
         )
         conn.commit()
         return cursor.lastrowid
-    finally:
-        conn.close()
 
 
 def get_latest_security_scan(server_id: str) -> Optional[Dict[str, Any]]:
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         row = conn.execute(
             """
             SELECT * FROM security_scans
@@ -642,8 +612,6 @@ def get_latest_security_scan(server_id: str) -> Optional[Dict[str, Any]]:
             if field in raw:
                 d.setdefault(field, raw[field])
         return d
-    finally:
-        conn.close()
 
 
 def get_tool_security_findings_map(server_id: str) -> Dict[str, Dict[str, Any]]:
@@ -664,8 +632,7 @@ def get_tool_security_finding(server_id: str, tool_name: str) -> Optional[Dict[s
 
 
 def set_tool_policy(server_id: str, tool_name: str, policy: Optional[str]) -> None:
-    conn = get_connection()
-    try:
+    with db_conn() as conn:
         if policy is None:
             conn.execute(
                 "DELETE FROM tool_policies WHERE server_id = ? AND tool_name = ?",
@@ -681,8 +648,6 @@ def set_tool_policy(server_id: str, tool_name: str, policy: Optional[str]) -> No
                 (server_id, tool_name, policy, datetime.now(timezone.utc).isoformat()),
             )
         conn.commit()
-    finally:
-        conn.close()
 
 
 def get_tool_policy(server_id: str, tool_name: str) -> Optional[str]:
