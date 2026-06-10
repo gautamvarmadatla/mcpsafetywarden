@@ -29,4 +29,4 @@ jobs:
           results_file: scorecard-results.sarif
           results_format: sarif
           publish_results: true
-          repo_token: ${{ secrets.SCORECARD_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
