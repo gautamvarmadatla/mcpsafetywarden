@@ -67,58 +67,6 @@ jobs:
       - name: Publish to MCP Registry
         run: ./mcp-publisher publish
 
-  create-release:
-    needs: build-and-publish
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
-
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.11"
-
-      - name: Build and sign
-        run: |
-          pip install build sigstore
-          python -m build
-          sigstore sign dist/*.whl dist/*.tar.gz
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="${{ github.ref_name }}"
-
-          NOTES=$(git tag -l --format='%(contents)' "$TAG" | sed '/^-----BEGIN SSH SIGNATURE-----/,/^-----END SSH SIGNATURE-----/d' | sed '/^-----BEGIN PGP SIGNATURE-----/,/^-----END PGP SIGNATURE-----/d')
-          PREV_TAG=$(gh release list --limit 2 --json tagName -q '.[1].tagName' 2>/dev/null || echo "")
-          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
-            [ -n "$PREV_TAG" ] && NOTES="**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}"
-          fi
-
-          if [ -n "$PREV_TAG" ]; then
-            LOGINS=$(gh api "repos/${{ github.repository }}/compare/${PREV_TAG}...${TAG}" \
-              --jq '[.commits[].author | select(. != null) | .login] | unique | .[]' 2>/dev/null || echo "")
-          else
-            LOGINS=$(gh api "repos/${{ github.repository }}/commits?per_page=100" \
-              --jq '[.[].author | select(. != null) | .login] | unique | .[]' 2>/dev/null || echo "")
-          fi
-
-          if [ -n "$LOGINS" ]; then
-            AVATARS=""
-            while IFS= read -r login; do
-              [ -z "$login" ] && continue
-              USER_ID=$(gh api "users/$login" --jq '.id' 2>/dev/null || echo "")
-              [ -n "$USER_ID" ] && AVATARS+="[![@${login}](https://avatars.githubusercontent.com/u/${USER_ID}?s=64&v=4)](https://github.com/${login}) "
-            done <<< "$LOGINS"
-            [ -n "$AVATARS" ] && NOTES+=$'\n\n## Contributors\n\n'"$AVATARS"
-          fi
-
-          gh release create "$TAG" dist/* --notes "$NOTES" --title "$TAG"
-
   publish-docker:
     needs: build-and-publish
     runs-on: ubuntu-latest
