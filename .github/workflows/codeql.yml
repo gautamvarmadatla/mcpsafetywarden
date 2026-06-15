@@ -1,4 +1,4 @@
-﻿name: CodeQL
+name: CodeQL
 
 concurrency:
   group: codeql-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@ed410739ba306e4ebe5e123421a6bd694e494a2b # v4
@@ -54,7 +54,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@ed410739ba306e4ebe5e123421a6bd694e494a2b # v4
