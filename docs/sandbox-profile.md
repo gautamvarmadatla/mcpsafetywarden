@@ -132,7 +132,9 @@ pins the TLS certificate against `network.pin_cert` (`sha256:<hex>`).
 Set `learning.mode` to `observe` or `suggest`. The server runs under the profile
 while the proxy records the domains it actually reaches; on exit a tightened
 profile is written to `<name>.suggested.json` for review. Nothing is
-auto-enforced.
+auto-enforced. Observe runs are **non-blocking by design** (the proxy allows and
+records so the server operates normally), which relaxes enforced egress to
+advisory for the duration of the learning run.
 
 ## Windows
 

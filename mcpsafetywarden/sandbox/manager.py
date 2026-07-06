@@ -77,7 +77,7 @@ def sandbox_session(
             profile.network,
             secrets=profile.secrets,
             record_observed=learn,
-            block=enforce,
+            block=enforce and not learn,
         )
         proxy = EgressProxy(policy).start()
         env.update(proxy.proxy_env())

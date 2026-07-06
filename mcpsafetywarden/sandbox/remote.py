@@ -36,6 +36,17 @@ def _cert_sha256(host: str, port: int) -> str:
 
 
 def verify_remote(server: Dict[str, Any], profile: SandboxProfile) -> None:
+    res = profile.resources
+    if profile.assurance.required != "process" or any(
+        v is not None for v in (res.cpu, res.memory, res.wall_time, res.max_processes, res.max_open_files)
+    ):
+        _log.warning(
+            "sandbox '%s': remote (%s) server cannot be process-sandboxed; assurance/resource/filesystem/syscall "
+            "controls are ignored - only endpoint and cert pinning apply",
+            profile.name,
+            profile.transport(),
+        )
+
     url = server.get("url")
     if not url:
         return

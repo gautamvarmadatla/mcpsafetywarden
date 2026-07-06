@@ -350,6 +350,31 @@ def test_observe_mode_allows_but_flags():
     assert "would block" in reason
 
 
+def test_observe_mode_wires_non_blocking_proxy(monkeypatch):
+    import mcpsafetywarden.sandbox.manager as mgr
+
+    captured = {}
+    real = mgr.EgressPolicy
+
+    def spy(*a, **k):
+        captured["block"] = k.get("block")
+        return real(*a, **k)
+
+    monkeypatch.setattr(mgr, "EgressPolicy", spy)
+    profile = from_dict(
+        {
+            "name": "o",
+            "target": {"transport": "stdio"},
+            "assurance": {"on_unavailable": "warn"},
+            "learning": {"mode": "observe"},
+            "network": {"default": "deny", "allow": [{"host": "x.com"}]},
+        }
+    )
+    with mgr.sandbox_session("python", [], {}, profile):
+        pass
+    assert captured.get("block") is False
+
+
 def test_remote_verification():
     from mcpsafetywarden.sandbox.remote import RemoteVerificationError, verify_remote
 
