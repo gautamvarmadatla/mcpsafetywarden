@@ -613,6 +613,17 @@ async def open_streams(server: Dict[str, Any]) -> AsyncGenerator[Tuple[Any, Any]
         resolved_env = {k: v for k, v in _os.environ.items() if k not in _WRAPPER_SECRET_KEYS}
         if env_override:
             resolved_env.update(env_override)
+
+        from ..sandbox import load_profile, sandbox_session
+
+        profile = load_profile(server)
+        if profile is not None:
+            with sandbox_session(server["command"], server.get("args") or [], resolved_env, profile) as spawn:
+                params = StdioServerParameters(command=spawn.command, args=spawn.args, env=spawn.env)
+                async with stdio_client(params) as (read, write):
+                    yield read, write
+            return
+
         params = StdioServerParameters(
             command=server["command"],
             args=server.get("args") or [],

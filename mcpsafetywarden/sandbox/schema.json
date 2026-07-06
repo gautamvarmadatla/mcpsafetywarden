@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gautamvarmadatla/mcpsafetywarden/sandbox-profile.schema.json",
+  "title": "MCP Safety Warden Sandbox Profile",
+  "type": "object",
+  "properties": {
+    "schema_version": { "type": "string" },
+    "name": { "type": "string" },
+    "target": {
+      "type": "object",
+      "properties": {
+        "server_id": { "type": "string" },
+        "transport": { "enum": ["stdio", "sse", "http"] },
+        "image": { "type": "string" }
+      }
+    },
+    "assurance": {
+      "type": "object",
+      "properties": {
+        "required": { "enum": ["process", "container", "microvm"] },
+        "on_unavailable": { "enum": ["block", "warn", "downgrade"] }
+      }
+    },
+    "enforcement": {
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["observe", "warn", "enforce"] },
+        "on_violation": { "enum": ["block", "log"] }
+      }
+    },
+    "filesystem": {
+      "type": "object",
+      "properties": {
+        "workdir": { "type": "string" },
+        "temp": { "type": "boolean" },
+        "read": { "type": "array", "items": { "type": "string" } },
+        "write": { "type": "array", "items": { "type": "string" } },
+        "deny": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "network": {
+      "type": "object",
+      "properties": {
+        "default": { "enum": ["deny", "allow"] },
+        "allow": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "properties": {
+                  "host": { "type": "string" },
+                  "ports": { "type": "array", "items": { "type": "integer" } }
+                },
+                "required": ["host"]
+              }
+            ]
+          }
+        },
+        "block_reserved": { "type": "boolean" },
+        "on_new_domain": { "enum": ["ask", "deny", "allow_once"] },
+        "endpoint": { "type": "string" },
+        "pin_cert": { "type": "string" }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "properties": {
+        "allow": { "type": "array", "items": { "type": "string" } },
+        "set": { "type": "object", "additionalProperties": { "type": "string" } },
+        "scrub": { "type": "boolean" }
+      }
+    },
+    "secrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ref": { "type": "string" },
+          "inject_as": { "enum": ["header", "env", "query"] },
+          "name": { "type": "string" },
+          "template": { "type": "string" },
+          "to": { "type": "string" }
+        },
+        "required": ["ref"]
+      }
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "cpu": { "type": "string" },
+        "memory": { "type": "string" },
+        "wall_time": { "type": "string" },
+        "max_processes": { "type": "integer" },
+        "max_open_files": { "type": "integer" }
+      }
+    },
+    "syscalls": {
+      "type": "object",
+      "properties": {
+        "profile": { "enum": ["strict", "default", "permissive"] },
+        "deny_extra": { "type": "array", "items": { "type": "string" } },
+        "allow_extra": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "tools": { "type": "object", "additionalProperties": { "type": "object" } },
+    "learning": {
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["off", "observe", "suggest"] },
+        "observed": { "type": "object" }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "properties": {
+        "log": { "type": "boolean" },
+        "path": { "type": "string" }
+      }
+    }
+  }
+}
