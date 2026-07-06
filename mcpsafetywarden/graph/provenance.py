@@ -812,8 +812,12 @@ def fetch_github_manifest(github_url: str) -> Dict[str, Any]:
     if text:
         try:
             pkg = json.loads(text)
-            raw_deps = pkg.get("dependencies") or {}
-            raw_dev = pkg.get("devDependencies") or {}
+            if not isinstance(pkg, dict):
+                pkg = {}
+            raw_deps = pkg.get("dependencies")
+            raw_dev = pkg.get("devDependencies")
+            raw_deps = raw_deps if isinstance(raw_deps, dict) else {}
+            raw_dev = raw_dev if isinstance(raw_dev, dict) else {}
             versioned = [{"name": n, "version": _extract_version(v), "dev": False} for n, v in raw_deps.items()] + [
                 {"name": n, "version": _extract_version(v), "dev": True} for n, v in raw_dev.items()
             ]
@@ -1116,7 +1120,9 @@ def resolve_host_ips(url: str) -> Dict[str, Any]:
     host = parsed.hostname
     if not host:
         return {"ips": [], "private_ips": [], "error": "no hostname in URL"}
+    _prev_timeout = socket.getdefaulttimeout()
     try:
+        socket.setdefaulttimeout(_PKG_TIMEOUT)
         infos = socket.getaddrinfo(host, None)
         all_ips = sorted(set(info[4][0] for info in infos))
         private: List[str] = []
@@ -1128,8 +1134,10 @@ def resolve_host_ips(url: str) -> Dict[str, Any]:
             except ValueError:
                 pass
         return {"ips": all_ips, "private_ips": private}
-    except socket.gaierror as exc:
+    except OSError as exc:
         return {"ips": [], "private_ips": [], "error": str(exc)}
+    finally:
+        socket.setdefaulttimeout(_prev_timeout)
 
 
 def compute_tool_fingerprint(

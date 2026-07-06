@@ -1070,6 +1070,8 @@ async def _hacker_openai_compat(
                 messages=msgs,
             ),
         )
+        if not getattr(response, "choices", None):
+            break
         msg = response.choices[0].message
         messages.append(msg)
 
@@ -1255,7 +1257,7 @@ async def _hacker_gemini(
                     tools=gemini_tools,
                 ),
             )
-            if not response.candidates:
+            if not response or not getattr(response, "candidates", None):
                 break
             candidate = response.candidates[0]
             if candidate.content is None:
