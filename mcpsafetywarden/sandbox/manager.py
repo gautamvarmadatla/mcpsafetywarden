@@ -32,6 +32,12 @@ def load_profile(server: Dict[str, Any]) -> Optional[SandboxProfile]:
         profile = from_dict(
             {"name": str(server.get("server_id", "unnamed")), "target": {"transport": server.get("transport", "stdio")}}
         )
+        _log.warning(
+            "MCP_SANDBOX active: applying strict default-deny profile to '%s'. "
+            "It will block filesystem/egress the backend cannot enforce and deny all network. "
+            "Run once with learning.mode=observe to synthesise an allowlist first.",
+            profile.name,
+        )
         return profile
     return None
 
@@ -59,23 +65,33 @@ def sandbox_session(
 ) -> Iterator[backends.WrappedSpawn]:
     env = build_env(profile, base_env)
     learn = profile.learning.mode in ("observe", "suggest")
+    enforce = profile.enforcement.mode == "enforce"
+
+    backend = backends.select_backend(profile)
+    unmet = backends.enforce_controls(profile, backend)
+
     proxy: Optional[EgressProxy] = None
     if profile.transport() == "stdio":
-        policy = EgressPolicy(profile.network, secrets=profile.secrets, record_observed=learn)
+        policy = EgressPolicy(
+            profile.network,
+            secrets=profile.secrets,
+            record_observed=learn,
+            block=enforce,
+        )
         proxy = EgressProxy(policy).start()
         env.update(proxy.proxy_env())
-        _log.info("sandbox '%s': egress proxy at %s", profile.name, proxy.address)
+        _log.info("sandbox '%s': egress proxy at %s (mode=%s)", profile.name, proxy.address, profile.enforcement.mode)
     try:
-        backend = backends.select_backend(profile)
         wrapped = backend.wrap(command, list(args or []), env, profile)
-        if backend.name == "subprocess" and (profile.network.allow or profile.network.default == "deny"):
+        if "egress" in unmet:
             _log.warning(
-                "sandbox '%s': subprocess backend enforces egress by proxy env only (advisory); "
-                "use bubblewrap/container/seatbelt for a server that may be hostile",
+                "sandbox '%s': egress on backend '%s' is advisory (proxy env only); a hostile binary can bypass it. "
+                "Use a no-egress policy or bubblewrap/container/wasm/microvm for enforcement.",
                 profile.name,
+                backend.name,
             )
         _log.info("sandbox '%s': backend=%s %s", profile.name, wrapped.backend, "; ".join(wrapped.notes))
-        _audit(profile, f"start backend={wrapped.backend}")
+        _audit(profile, f"start backend={wrapped.backend} unmet={unmet or 'none'}")
         yield wrapped
     finally:
         if proxy is not None:

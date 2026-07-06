@@ -51,11 +51,13 @@ class EgressPolicy:
         secrets: Optional[List[SecretRule]] = None,
         approval: Optional[ApprovalFn] = None,
         record_observed: bool = False,
+        block: bool = True,
     ) -> None:
         self.network = network
         self.secrets = secrets or []
         self.approval = approval
         self.record_observed = record_observed
+        self.block = block
         self.seen_new: set = set()
         self.decisions: List[tuple] = []
         self.observed_domains: set = set()
@@ -74,6 +76,9 @@ class EgressPolicy:
         if self.record_observed and not netfilter.is_ip_literal(host):
             self.observed_domains.add(netfilter.normalize_host(host).lower())
         _log.info("egress %s %s:%s (%s)", "ALLOW" if allowed else "DENY", host, port, reason)
+        if not allowed and not self.block:
+            _log.warning("egress OBSERVE would-block %s:%s (%s)", host, port, reason)
+            return True, f"observe: would block ({reason})"
         return allowed, reason
 
     def _handle_new_domain(self, host: str, port: Optional[int]) -> tuple:
@@ -176,7 +181,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         try:
             upstream = _safe_connect(host, port, self.policy.network.block_reserved)
-            conn = _HTTPOnSocket(host, upstream)
+            conn = _VettedHTTPConnection(host, port, upstream)
             conn.request(self.command, path, body=body, headers=headers)
             resp = conn.getresponse()
             data = resp.read(MAX_BODY_BYTES + 1)
@@ -208,20 +213,18 @@ class _Handler(BaseHTTPRequestHandler):
     do_HEAD = _handle_forward
 
 
-class _HTTPOnSocket:
-    """Minimal HTTP/1.1 client over an already-vetted socket (no re-resolution)."""
+import http.client
 
-    def __init__(self, host: str, sock: socket.socket) -> None:
-        import http.client
 
-        self._conn = http.client.HTTPConnection(host)
-        self._conn.sock = sock
+class _VettedHTTPConnection(http.client.HTTPConnection):
+    """HTTP/1.1 client bound to an already-vetted socket (no re-resolution)."""
 
-    def request(self, method, path, body=None, headers=None):
-        self._conn.request(method, path, body=body, headers=headers or {})
+    def __init__(self, host: str, port: int, sock: socket.socket) -> None:
+        super().__init__(host, port)
+        self._vetted = sock
 
-    def getresponse(self):
-        return self._conn.getresponse()
+    def connect(self) -> None:
+        self.sock = self._vetted
 
 
 def _tunnel(client: socket.socket, upstream: socket.socket) -> None:
@@ -247,12 +250,30 @@ def _tunnel(client: socket.socket, upstream: socket.socket) -> None:
                 pass
 
 
+class _BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    max_workers = 64
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._slots = threading.BoundedSemaphore(self.max_workers)
+
+    def process_request_thread(self, request, client_address):
+        acquired = self._slots.acquire(timeout=30)
+        if not acquired:
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+
 class EgressProxy:
     def __init__(self, policy: EgressPolicy, host: str = "127.0.0.1", port: int = 0) -> None:
         self.policy = policy
-        self._server = ThreadingHTTPServer((host, port), _Handler)
+        self._server = _BoundedThreadingHTTPServer((host, port), _Handler)
         self._server.policy = policy
-        self._server.daemon_threads = True
         self._thread: Optional[threading.Thread] = None
 
     @property

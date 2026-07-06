@@ -91,6 +91,7 @@ class Network:
     allow: List[HostRule] = field(default_factory=list)
     block_reserved: bool = True
     on_new_domain: str = "ask"
+    enforcement: str = "enforced"
     endpoint: Optional[str] = None
     pin_cert: Optional[str] = None
 
@@ -160,11 +161,85 @@ class SandboxProfile:
     def transport(self) -> str:
         return str(self.target.get("transport", "stdio"))
 
+    def to_dict(self) -> Dict[str, Any]:
+        if self._raw:
+            return copy.deepcopy(self._raw)
+        return {
+            "schema_version": self.schema_version,
+            "name": self.name,
+            "target": dict(self.target),
+            "assurance": {"required": self.assurance.required, "on_unavailable": self.assurance.on_unavailable},
+            "enforcement": {"mode": self.enforcement.mode, "on_violation": self.enforcement.on_violation},
+            "filesystem": {
+                "workdir": self.filesystem.workdir,
+                "temp": self.filesystem.temp,
+                "read": list(self.filesystem.read),
+                "write": list(self.filesystem.write),
+                "deny": list(self.filesystem.deny),
+            },
+            "network": {
+                "default": self.network.default,
+                "allow": [{"host": r.host, "ports": list(r.ports)} for r in self.network.allow],
+                "block_reserved": self.network.block_reserved,
+                "on_new_domain": self.network.on_new_domain,
+                "enforcement": self.network.enforcement,
+                "endpoint": self.network.endpoint,
+                "pin_cert": self.network.pin_cert,
+            },
+            "environment": {
+                "allow": list(self.environment.allow),
+                "set": dict(self.environment.set),
+                "scrub": self.environment.scrub,
+            },
+            "secrets": [
+                {"ref": s.ref, "inject_as": s.inject_as, "name": s.name, "template": s.template, "to": s.to}
+                for s in self.secrets
+            ],
+            "resources": {
+                "cpu": self.resources.cpu,
+                "memory": self.resources.memory,
+                "wall_time": self.resources.wall_time,
+                "max_processes": self.resources.max_processes,
+                "max_open_files": self.resources.max_open_files,
+            },
+            "syscalls": {
+                "profile": self.syscalls.profile,
+                "deny_extra": list(self.syscalls.deny_extra),
+                "allow_extra": list(self.syscalls.allow_extra),
+            },
+            "tools": dict(self.tools),
+            "learning": {"mode": self.learning.mode, "observed": dict(self.learning.observed)},
+            "audit": {"log": self.audit.log, "path": self.audit.path},
+        }
+
+    def required_controls(self) -> Dict[str, str]:
+        """Controls the profile asks for, each marked block (fail-closed) or warn."""
+        controls: Dict[str, str] = {}
+        if self.enforcement.mode == "enforce":
+            controls["filesystem"] = "block"
+        if self.network.enforcement == "enforced" and self.network.default == "deny":
+            controls["egress"] = "block" if not self.network.allow else "warn"
+        if self.syscalls.profile in ("strict", "default"):
+            controls["syscalls"] = "warn"
+        if any(
+            v is not None
+            for v in (
+                self.resources.cpu,
+                self.resources.memory,
+                self.resources.wall_time,
+                self.resources.max_processes,
+                self.resources.max_open_files,
+            )
+        ):
+            controls["resources"] = "warn"
+        return controls
+
     def for_tool(self, tool_name: str) -> "SandboxProfile":
         override = self.tools.get(tool_name)
         if not override:
             return self
-        merged = _deep_merge(self._raw, {k: v for k, v in override.items()})
+        base = self._raw if self._raw else self.to_dict()
+        merged = _deep_merge(base, {k: v for k, v in override.items()})
         merged.pop("tools", None)
         return from_dict(merged)
 
@@ -215,6 +290,7 @@ def from_dict(data: Dict[str, Any]) -> SandboxProfile:
             allow=[HostRule.from_any(h) for h in (net_raw.get("allow", []) or [])],
             block_reserved=bool(net_raw.get("block_reserved", True)),
             on_new_domain=str(net_raw.get("on_new_domain", "ask")),
+            enforcement=str(net_raw.get("enforcement", "enforced")),
             endpoint=net_raw.get("endpoint"),
             pin_cert=net_raw.get("pin_cert"),
         ),

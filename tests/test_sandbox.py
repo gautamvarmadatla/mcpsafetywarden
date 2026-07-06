@@ -1,6 +1,9 @@
 """Tests for the sandbox layer: profile model, egress decisions, backends, broker."""
 
+import os
 import socket
+import subprocess
+import sys
 
 import pytest
 
@@ -9,6 +12,7 @@ from mcpsafetywarden.sandbox import (
     build_env,
     from_dict,
     load_profile,
+    sandbox_session,
     select_backend,
     set_secret_resolver,
     validate,
@@ -266,3 +270,134 @@ def test_learning_synthesizes_allowlist():
     assert hosts == {"api.example.com", "cdn.example.com"}
     assert suggested["network"]["default"] == "deny"
     assert suggested["enforcement"]["mode"] == "enforce"
+
+
+def test_required_controls_and_enforcement_knob():
+    p = from_dict({})
+    ctl = p.required_controls()
+    assert ctl.get("filesystem") == "block"
+    assert ctl.get("egress") == "block"
+    assert ctl.get("syscalls") == "warn"
+
+    p2 = from_dict({"network": {"default": "deny", "allow": [{"host": "x.com"}]}})
+    assert p2.required_controls().get("egress") == "warn"
+
+    p3 = from_dict({"network": {"enforcement": "advisory"}})
+    assert "egress" not in p3.required_controls()
+
+
+def test_capabilities_are_honest():
+    from mcpsafetywarden.sandbox.backends import BubblewrapBackend, ContainerBackend, SubprocessBackend
+
+    no_egress = from_dict({})
+    assert "filesystem" not in SubprocessBackend().capabilities(no_egress)
+    assert "egress" in BubblewrapBackend().capabilities(no_egress)
+    with_allow = from_dict({"network": {"allow": [{"host": "x.com"}]}})
+    assert "egress" not in BubblewrapBackend().capabilities(with_allow)
+    assert "egress" in ContainerBackend().capabilities(no_egress)
+
+
+def test_enforce_controls_fails_closed():
+    from mcpsafetywarden.sandbox.backends import SandboxUnavailable, SubprocessBackend, enforce_controls
+
+    blocking = from_dict({"assurance": {"on_unavailable": "block"}})
+    with pytest.raises(SandboxUnavailable):
+        enforce_controls(blocking, SubprocessBackend())
+
+    warning = from_dict({"assurance": {"on_unavailable": "warn"}})
+    unmet = enforce_controls(warning, SubprocessBackend())
+    assert "filesystem" in unmet
+
+
+def test_enforced_no_egress_argv():
+    from mcpsafetywarden.sandbox.backends import BubblewrapBackend, ContainerBackend
+
+    monkeypatch_image = {"target": {"image": "python:3.11-slim"}}
+    no_egress = from_dict(monkeypatch_image)
+    bw = BubblewrapBackend().wrap("python", ["-m", "s"], {}, no_egress)
+    assert "--unshare-net" in bw.args
+    ct = ContainerBackend().wrap("python", ["-m", "s"], {}, no_egress)
+    assert "--network" in ct.args and ct.args[ct.args.index("--network") + 1] == "none"
+    assert "host" not in ct.args
+
+    allow = from_dict({**monkeypatch_image, "network": {"allow": [{"host": "x.com"}]}})
+    bw2 = BubblewrapBackend().wrap("python", [], {}, allow)
+    assert "--unshare-net" not in bw2.args
+    ct2 = ContainerBackend().wrap("python", [], {}, allow)
+    assert ct2.args[ct2.args.index("--network") + 1] == "bridge"
+
+
+def test_deny_paths_masked_in_bwrap():
+    from mcpsafetywarden.sandbox.backends import BubblewrapBackend
+
+    p = from_dict({"filesystem": {"deny": ["~/.ssh"]}})
+    spawn = BubblewrapBackend().wrap("python", [], {}, p)
+    assert "--tmpfs" in spawn.args
+
+
+def test_container_resource_flags():
+    from mcpsafetywarden.sandbox.backends import ContainerBackend
+
+    p = from_dict(
+        {
+            "target": {"image": "img"},
+            "resources": {"memory": "512MiB", "cpu": "1.0", "max_processes": 8, "max_open_files": 128},
+        }
+    )
+    args = ContainerBackend().wrap("python", [], {}, p).args
+    assert "--memory" in args and "--cpus" in args and "--pids-limit" in args and "--ulimit" in args
+
+
+def test_observe_mode_allows_but_flags():
+    policy = EgressPolicy(Network(default="deny", allow=[]), block=False)
+    allowed, reason = policy.decide("169.254.169.254", 80)
+    assert allowed is True
+    assert "would block" in reason
+
+
+def test_remote_verification():
+    from mcpsafetywarden.sandbox.remote import RemoteVerificationError, verify_remote
+
+    p = from_dict({"network": {"endpoint": "https://mcp.example.com", "block_reserved": False}})
+    with pytest.raises(RemoteVerificationError):
+        verify_remote({"url": "https://evil.example.com/mcp"}, p)
+
+    reserved = from_dict({})
+    with pytest.raises(RemoteVerificationError):
+        verify_remote({"url": "http://169.254.169.254/mcp"}, reserved)
+
+    ok = from_dict({"network": {"endpoint": "https://mcp.example.com", "block_reserved": False}})
+    verify_remote({"url": "https://mcp.example.com/mcp"}, ok)
+
+
+def test_to_dict_and_for_tool_without_raw():
+    p = from_dict({"network": {"allow": [{"host": "api.example.com"}]}})
+    p._raw = {}
+    d = p.to_dict()
+    assert d["network"]["allow"][0]["host"] == "api.example.com"
+    p2 = from_dict({"network": {"allow": [{"host": "api.example.com"}]}, "tools": {"t": {"network": {"allow": []}}}})
+    p2._raw = {}
+    assert p2.for_tool("t").network.allow == []
+
+
+def test_integration_subprocess_egress_blocked():
+    profile = from_dict(
+        {
+            "name": "it",
+            "target": {"transport": "stdio"},
+            "assurance": {"on_unavailable": "warn"},
+            "environment": {"allow": list(os.environ.keys()), "scrub": False},
+            "network": {"default": "deny", "allow": [], "enforcement": "advisory"},
+        }
+    )
+    code = (
+        "import urllib.request\n"
+        "try:\n"
+        "    urllib.request.urlopen('http://10.0.0.1/', timeout=8)\n"
+        "    print('REACHED')\n"
+        "except Exception:\n"
+        "    print('BLOCKED')\n"
+    )
+    with sandbox_session(sys.executable, ["-c", code], dict(os.environ), profile) as spawn:
+        out = subprocess.run([spawn.command, *spawn.args], env=spawn.env, capture_output=True, text=True, timeout=40)
+        assert "BLOCKED" in out.stdout, f"stdout={out.stdout!r} stderr={out.stderr!r}"

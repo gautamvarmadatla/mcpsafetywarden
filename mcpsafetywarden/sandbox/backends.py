@@ -1,9 +1,13 @@
 """Pluggable enforcer backends and capability negotiation.
 
-The profile says WHAT to enforce; a backend says HOW on a given platform. New
-primitives (wasm, microvm) become new backends without touching policy. The
-registry picks the strongest available backend that meets the required
-assurance level, and fails closed when none does.
+The profile says WHAT to enforce; a backend says HOW on a given platform. Every
+backend declares exactly which controls it enforces via capabilities(), so the
+manager can fail closed (never silently ignore) a control the profile requires
+but the backend cannot deliver.
+
+Controls: filesystem, egress, resources, envscrub. Syscall filtering is not
+enforceable through the stdio spawn path here, so it is always surfaced as an
+unmet control rather than silently dropped.
 """
 
 from __future__ import annotations
@@ -13,11 +17,13 @@ import os
 import platform
 import shutil
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
-from .profile import SandboxProfile, assurance_rank
+from .profile import Resources, SandboxProfile, assurance_rank
 
 _log = logging.getLogger(__name__)
+
+_POSIX = os.name == "posix"
 
 
 class SandboxUnavailable(RuntimeError):
@@ -33,6 +39,83 @@ class WrappedSpawn:
     notes: List[str] = field(default_factory=list)
 
 
+def enforced_no_egress(profile: SandboxProfile) -> bool:
+    net = profile.network
+    return net.enforcement == "enforced" and net.default == "deny" and not net.allow
+
+
+def _parse_bytes(value: Optional[str]) -> Optional[int]:
+    if not value:
+        return None
+    s = str(value).strip().upper()
+    units = {
+        "K": 1024,
+        "KI": 1024,
+        "KIB": 1024,
+        "M": 1024**2,
+        "MI": 1024**2,
+        "MIB": 1024**2,
+        "G": 1024**3,
+        "GI": 1024**3,
+        "GIB": 1024**3,
+    }
+    for suffix in sorted(units, key=len, reverse=True):
+        if s.endswith(suffix):
+            try:
+                return int(float(s[: -len(suffix)]) * units[suffix])
+            except ValueError:
+                return None
+    try:
+        return int(s)
+    except ValueError:
+        return None
+
+
+def _parse_seconds(value: Optional[str]) -> Optional[int]:
+    if not value:
+        return None
+    s = str(value).strip().lower()
+    mult = 1
+    if s.endswith("s"):
+        s = s[:-1]
+    elif s.endswith("m"):
+        s, mult = s[:-1], 60
+    elif s.endswith("h"):
+        s, mult = s[:-1], 3600
+    try:
+        return int(float(s) * mult)
+    except ValueError:
+        return None
+
+
+def _apply_posix_limits(command: str, args: List[str], resources: Resources):
+    if not _POSIX or shutil.which("sh") is None:
+        return command, args
+    limits: List[str] = []
+    mem = _parse_bytes(resources.memory)
+    if mem:
+        limits.append(f"ulimit -v {mem // 1024}")
+    if resources.max_open_files:
+        limits.append(f"ulimit -n {int(resources.max_open_files)}")
+    if resources.max_processes:
+        limits.append(f"ulimit -u {int(resources.max_processes)}")
+    wall = _parse_seconds(resources.wall_time)
+    if not limits and not wall:
+        return command, args
+    script = "; ".join(limits + ['exec "$@"']) if limits else 'exec "$@"'
+    inner = ["/bin/sh", "-c", script, "sh", command, *args]
+    if wall and shutil.which("timeout"):
+        inner = ["timeout", str(wall), *inner]
+    return inner[0], inner[1:]
+
+
+def _posix_resources_supported(resources: Resources) -> bool:
+    return _POSIX and any(
+        v is not None
+        for v in (resources.memory, resources.max_open_files, resources.max_processes, resources.wall_time)
+    )
+
+
 class SandboxBackend:
     name = "base"
     assurance = "process"
@@ -40,12 +123,15 @@ class SandboxBackend:
     def available(self) -> bool:
         raise NotImplementedError
 
+    def capabilities(self, profile: SandboxProfile) -> Set[str]:
+        return set()
+
     def wrap(self, command: str, args: List[str], env: Dict[str, str], profile: SandboxProfile) -> WrappedSpawn:
         raise NotImplementedError
 
 
 class SubprocessBackend(SandboxBackend):
-    """Floor: works everywhere. Env scrub + egress only, no FS/syscall jail."""
+    """Floor: works everywhere. Env scrub only; egress is advisory, no FS jail."""
 
     name = "subprocess"
     assurance = "process"
@@ -53,13 +139,20 @@ class SubprocessBackend(SandboxBackend):
     def available(self) -> bool:
         return True
 
+    def capabilities(self, profile: SandboxProfile) -> Set[str]:
+        caps = {"envscrub"}
+        if _posix_resources_supported(profile.resources):
+            caps.add("resources")
+        return caps
+
     def wrap(self, command, args, env, profile) -> WrappedSpawn:
+        command, args = _apply_posix_limits(command, list(args), profile.resources)
         return WrappedSpawn(
             command=command,
             args=list(args),
             env=env,
             backend=self.name,
-            notes=["env-scrub + egress only; no filesystem/syscall isolation on this backend"],
+            notes=["env-scrub only; no filesystem isolation; egress advisory (proxy env)"],
         )
 
 
@@ -69,6 +162,14 @@ class BubblewrapBackend(SandboxBackend):
 
     def available(self) -> bool:
         return platform.system() == "Linux" and shutil.which("bwrap") is not None
+
+    def capabilities(self, profile: SandboxProfile) -> Set[str]:
+        caps = {"filesystem", "envscrub"}
+        if enforced_no_egress(profile):
+            caps.add("egress")
+        if _posix_resources_supported(profile.resources):
+            caps.add("resources")
+        return caps
 
     def wrap(self, command, args, env, profile) -> WrappedSpawn:
         bwrap = shutil.which("bwrap") or "bwrap"
@@ -88,6 +189,9 @@ class BubblewrapBackend(SandboxBackend):
             "--tmpfs",
             "/tmp",
         ]
+        no_egress = enforced_no_egress(profile)
+        if no_egress:
+            argv.append("--unshare-net")
         for base in ("/usr", "/bin", "/lib", "/lib64", "/etc/ssl", "/etc/resolv.conf"):
             if os.path.exists(base):
                 argv += ["--ro-bind", base, base]
@@ -99,59 +203,15 @@ class BubblewrapBackend(SandboxBackend):
         for path in profile.filesystem.write:
             resolved = os.path.abspath(os.path.expanduser(path))
             argv += ["--bind", resolved, resolved]
-        argv += ["--chdir", workdir]
-        argv += ["--", command, *args]
-        return WrappedSpawn(
-            command=bwrap,
-            args=argv,
-            env=env,
-            backend=self.name,
-            notes=["filesystem confined to workdir + declared reads; sensitive paths not bound"],
-        )
-
-
-class ContainerBackend(SandboxBackend):
-    name = "container"
-    assurance = "container"
-
-    def _runtime(self) -> Optional[str]:
-        for candidate in ("podman", "docker"):
-            if shutil.which(candidate):
-                return candidate
-        return None
-
-    def available(self) -> bool:
-        return self._runtime() is not None and bool(self._image_for(None))
-
-    def _image_for(self, profile: Optional[SandboxProfile]) -> Optional[str]:
-        if profile is None:
-            return os.environ.get("MCP_SANDBOX_IMAGE")
-        return (profile.target.get("image") if profile.target else None) or os.environ.get("MCP_SANDBOX_IMAGE")
-
-    def wrap(self, command, args, env, profile) -> WrappedSpawn:
-        runtime = self._runtime() or "docker"
-        image = self._image_for(profile)
-        if not image:
-            raise SandboxUnavailable("container backend requires target.image or MCP_SANDBOX_IMAGE")
-        workdir = os.path.abspath(os.path.expanduser(profile.filesystem.workdir or "./"))
-        argv = ["run", "--rm", "-i", "--network", "host", "-v", f"{workdir}:/work:rw", "-w", "/work"]
-        for path in profile.filesystem.read:
+        for path in profile.filesystem.deny:
             resolved = os.path.abspath(os.path.expanduser(path))
-            argv += ["-v", f"{resolved}:{resolved}:ro"]
-        if profile.resources.memory:
-            argv += ["--memory", str(profile.resources.memory)]
-        if profile.resources.cpu:
-            argv += ["--cpus", str(profile.resources.cpu)]
-        for key, value in env.items():
-            argv += ["-e", f"{key}={value}"]
-        argv += [image, command, *args]
-        return WrappedSpawn(
-            command=runtime,
-            args=argv,
-            env=env,
-            backend=self.name,
-            notes=[f"containerised via {runtime} image {image}"],
-        )
+            argv += ["--tmpfs", resolved]
+        argv += ["--chdir", workdir]
+        inner_cmd, inner_args = _apply_posix_limits(command, list(args), profile.resources)
+        argv += ["--", inner_cmd, *inner_args]
+        notes = ["filesystem confined to workdir + declared reads; deny paths masked with tmpfs"]
+        notes.append("network isolated (--unshare-net): no egress" if no_egress else "network shared: egress advisory")
+        return WrappedSpawn(command=bwrap, args=argv, env=env, backend=self.name, notes=notes)
 
 
 class SeatbeltBackend(SandboxBackend):
@@ -160,6 +220,12 @@ class SeatbeltBackend(SandboxBackend):
 
     def available(self) -> bool:
         return platform.system() == "Darwin" and shutil.which("sandbox-exec") is not None
+
+    def capabilities(self, profile: SandboxProfile) -> Set[str]:
+        caps = {"filesystem", "envscrub"}
+        if _posix_resources_supported(profile.resources):
+            caps.add("resources")
+        return caps
 
     def _profile_text(self, profile: SandboxProfile) -> str:
         workdir = os.path.abspath(os.path.expanduser(profile.filesystem.workdir or "./"))
@@ -177,16 +243,20 @@ class SeatbeltBackend(SandboxBackend):
         for path in profile.filesystem.read:
             resolved = os.path.abspath(os.path.expanduser(path))
             lines.append(f'(allow file-read* (subpath "{resolved}"))')
+        for path in profile.filesystem.deny:
+            resolved = os.path.abspath(os.path.expanduser(path))
+            lines.append(f'(deny file* (subpath "{resolved}"))')
         return "\n".join(lines)
 
     def wrap(self, command, args, env, profile) -> WrappedSpawn:
         sbx = shutil.which("sandbox-exec") or "sandbox-exec"
+        inner_cmd, inner_args = _apply_posix_limits(command, list(args), profile.resources)
         return WrappedSpawn(
             command=sbx,
-            args=["-p", self._profile_text(profile), command, *args],
+            args=["-p", self._profile_text(profile), inner_cmd, *inner_args],
             env=env,
             backend=self.name,
-            notes=["macOS seatbelt: deny-by-default filesystem, workdir writable"],
+            notes=["macOS seatbelt: deny-by-default filesystem, workdir writable; egress advisory"],
         )
 
 
@@ -202,6 +272,12 @@ class WasmBackend(SandboxBackend):
     def available(self) -> bool:
         return shutil.which("wasmtime") is not None
 
+    def capabilities(self, profile: SandboxProfile) -> Set[str]:
+        caps = {"filesystem", "envscrub"}
+        if enforced_no_egress(profile):
+            caps.add("egress")
+        return caps
+
     def wrap(self, command, args, env, profile) -> WrappedSpawn:
         if not self._is_wasm(command, profile):
             raise SandboxUnavailable("wasm backend requires a .wasm module or target.wasm")
@@ -214,13 +290,61 @@ class WasmBackend(SandboxBackend):
         for key, value in env.items():
             argv += ["--env", f"{key}={value}"]
         argv += [command, *args]
-        return WrappedSpawn(
-            command=runtime,
-            args=argv,
-            env=env,
-            backend=self.name,
-            notes=["wasi capability isolation: filesystem via preopened dirs only"],
-        )
+        notes = ["wasi capability isolation: filesystem via preopened dirs only"]
+        notes.append("no network granted: egress denied" if enforced_no_egress(profile) else "network via proxy env")
+        return WrappedSpawn(command=runtime, args=argv, env=env, backend=self.name, notes=notes)
+
+
+class ContainerBackend(SandboxBackend):
+    name = "container"
+    assurance = "container"
+
+    def _runtime(self) -> Optional[str]:
+        for candidate in ("podman", "docker"):
+            if shutil.which(candidate):
+                return candidate
+        return None
+
+    def _image_for(self, profile: Optional[SandboxProfile]) -> Optional[str]:
+        if profile is None:
+            return os.environ.get("MCP_SANDBOX_IMAGE")
+        return (profile.target.get("image") if profile.target else None) or os.environ.get("MCP_SANDBOX_IMAGE")
+
+    def available(self) -> bool:
+        return self._runtime() is not None and bool(self._image_for(None))
+
+    def capabilities(self, profile: SandboxProfile) -> Set[str]:
+        caps = {"filesystem", "envscrub", "resources"}
+        if enforced_no_egress(profile):
+            caps.add("egress")
+        return caps
+
+    def wrap(self, command, args, env, profile) -> WrappedSpawn:
+        runtime = self._runtime() or "docker"
+        image = self._image_for(profile)
+        if not image:
+            raise SandboxUnavailable("container backend requires target.image or MCP_SANDBOX_IMAGE")
+        workdir = os.path.abspath(os.path.expanduser(profile.filesystem.workdir or "./"))
+        no_egress = enforced_no_egress(profile)
+        network = "none" if no_egress else "bridge"
+        argv = ["run", "--rm", "-i", "--network", network, "-v", f"{workdir}:/work:rw", "-w", "/work"]
+        for path in profile.filesystem.read:
+            resolved = os.path.abspath(os.path.expanduser(path))
+            argv += ["-v", f"{resolved}:{resolved}:ro"]
+        if profile.resources.memory:
+            argv += ["--memory", str(profile.resources.memory)]
+        if profile.resources.cpu:
+            argv += ["--cpus", str(profile.resources.cpu)]
+        if profile.resources.max_processes:
+            argv += ["--pids-limit", str(int(profile.resources.max_processes))]
+        if profile.resources.max_open_files:
+            argv += ["--ulimit", f"nofile={int(profile.resources.max_open_files)}"]
+        for key, value in env.items():
+            argv += ["-e", f"{key}={value}"]
+        argv += [image, command, *args]
+        notes = [f"containerised via {runtime} image {image}"]
+        notes.append("network=none: no egress" if no_egress else "network=bridge: egress advisory (proxy env)")
+        return WrappedSpawn(command=runtime, args=argv, env=env, backend=self.name, notes=notes)
 
 
 class MicroVMBackend(SandboxBackend):
@@ -237,6 +361,9 @@ class MicroVMBackend(SandboxBackend):
 
     def available(self) -> bool:
         return self._prefix() is not None
+
+    def capabilities(self, profile: SandboxProfile) -> Set[str]:
+        return {"filesystem", "envscrub"}
 
     def wrap(self, command, args, env, profile) -> WrappedSpawn:
         prefix = self._prefix()
@@ -283,3 +410,31 @@ def select_backend(profile: SandboxProfile) -> SandboxBackend:
         raise SandboxUnavailable("no sandbox backend available at all")
     _log.warning("sandbox: %s -> %s with '%s'", msg, on_unavailable, best.name)
     return best
+
+
+def enforce_controls(profile: SandboxProfile, backend: SandboxBackend) -> List[str]:
+    """Raise or warn for requested controls the backend cannot enforce.
+
+    Returns the list of controls that could not be enforced (after applying the
+    profile's on_unavailable policy for block-level controls).
+    """
+    caps = backend.capabilities(profile)
+    requested = profile.required_controls()
+    unmet: List[str] = []
+    for control, strictness in requested.items():
+        if control in caps:
+            continue
+        unmet.append(control)
+        if strictness == "block" and profile.enforcement.mode == "enforce":
+            action = profile.assurance.on_unavailable
+            detail = (
+                f"backend '{backend.name}' cannot enforce '{control}' "
+                f"(install bubblewrap/podman/docker, use assurance.on_unavailable=warn, "
+                f"or network.enforcement=advisory)"
+            )
+            if action == "block":
+                raise SandboxUnavailable(detail)
+            _log.warning("sandbox: %s -> %s", detail, action)
+        else:
+            _log.warning("sandbox: backend '%s' does not enforce requested control '%s'", backend.name, control)
+    return unmet

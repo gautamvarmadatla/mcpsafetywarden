@@ -635,11 +635,25 @@ async def open_streams(server: Dict[str, Any]) -> AsyncGenerator[Tuple[Any, Any]
     elif transport == "sse":
         from mcp.client.sse import sse_client
 
+        from ..sandbox import load_profile
+        from ..sandbox.remote import verify_remote
+
+        _profile = load_profile(server)
+        if _profile is not None:
+            verify_remote(server, _profile)
+
         async with sse_client(server["url"], headers=headers or None) as (read, write):
             yield read, write
 
     elif transport == "streamable_http":
         from mcp.client.streamable_http import streamable_http_client
+
+        from ..sandbox import load_profile
+        from ..sandbox.remote import verify_remote
+
+        _profile = load_profile(server)
+        if _profile is not None:
+            verify_remote(server, _profile)
 
         http_client = httpx.AsyncClient(headers=headers) if headers else None
         try:
