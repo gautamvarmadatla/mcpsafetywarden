@@ -95,6 +95,13 @@ Every control a profile requires but the backend cannot enforce is **surfaced,
 never silently dropped**: `filesystem` and no-egress `egress` are fail-closed
 (blocked per `assurance.on_unavailable`); `syscalls` and `resources` warn.
 
+**Container backend needs a server-bearing image.** The `container` backend runs
+`command` inside `target.image`, so that image must already contain the server
+and its dependencies (e.g. a `python:3.11-slim` base will not have your package).
+A global `MCP_SANDBOX_IMAGE` is rarely correct for this reason; prefer per-server
+`target.image`. `filesystem.deny` entries are literal paths (globs are ignored by
+the filesystem backends) and are masked only when they fall under a bound dir.
+
 **Enforced vs advisory egress.** A "no-egress" policy (`network.default: deny`
 with an empty `allow`) is genuinely enforced on `bubblewrap` (`--unshare-net`),
 `wasm` (no sockets granted), and `container` (`--network none`). An *allowlisted*

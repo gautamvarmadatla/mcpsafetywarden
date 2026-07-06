@@ -40,80 +40,46 @@ class WrappedSpawn:
 
 
 def enforced_no_egress(profile: SandboxProfile) -> bool:
+    if profile.learning.mode in ("observe", "suggest"):
+        return False
     net = profile.network
     return net.enforcement == "enforced" and net.default == "deny" and not net.allow
 
 
-def _parse_bytes(value: Optional[str]) -> Optional[int]:
-    if not value:
-        return None
-    s = str(value).strip().upper()
-    units = {
-        "K": 1024,
-        "KI": 1024,
-        "KIB": 1024,
-        "M": 1024**2,
-        "MI": 1024**2,
-        "MIB": 1024**2,
-        "G": 1024**3,
-        "GI": 1024**3,
-        "GIB": 1024**3,
-    }
-    for suffix in sorted(units, key=len, reverse=True):
-        if s.endswith(suffix):
-            try:
-                return int(float(s[: -len(suffix)]) * units[suffix])
-            except ValueError:
-                return None
-    try:
-        return int(s)
-    except ValueError:
-        return None
+def _has_glob(path: str) -> bool:
+    return any(c in path for c in "*?[")
 
 
-def _parse_seconds(value: Optional[str]) -> Optional[int]:
-    if not value:
-        return None
-    s = str(value).strip().lower()
-    mult = 1
-    if s.endswith("s"):
-        s = s[:-1]
-    elif s.endswith("m"):
-        s, mult = s[:-1], 60
-    elif s.endswith("h"):
-        s, mult = s[:-1], 3600
-    try:
-        return int(float(s) * mult)
-    except ValueError:
-        return None
+def _under_any(path: str, bases: List[str]) -> bool:
+    for base in bases:
+        if path == base or path.startswith(base.rstrip(os.sep) + os.sep):
+            return True
+    return False
 
 
 def _apply_posix_limits(command: str, args: List[str], resources: Resources):
+    """Apply only safe, long-lived-process-compatible rlimits.
+
+    Memory (ulimit -v) and wall_time (timeout) are deliberately excluded: -v caps
+    virtual address space and kills modern runtimes, and a wall clock would kill
+    a long-lived stdio server mid-session. Memory/CPU belong to cgroups
+    (container backend).
+    """
     if not _POSIX or shutil.which("sh") is None:
         return command, args
     limits: List[str] = []
-    mem = _parse_bytes(resources.memory)
-    if mem:
-        limits.append(f"ulimit -v {mem // 1024}")
     if resources.max_open_files:
         limits.append(f"ulimit -n {int(resources.max_open_files)}")
     if resources.max_processes:
         limits.append(f"ulimit -u {int(resources.max_processes)}")
-    wall = _parse_seconds(resources.wall_time)
-    if not limits and not wall:
+    if not limits:
         return command, args
-    script = "; ".join(limits + ['exec "$@"']) if limits else 'exec "$@"'
-    inner = ["/bin/sh", "-c", script, "sh", command, *args]
-    if wall and shutil.which("timeout"):
-        inner = ["timeout", str(wall), *inner]
-    return inner[0], inner[1:]
+    script = "; ".join(limits + ['exec "$@"'])
+    return "/bin/sh", ["-c", script, "sh", command, *args]
 
 
 def _posix_resources_supported(resources: Resources) -> bool:
-    return _POSIX and any(
-        v is not None
-        for v in (resources.memory, resources.max_open_files, resources.max_processes, resources.wall_time)
-    )
+    return _POSIX and any(v is not None for v in (resources.max_open_files, resources.max_processes))
 
 
 class SandboxBackend:
@@ -200,12 +166,17 @@ class BubblewrapBackend(SandboxBackend):
             if os.path.exists(resolved):
                 argv += ["--ro-bind", resolved, resolved]
         argv += ["--bind", workdir, workdir]
+        bound = [workdir]
         for path in profile.filesystem.write:
             resolved = os.path.abspath(os.path.expanduser(path))
             argv += ["--bind", resolved, resolved]
+            bound.append(resolved)
         for path in profile.filesystem.deny:
+            if _has_glob(path):
+                continue
             resolved = os.path.abspath(os.path.expanduser(path))
-            argv += ["--tmpfs", resolved]
+            if _under_any(resolved, bound):
+                argv += ["--tmpfs", resolved]
         argv += ["--chdir", workdir]
         inner_cmd, inner_args = _apply_posix_limits(command, list(args), profile.resources)
         argv += ["--", inner_cmd, *inner_args]
@@ -244,6 +215,8 @@ class SeatbeltBackend(SandboxBackend):
             resolved = os.path.abspath(os.path.expanduser(path))
             lines.append(f'(allow file-read* (subpath "{resolved}"))')
         for path in profile.filesystem.deny:
+            if _has_glob(path):
+                continue
             resolved = os.path.abspath(os.path.expanduser(path))
             lines.append(f'(deny file* (subpath "{resolved}"))')
         return "\n".join(lines)

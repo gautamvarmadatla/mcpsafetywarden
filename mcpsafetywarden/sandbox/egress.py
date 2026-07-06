@@ -18,7 +18,8 @@ import logging
 import select
 import socket
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Callable, List, Optional, Tuple
 from urllib.parse import urlencode, urlsplit
 
@@ -250,23 +251,32 @@ def _tunnel(client: socket.socket, upstream: socket.socket) -> None:
                 pass
 
 
-class _BoundedThreadingHTTPServer(ThreadingHTTPServer):
-    daemon_threads = True
-    max_workers = 64
+class _BoundedThreadingHTTPServer(HTTPServer):
+    max_workers = 32
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._slots = threading.BoundedSemaphore(self.max_workers)
+        self._pool = ThreadPoolExecutor(max_workers=self.max_workers)
+        self._inflight = threading.Semaphore(self.max_workers * 2)
 
-    def process_request_thread(self, request, client_address):
-        acquired = self._slots.acquire(timeout=30)
-        if not acquired:
+    def process_request(self, request, client_address):
+        if not self._inflight.acquire(blocking=False):
             self.shutdown_request(request)
             return
+        self._pool.submit(self._handle, request, client_address)
+
+    def _handle(self, request, client_address):
         try:
-            super().process_request_thread(request, client_address)
+            self.finish_request(request, client_address)
+        except Exception:
+            self.handle_error(request, client_address)
         finally:
-            self._slots.release()
+            self.shutdown_request(request)
+            self._inflight.release()
+
+    def server_close(self):
+        super().server_close()
+        self._pool.shutdown(wait=False)
 
 
 class EgressProxy:

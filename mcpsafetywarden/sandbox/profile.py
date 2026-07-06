@@ -153,7 +153,6 @@ class SandboxProfile:
     secrets: List[SecretRule] = field(default_factory=list)
     resources: Resources = field(default_factory=Resources)
     syscalls: Syscalls = field(default_factory=Syscalls)
-    tools: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     learning: Learning = field(default_factory=Learning)
     audit: Audit = field(default_factory=Audit)
     _raw: Dict[str, Any] = field(default_factory=dict, repr=False)
@@ -207,7 +206,6 @@ class SandboxProfile:
                 "deny_extra": list(self.syscalls.deny_extra),
                 "allow_extra": list(self.syscalls.allow_extra),
             },
-            "tools": dict(self.tools),
             "learning": {"mode": self.learning.mode, "observed": dict(self.learning.observed)},
             "audit": {"log": self.audit.log, "path": self.audit.path},
         }
@@ -233,25 +231,6 @@ class SandboxProfile:
         ):
             controls["resources"] = "warn"
         return controls
-
-    def for_tool(self, tool_name: str) -> "SandboxProfile":
-        override = self.tools.get(tool_name)
-        if not override:
-            return self
-        base = self._raw if self._raw else self.to_dict()
-        merged = _deep_merge(base, {k: v for k, v in override.items()})
-        merged.pop("tools", None)
-        return from_dict(merged)
-
-
-def _deep_merge(base: Dict[str, Any], patch: Dict[str, Any]) -> Dict[str, Any]:
-    out = copy.deepcopy(base)
-    for key, value in patch.items():
-        if isinstance(value, dict) and isinstance(out.get(key), dict):
-            out[key] = _deep_merge(out[key], value)
-        else:
-            out[key] = copy.deepcopy(value)
-    return out
 
 
 def from_dict(data: Dict[str, Any]) -> SandboxProfile:
@@ -321,7 +300,6 @@ def from_dict(data: Dict[str, Any]) -> SandboxProfile:
             deny_extra=list(sys_raw.get("deny_extra", []) or []),
             allow_extra=list(sys_raw.get("allow_extra", []) or []),
         ),
-        tools=dict(data.get("tools", {}) or {}),
         learning=Learning(mode=str(lrn_raw.get("mode", "off")), observed=dict(lrn_raw.get("observed", {}) or {})),
         audit=Audit(log=bool(aud_raw.get("log", True)), path=aud_raw.get("path")),
     )

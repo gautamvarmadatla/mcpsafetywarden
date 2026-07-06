@@ -60,6 +60,7 @@
         },
         "block_reserved": { "type": "boolean" },
         "on_new_domain": { "enum": ["ask", "deny", "allow_once"] },
+        "enforcement": { "enum": ["enforced", "advisory"] },
         "endpoint": { "type": "string" },
         "pin_cert": { "type": "string" }
       }
@@ -104,7 +105,6 @@
         "allow_extra": { "type": "array", "items": { "type": "string" } }
       }
     },
-    "tools": { "type": "object", "additionalProperties": { "type": "object" } },
     "learning": {
       "type": "object",
       "properties": {

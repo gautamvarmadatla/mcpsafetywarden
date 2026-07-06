@@ -640,7 +640,9 @@ async def open_streams(server: Dict[str, Any]) -> AsyncGenerator[Tuple[Any, Any]
 
         _profile = load_profile(server)
         if _profile is not None:
-            verify_remote(server, _profile)
+            import asyncio
+
+            await asyncio.get_event_loop().run_in_executor(None, verify_remote, server, _profile)
 
         async with sse_client(server["url"], headers=headers or None) as (read, write):
             yield read, write
@@ -653,7 +655,9 @@ async def open_streams(server: Dict[str, Any]) -> AsyncGenerator[Tuple[Any, Any]
 
         _profile = load_profile(server)
         if _profile is not None:
-            verify_remote(server, _profile)
+            import asyncio
+
+            await asyncio.get_event_loop().run_in_executor(None, verify_remote, server, _profile)
 
         http_client = httpx.AsyncClient(headers=headers) if headers else None
         try:

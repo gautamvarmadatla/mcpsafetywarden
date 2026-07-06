@@ -1,6 +1,7 @@
 """Tests for the sandbox layer: profile model, egress decisions, backends, broker."""
 
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -39,19 +40,6 @@ def test_validate_catches_bad_fields():
     assert any("network.default" in e for e in validate({"network": {"default": "maybe"}}))
     assert any("ref" in e for e in validate({"secrets": [{"inject_as": "header"}]}))
     assert validate({"name": "ok"}) == []
-
-
-def test_tool_override_precedence():
-    p = from_dict(
-        {
-            "network": {"allow": [{"host": "api.example.com"}]},
-            "tools": {"nonet": {"network": {"default": "deny", "allow": []}}},
-        }
-    )
-    assert len(p.network.allow) == 1
-    effective = p.for_tool("nonet")
-    assert effective.network.allow == []
-    assert p.for_tool("other").network.allow[0].host == "api.example.com"
 
 
 @pytest.mark.parametrize(
@@ -327,12 +315,19 @@ def test_enforced_no_egress_argv():
     assert ct2.args[ct2.args.index("--network") + 1] == "bridge"
 
 
-def test_deny_paths_masked_in_bwrap():
+def test_deny_paths_masked_only_when_bound():
     from mcpsafetywarden.sandbox.backends import BubblewrapBackend
 
-    p = from_dict({"filesystem": {"deny": ["~/.ssh"]}})
-    spawn = BubblewrapBackend().wrap("python", [], {}, p)
+    unbound = from_dict({"filesystem": {"workdir": ".", "deny": ["~/.ssh", "**/.env"]}})
+    spawn = BubblewrapBackend().wrap("python", [], {}, unbound)
     assert "--tmpfs" in spawn.args
+    assert not any(a.endswith(".ssh") for a in spawn.args)
+    assert not any("**" in a for a in spawn.args)
+
+    bound = from_dict({"filesystem": {"workdir": ".", "deny": ["./secret"]}})
+    spawn2 = BubblewrapBackend().wrap("python", [], {}, bound)
+    tmpfs_targets = [spawn2.args[i + 1] for i, a in enumerate(spawn2.args) if a == "--tmpfs"]
+    assert any(t.endswith("secret") for t in tmpfs_targets)
 
 
 def test_container_resource_flags():
@@ -370,14 +365,13 @@ def test_remote_verification():
     verify_remote({"url": "https://mcp.example.com/mcp"}, ok)
 
 
-def test_to_dict_and_for_tool_without_raw():
-    p = from_dict({"network": {"allow": [{"host": "api.example.com"}]}})
+def test_to_dict_roundtrip_without_raw():
+    p = from_dict({"network": {"allow": [{"host": "api.example.com"}], "enforcement": "advisory"}})
     p._raw = {}
     d = p.to_dict()
     assert d["network"]["allow"][0]["host"] == "api.example.com"
-    p2 = from_dict({"network": {"allow": [{"host": "api.example.com"}]}, "tools": {"t": {"network": {"allow": []}}}})
-    p2._raw = {}
-    assert p2.for_tool("t").network.allow == []
+    assert d["network"]["enforcement"] == "advisory"
+    assert from_dict(d).network.allow[0].host == "api.example.com"
 
 
 def test_integration_subprocess_egress_blocked():
@@ -401,3 +395,31 @@ def test_integration_subprocess_egress_blocked():
     with sandbox_session(sys.executable, ["-c", code], dict(os.environ), profile) as spawn:
         out = subprocess.run([spawn.command, *spawn.args], env=spawn.env, capture_output=True, text=True, timeout=40)
         assert "BLOCKED" in out.stdout, f"stdout={out.stdout!r} stderr={out.stderr!r}"
+
+
+@pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap not installed")
+def test_bwrap_execution_enforces_fs_and_egress():
+    profile = from_dict(
+        {
+            "name": "bw",
+            "target": {"transport": "stdio"},
+            "filesystem": {"workdir": ".", "read": [sys.prefix, sys.base_prefix], "deny": ["~/.ssh", "**/.env"]},
+            "network": {"default": "deny", "allow": []},
+            "environment": {"allow": list(os.environ.keys()), "scrub": False},
+        }
+    )
+    code = (
+        "import os, socket\n"
+        "print('SSH', os.path.exists(os.path.expanduser('~/.ssh')))\n"
+        "try:\n"
+        "    socket.create_connection(('1.1.1.1', 53), timeout=5)\n"
+        "    print('NET reachable')\n"
+        "except Exception:\n"
+        "    print('NET blocked')\n"
+    )
+    with sandbox_session(sys.executable, ["-c", code], dict(os.environ), profile) as spawn:
+        assert spawn.backend == "bubblewrap"
+        assert "--unshare-net" in spawn.args
+        out = subprocess.run([spawn.command, *spawn.args], env=spawn.env, capture_output=True, text=True, timeout=40)
+        assert "NET blocked" in out.stdout, f"stdout={out.stdout!r} stderr={out.stderr!r}"
+        assert "SSH False" in out.stdout, f"stdout={out.stdout!r} stderr={out.stderr!r}"

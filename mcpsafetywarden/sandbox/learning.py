@@ -35,9 +35,17 @@ def synthesize(profile: SandboxProfile, observed_domains: Iterable[str]) -> Dict
 
 
 def write_suggestion(profile: SandboxProfile, suggested: Dict[str, Any]) -> str:
-    base = os.path.expanduser(os.path.dirname(profile.audit.path)) if profile.audit.path else "."
+    if profile.audit.path:
+        base = os.path.dirname(os.path.expanduser(profile.audit.path)) or "."
+    else:
+        try:
+            import platformdirs
+
+            base = os.path.join(platformdirs.user_data_dir("mcpsafetywarden"), "suggestions")
+        except Exception:
+            base = "."
     safe_name = (profile.name or "server").replace("/", "_").replace(":", "_")
-    path = os.path.join(base or ".", f"{safe_name}.suggested.json")
+    path = os.path.join(base, f"{safe_name}.suggested.json")
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
