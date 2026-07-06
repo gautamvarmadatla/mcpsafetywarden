@@ -862,7 +862,11 @@ def _classify_with_llm(
 
     raw_conf = parsed.get("confidence", {})
     if not isinstance(raw_conf, dict):
-        raw_conf = {"effect_class": float(raw_conf) if isinstance(raw_conf, (int, float)) else 0.80}
+        try:
+            coerced = float(raw_conf)
+        except (TypeError, ValueError):
+            coerced = 0.80
+        raw_conf = {"effect_class": coerced}
     raw_conf.setdefault("effect_class", 0.75)
     raw_conf.setdefault("risk_level", 0.75)
     raw_conf.setdefault("retry_safety", 0.75)

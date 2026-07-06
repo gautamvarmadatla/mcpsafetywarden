@@ -749,8 +749,10 @@ async def scan_args_for_threats(
                 llm_model,
                 llm_api_key,
             )
-            is_attack: bool = bool(verdict.get("is_attack", True))
-            confidence: float = float(verdict.get("confidence", 0.5))
+            raw_attack = verdict.get("is_attack", True)
+            is_attack: bool = True if raw_attack is None else bool(raw_attack)
+            raw_conf = verdict.get("confidence", 0.5)
+            confidence: float = float(raw_conf) if isinstance(raw_conf, (int, float)) else 0.5
             reason: str = str(verdict.get("reason", ""))
 
             if not is_attack:
