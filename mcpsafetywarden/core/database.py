@@ -42,6 +42,11 @@ def _decrypt_field(ciphertext: str) -> str:
     try:
         return _fernet.decrypt(ciphertext.encode()).decode()
     except Exception as _dec_err:
+        try:
+            json.loads(ciphertext)
+            return ciphertext
+        except (ValueError, TypeError):
+            pass
         _log.error(
             "_decrypt_field failed - key rotation or data corruption: %s. "
             "Check MCP_DB_ENCRYPTION_KEY. Returning empty JSON object to prevent garbled data.",

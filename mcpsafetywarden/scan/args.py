@@ -428,7 +428,11 @@ def _inspect_probe_args(
 
 def _detect_base64_payloads(value: str) -> List[str]:
     issues: List[str] = []
+    seen = 0
     for m in _B64_CANDIDATE_RE.finditer(value):
+        seen += 1
+        if seen > 50:
+            break
         candidate = m.group()
         padding = (-len(candidate)) % 4
         try:
