@@ -80,9 +80,28 @@ and reserved-range denies always win over allows.
 `select_backend` picks the strongest available backend meeting
 `assurance.required` and fails closed (`on_unavailable`) when none qualifies.
 
-The `subprocess` backend enforces egress only through `HTTP(S)_PROXY` env, which
-a deliberately hostile binary can ignore; use `bubblewrap`, `seatbelt`,
-`container`, or `wasm` for untrusted servers.
+## Capability matrix (what each backend actually enforces)
+
+| Backend | filesystem | enforced egress | resources | env scrub |
+|---------|:---:|:---:|:---:|:---:|
+| `subprocess` | ✗ | ✗ (advisory) | POSIX only | ✓ |
+| `bubblewrap` | ✓ | ✓ no-egress only | POSIX | ✓ |
+| `seatbelt` | ✓ | ✗ (advisory) | POSIX | ✓ |
+| `wasm` | ✓ | ✓ no-egress only | ✗ | ✓ |
+| `container` | ✓ | ✓ no-egress only | ✓ | ✓ |
+| `microvm` | ✓ | depends on cmd | ✗ | ✓ |
+
+Every control a profile requires but the backend cannot enforce is **surfaced,
+never silently dropped**: `filesystem` and no-egress `egress` are fail-closed
+(blocked per `assurance.on_unavailable`); `syscalls` and `resources` warn.
+
+**Enforced vs advisory egress.** A "no-egress" policy (`network.default: deny`
+with an empty `allow`) is genuinely enforced on `bubblewrap` (`--unshare-net`),
+`wasm` (no sockets granted), and `container` (`--network none`). An *allowlisted*
+egress policy is **advisory** in this release - enforced only for cooperative
+servers via `HTTP(S)_PROXY`; a hostile binary can bypass it. Set
+`network.enforcement: advisory` to acknowledge this, or use a no-egress policy
+for untrusted servers. `subprocess` never enforces egress.
 
 ## Egress hardening
 
@@ -94,12 +113,26 @@ a deliberately hostile binary can ignore; use `bubblewrap`, `seatbelt`,
 - Request and response bodies are size-capped; brokered secrets are stripped of
   CR/LF to prevent header injection.
 
+## Remote (sse/http) servers
+
+A remote server cannot be process-sandboxed. For `transport: sse|http`, warden
+verifies the connection before use: it refuses endpoints resolving to
+reserved/metadata ranges, checks the URL host against `network.endpoint`, and
+pins the TLS certificate against `network.pin_cert` (`sha256:<hex>`).
+
 ## Observe mode
 
 Set `learning.mode` to `observe` or `suggest`. The server runs under the profile
 while the proxy records the domains it actually reaches; on exit a tightened
 profile is written to `<name>.suggested.json` for review. Nothing is
 auto-enforced.
+
+## Windows
+
+Strong isolation backends are Linux (`bubblewrap`) and macOS (`seatbelt`); on
+Windows use `container` (Docker/Podman, incl. WSL2) or `wasm`. With only the
+`subprocess` backend, a strict profile fails closed rather than pretend to
+isolate - set `assurance.on_unavailable: warn` to run degraded knowingly.
 
 ## Durability principles
 
