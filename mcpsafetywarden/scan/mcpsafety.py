@@ -1257,7 +1257,7 @@ async def _hacker_gemini(
                     tools=gemini_tools,
                 ),
             )
-            if not response or not getattr(response, "candidates", None):
+            if not response.candidates:
                 break
             candidate = response.candidates[0]
             if candidate.content is None:

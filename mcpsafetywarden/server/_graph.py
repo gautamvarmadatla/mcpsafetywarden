@@ -185,7 +185,7 @@ def analyze_cve_blast_radius(
             meta = n.get("metadata", {})
             results.append(
                 {
-                    "vuln_id": meta.get("vuln_id", n.get("name", "")),
+                    "vuln_id": meta.get("vuln_id", n["name"]),
                     "severity": meta.get("severity", "UNKNOWN"),
                     "affected_servers": meta.get("affected_servers", []),
                     "client_id": meta.get("client_id", ""),
