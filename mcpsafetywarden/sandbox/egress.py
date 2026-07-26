@@ -183,6 +183,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._deny(host, reason)
             return
 
+        if self.headers.get("Content-Length") is not None and self.headers.get("Transfer-Encoding") is not None:
+            self._deny(host, "conflicting Content-Length and Transfer-Encoding")
+            return
+
         length = int(self.headers.get("Content-Length", 0) or 0)
         if length > MAX_BODY_BYTES:
             self._deny(host, "request body exceeds limit")
@@ -209,7 +213,7 @@ class _Handler(BaseHTTPRequestHandler):
             conn.request(self.command, path, body=body, headers=headers)
             resp = conn.getresponse()
             data = resp.read(MAX_BODY_BYTES + 1)
-        except (OSError, http.client.HTTPException) as exc:
+        except (OSError, ValueError, http.client.HTTPException) as exc:
             self._deny(host, f"forward failed: {exc}")
             return
         finally:

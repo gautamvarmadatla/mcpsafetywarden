@@ -134,7 +134,7 @@ def resolve_targets(host: str, port: int, block_reserved: bool = True):
 def _host_matches_rule(host: str, rule_host: str) -> bool:
     host = normalize_host(host).lower()
     rule = rule_host.lower().rstrip(".")
-    if not host or ".." in host or host.startswith(".") or any(c in host for c in "#@ /?"):
+    if not host or ".." in host or host.startswith(".") or any(c in host for c in "#@ /?\\\t\r\n\x00"):
         return False
     if rule.startswith("*."):
         suffix = rule[1:]

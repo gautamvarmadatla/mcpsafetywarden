@@ -12,12 +12,13 @@ unmet control rather than silently dropped.
 
 from __future__ import annotations
 
+import fnmatch
+import glob as _glob
 import logging
 import os
 import platform
 import shutil
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 from .profile import Resources, SandboxProfile, assurance_rank
@@ -58,28 +59,41 @@ def _under_any(path: str, bases: List[str]) -> bool:
     return False
 
 
-def _expand_glob_deny(pattern: str, bound_dirs: List[str], cap: int = 500) -> List[str]:
-    """Expand a `**/name` deny glob to concrete existing paths under bound dirs."""
-    if not pattern.startswith("**/"):
-        return []
-    name = pattern[3:]
+def _expand_glob_deny(pattern: str, bound_dirs: List[str], cap: int = 500, max_visits: int = 50_000) -> List[str]:
+    """Expand a deny glob to concrete existing paths under bound dirs.
+
+    `**/name` is expanded with os.walk (symlinks NOT followed, bounded traversal
+    to prevent a malicious workdir from hanging spawn). Other glob shapes use a
+    non-recursive glob so `**` cannot trigger symlink-cycle recursion.
+    """
     out: List[str] = []
-    for base in bound_dirs:
-        try:
-            for p in Path(base).rglob(name):
-                out.append(str(p))
-                if len(out) >= cap:
+    if pattern.startswith("**/"):
+        name = pattern[3:]
+        visits = 0
+        for base in bound_dirs:
+            for root, dirs, files in os.walk(base, followlinks=False):
+                visits += len(dirs) + len(files)
+                if visits > max_visits:
                     return out
-        except OSError:
-            continue
-    return out
+                for entry in list(files) + list(dirs):
+                    if fnmatch.fnmatch(entry, name):
+                        out.append(os.path.join(root, entry))
+                        if len(out) >= cap:
+                            return out
+        return out
+    matches = set(_glob.glob(os.path.expanduser(pattern)))
+    for base in bound_dirs:
+        matches.update(_glob.glob(os.path.join(base, pattern)))
+    return list(matches)[:cap]
 
 
 def _as_int(value: object) -> Optional[int]:
+    """Coerce to a positive int for rlimits; non-int or <= 0 (no limit) returns None."""
     try:
-        return int(value)  # type: ignore[arg-type]
+        parsed = int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
+    return parsed if parsed > 0 else None
 
 
 def _apply_posix_limits(command: str, args: List[str], resources: Resources):
@@ -106,7 +120,9 @@ def _apply_posix_limits(command: str, args: List[str], resources: Resources):
 
 
 def _posix_resources_supported(resources: Resources) -> bool:
-    return _POSIX and (_as_int(resources.max_open_files) is not None or _as_int(resources.max_processes) is not None)
+    if not _POSIX or shutil.which("sh") is None:
+        return False
+    return _as_int(resources.max_open_files) is not None or _as_int(resources.max_processes) is not None
 
 
 class SandboxBackend:
@@ -202,6 +218,8 @@ class BubblewrapBackend(SandboxBackend):
         for path in profile.filesystem.deny:
             if _has_glob(path):
                 candidates = _expand_glob_deny(path, bound)
+                if not candidates:
+                    _log.debug("bwrap: deny glob %r under bound dirs matched nothing", path)
             else:
                 candidates = [os.path.abspath(os.path.expanduser(path))]
             for resolved in candidates:
@@ -247,13 +265,16 @@ class SeatbeltBackend(SandboxBackend):
             f'(allow file-read* file-write* (subpath "{workdir}") (subpath "/private/tmp") (subpath "/private/var/tmp"))',
             "(allow network*)",
         ]
+        deny_roots = [workdir]
         for path in profile.filesystem.read:
             resolved = os.path.abspath(os.path.expanduser(path))
             lines.append(f'(allow file-read* (subpath "{resolved}"))')
-        workdir_root = [workdir]
+            deny_roots.append(resolved)
+        for path in profile.filesystem.write:
+            deny_roots.append(os.path.abspath(os.path.expanduser(path)))
         for path in profile.filesystem.deny:
             if _has_glob(path):
-                targets = _expand_glob_deny(path, workdir_root)
+                targets = _expand_glob_deny(path, deny_roots)
             else:
                 targets = [os.path.abspath(os.path.expanduser(path))]
             for resolved in targets:

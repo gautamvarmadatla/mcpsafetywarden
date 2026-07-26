@@ -127,6 +127,21 @@ verifies the connection before use: it refuses endpoints resolving to
 reserved/metadata ranges, checks the URL host against `network.endpoint`, and
 pins the TLS certificate against `network.pin_cert` (`sha256:<hex>`).
 
+## Secrets
+
+Two disclosure models:
+- `inject_as: header` / `query` — added to the outbound request at the egress
+  proxy; the server never sees the value. A `to` scope is **required** (a secret
+  with no `to` is not injected, to avoid broadcasting it to every host). Prefer an
+  **exact host**; a wildcard `to` over a shared/multi-tenant domain
+  (`*.s3.amazonaws.com`) can leak to an attacker-registered subdomain.
+- `inject_as: env` — placed in the sandboxed process environment, so the server
+  **does** receive the plaintext value. Use only for secrets the server itself
+  legitimately needs to authenticate.
+
+Header/query injection only applies to plaintext HTTP forwards; HTTPS is tunnelled
+(CONNECT) and never has secrets injected.
+
 ## Observe mode
 
 Set `learning.mode` to `observe` or `suggest`. The server runs under the profile

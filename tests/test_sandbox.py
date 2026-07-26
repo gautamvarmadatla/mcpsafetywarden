@@ -569,3 +569,42 @@ def test_broker_malformed_attribute_template_skips(monkeypatch):
     )
     assert broker.header_injections(p.secrets, "h.com") == {}
     set_secret_resolver(lambda ref: None)
+
+
+def test_zero_rlimit_not_applied():
+    from mcpsafetywarden.sandbox.backends import SubprocessBackend, _posix_resources_supported
+
+    p = from_dict({"resources": {"max_open_files": 0, "max_processes": 0}})
+    assert _posix_resources_supported(p.resources) is False
+    spawn = SubprocessBackend().wrap("python", ["-m", "s"], {}, p)
+    assert spawn.command == "python" and spawn.args == ["-m", "s"]
+
+
+@pytest.mark.parametrize("host", ["ev\\il.com", "ev\til.com", "ev il.com", "a@b.com", "a/b.com", "..evil.com"])
+def test_host_validity_rejects_bad_chars(host):
+    assert netfilter._host_matches_rule(host, "*.com") is False
+
+
+def test_egress_forward_rejects_conflicting_cl_te():
+    proxy = EgressProxy(EgressPolicy(Network(default="deny", on_new_domain="allow_once"))).start()
+    try:
+        _, port = proxy._server.server_address[:2]
+        s = socket.create_connection(("127.0.0.1", port), timeout=5)
+        s.sendall(
+            b"POST http://allowed.test/x HTTP/1.1\r\nHost: allowed.test\r\n"
+            b"Content-Length: 5\r\nTransfer-Encoding: chunked\r\n\r\nhello"
+        )
+        resp = s.recv(1024)
+        s.close()
+        assert b"403" in resp
+    finally:
+        proxy.stop()
+
+
+def test_glob_deny_expands_nested(tmp_path):
+    from mcpsafetywarden.sandbox.backends import _expand_glob_deny
+
+    (tmp_path / "a" / "b").mkdir(parents=True)
+    (tmp_path / "a" / "b" / ".env").write_text("x")
+    matches = _expand_glob_deny("**/.env", [str(tmp_path)])
+    assert any(m.endswith(".env") for m in matches)

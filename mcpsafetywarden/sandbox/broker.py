@@ -1,8 +1,13 @@
 """Credential broker: resolves secret refs and injects them at the edge.
 
-The sandboxed server never receives raw secret values. Values are resolved
-outside the sandbox and applied at the egress boundary (headers) or injected as
-scoped env only when a rule explicitly requests it.
+Two disclosure models:
+- inject_as "header"/"query": the secret is added to the outbound request at the
+  egress proxy and the server never sees it. Requires a `to` scope (an exact host
+  is safest; a wildcard over a shared/multi-tenant domain can leak to an
+  attacker-registered subdomain).
+- inject_as "env": the secret is placed in the sandboxed process environment, so
+  the server DOES receive the plaintext value. Use only for secrets the server
+  legitimately needs to authenticate itself.
 """
 
 from __future__ import annotations

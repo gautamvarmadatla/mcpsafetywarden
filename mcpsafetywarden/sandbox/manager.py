@@ -77,6 +77,15 @@ def sandbox_session(
             profile.name,
             profile.learning.mode,
         )
+    for s in profile.secrets:
+        if s.inject_as in ("header", "query") and s.to and s.to.startswith("*"):
+            _log.warning(
+                "sandbox '%s': secret '%s' scoped to wildcard '%s'; on a shared/multi-tenant domain a secret can "
+                "leak to an attacker-registered subdomain - prefer an exact host",
+                profile.name,
+                s.ref,
+                s.to,
+            )
     res = profile.resources
     if backend.name != "container" and any(v is not None for v in (res.memory, res.cpu, res.wall_time)):
         _log.warning(
