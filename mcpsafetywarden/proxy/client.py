@@ -614,9 +614,13 @@ async def open_streams(server: Dict[str, Any]) -> AsyncGenerator[Tuple[Any, Any]
         if env_override:
             resolved_env.update(env_override)
 
-        from ..sandbox import load_profile, sandbox_session
+        profile = None
+        try:
+            from ..sandbox import load_profile, sandbox_session
 
-        profile = load_profile(server)
+            profile = load_profile(server)
+        except Exception as _sbx_exc:
+            _log.warning("sandbox init failed; running '%s' unsandboxed: %s", server.get("server_id", "?"), _sbx_exc)
         if profile is not None:
             with sandbox_session(server["command"], server.get("args") or [], resolved_env, profile) as spawn:
                 params = StdioServerParameters(command=spawn.command, args=spawn.args, env=spawn.env)
@@ -635,14 +639,16 @@ async def open_streams(server: Dict[str, Any]) -> AsyncGenerator[Tuple[Any, Any]
     elif transport == "sse":
         from mcp.client.sse import sse_client
 
-        from ..sandbox import load_profile
-        from ..sandbox.remote import verify_remote
+        _profile = None
+        try:
+            from ..sandbox import load_profile
+            from ..sandbox.remote import verify_remote
 
-        _profile = load_profile(server)
+            _profile = load_profile(server)
+        except Exception as _sbx_exc:
+            _log.warning("sandbox init failed; skipping remote verification: %s", _sbx_exc)
         if _profile is not None:
-            import asyncio
-
-            await asyncio.get_event_loop().run_in_executor(None, verify_remote, server, _profile)
+            await asyncio.get_running_loop().run_in_executor(None, verify_remote, server, _profile)
 
         async with sse_client(server["url"], headers=headers or None) as (read, write):
             yield read, write
@@ -650,14 +656,16 @@ async def open_streams(server: Dict[str, Any]) -> AsyncGenerator[Tuple[Any, Any]
     elif transport == "streamable_http":
         from mcp.client.streamable_http import streamable_http_client
 
-        from ..sandbox import load_profile
-        from ..sandbox.remote import verify_remote
+        _profile = None
+        try:
+            from ..sandbox import load_profile
+            from ..sandbox.remote import verify_remote
 
-        _profile = load_profile(server)
+            _profile = load_profile(server)
+        except Exception as _sbx_exc:
+            _log.warning("sandbox init failed; skipping remote verification: %s", _sbx_exc)
         if _profile is not None:
-            import asyncio
-
-            await asyncio.get_event_loop().run_in_executor(None, verify_remote, server, _profile)
+            await asyncio.get_running_loop().run_in_executor(None, verify_remote, server, _profile)
 
         http_client = httpx.AsyncClient(headers=headers) if headers else None
         try:

@@ -12,7 +12,7 @@ import hashlib
 import logging
 import socket
 import ssl
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from urllib.parse import urlsplit
 
 from . import netfilter
@@ -25,14 +25,23 @@ class RemoteVerificationError(RuntimeError):
     pass
 
 
-def _cert_sha256(host: str, port: int) -> str:
+def _cert_sha256(host: str, targets: list) -> str:
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
-    with socket.create_connection((host, port), timeout=10) as sock:
-        with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+    last: Optional[OSError] = None
+    for family, socktype, proto, sockaddr in targets:
+        try:
+            raw = socket.socket(family, socktype, proto)
+            raw.settimeout(10)
+            raw.connect(sockaddr)
+        except OSError as exc:
+            last = exc
+            continue
+        with ctx.wrap_socket(raw, server_hostname=host) as ssock:
             der = ssock.getpeercert(binary_form=True)
-    return "sha256:" + hashlib.sha256(der or b"").hexdigest()
+        return "sha256:" + hashlib.sha256(der or b"").hexdigest()
+    raise OSError(f"no reachable non-reserved address: {last}")
 
 
 def verify_remote(server: Dict[str, Any], profile: SandboxProfile) -> None:
@@ -52,7 +61,10 @@ def verify_remote(server: Dict[str, Any], profile: SandboxProfile) -> None:
         return
     parts = urlsplit(url)
     host = parts.hostname or ""
-    port = parts.port or (443 if parts.scheme == "https" else 80)
+    try:
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+    except ValueError:
+        raise RemoteVerificationError(f"invalid port in remote url {url!r}")
     net = profile.network
 
     if net.block_reserved:
@@ -65,13 +77,19 @@ def verify_remote(server: Dict[str, Any], profile: SandboxProfile) -> None:
     if net.endpoint:
         ep = urlsplit(net.endpoint)
         ep_host = ep.hostname or ""
-        ep_port = ep.port or (443 if ep.scheme == "https" else 80)
+        try:
+            ep_port = ep.port or (443 if ep.scheme == "https" else 80)
+        except ValueError:
+            raise RemoteVerificationError(f"invalid port in network.endpoint {net.endpoint!r}")
         if (ep_host.lower(), ep_port) != (host.lower(), port):
             raise RemoteVerificationError(f"remote endpoint {host}:{port} does not match pinned {ep_host}:{ep_port}")
 
     if net.pin_cert and parts.scheme == "https":
+        targets = netfilter.resolve_targets(host, port, block_reserved=net.block_reserved)
+        if not targets:
+            raise RemoteVerificationError(f"could not resolve a non-reserved address for {host}")
         try:
-            actual = _cert_sha256(host, port)
+            actual = _cert_sha256(host, targets)
         except OSError as exc:
             raise RemoteVerificationError(f"could not fetch cert for {host}: {exc}") from exc
         if actual.lower() != net.pin_cert.strip().lower():

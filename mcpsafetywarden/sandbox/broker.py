@@ -7,11 +7,14 @@ scoped env only when a rule explicitly requests it.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Callable, Dict, List, Optional
 
 from .netfilter import _host_matches_rule
 from .profile import SecretRule
+
+_log = logging.getLogger(__name__)
 
 _resolver: Optional[Callable[[str], Optional[str]]] = None
 
@@ -51,8 +54,9 @@ def _render(rule: SecretRule) -> Optional[str]:
     secret = _sanitize(secret)
     try:
         return _sanitize(rule.template.format(secret=secret))
-    except (KeyError, IndexError):
-        return secret
+    except (KeyError, IndexError, ValueError):
+        _log.warning("secret template for ref '%s' is malformed; skipping injection", rule.ref)
+        return None
 
 
 def header_injections(secrets: List[SecretRule], dest_host: str) -> Dict[str, str]:

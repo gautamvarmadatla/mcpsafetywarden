@@ -70,21 +70,40 @@ def sandbox_session(
     backend = backends.select_backend(profile)
     unmet = backends.enforce_controls(profile, backend)
 
+    if learn and enforce:
+        _log.warning(
+            "sandbox '%s': learning.mode=%s relaxes egress enforcement to ADVISORY for this run so the "
+            "server can operate and its domains be observed; re-enforce after applying the suggested profile",
+            profile.name,
+            profile.learning.mode,
+        )
+    res = profile.resources
+    if backend.name != "container" and any(v is not None for v in (res.memory, res.cpu, res.wall_time)):
+        _log.warning(
+            "sandbox '%s': backend '%s' cannot enforce memory/cpu/wall_time (only file/process limits); "
+            "use the container backend for those",
+            profile.name,
+            backend.name,
+        )
+
     proxy: Optional[EgressProxy] = None
     no_egress = backends.enforced_no_egress(profile)
-    if profile.transport() == "stdio" and not no_egress:
-        policy = EgressPolicy(
-            profile.network,
-            secrets=profile.secrets,
-            record_observed=learn,
-            block=enforce and not learn,
-        )
-        proxy = EgressProxy(policy).start()
-        env.update(proxy.proxy_env())
-        _log.info("sandbox '%s': egress proxy at %s (mode=%s)", profile.name, proxy.address, profile.enforcement.mode)
-    elif no_egress:
-        _log.info("sandbox '%s': no-egress enforced at backend layer; egress proxy not needed", profile.name)
     try:
+        if profile.transport() == "stdio" and not no_egress:
+            policy = EgressPolicy(
+                profile.network,
+                secrets=profile.secrets,
+                record_observed=learn,
+                block=enforce and not learn,
+            )
+            proxy = EgressProxy(policy).start()
+            env.update(proxy.proxy_env())
+            _log.info(
+                "sandbox '%s': egress proxy at %s (mode=%s)", profile.name, proxy.address, profile.enforcement.mode
+            )
+        elif no_egress:
+            _log.info("sandbox '%s': no-egress enforced at backend layer; egress proxy not needed", profile.name)
+
         wrapped = backend.wrap(command, list(args or []), env, profile)
         if "egress" in unmet:
             _log.warning(
@@ -100,8 +119,10 @@ def sandbox_session(
         if proxy is not None:
             _audit(profile, f"egress decisions={len(proxy.policy.decisions)}")
             if learn and proxy.policy.observed_domains:
-                suggested = learning.synthesize(profile, proxy.policy.observed_domains)
-                learning.write_suggestion(profile, suggested)
+                try:
+                    learning.write_suggestion(profile, learning.synthesize(profile, proxy.policy.observed_domains))
+                except Exception as exc:
+                    _log.debug("sandbox '%s': learning synthesis failed: %s", profile.name, exc)
             proxy.stop()
 
 

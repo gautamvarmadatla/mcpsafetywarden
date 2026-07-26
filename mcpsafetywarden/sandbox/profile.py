@@ -61,7 +61,15 @@ class HostRule:
     def from_any(raw: Any) -> "HostRule":
         if isinstance(raw, str):
             return HostRule(host=raw)
-        return HostRule(host=str(raw.get("host", "")), ports=[int(p) for p in raw.get("ports", [])])
+        if isinstance(raw, dict):
+            ports: List[int] = []
+            for p in raw.get("ports", []) or []:
+                try:
+                    ports.append(int(p))
+                except (ValueError, TypeError):
+                    continue
+            return HostRule(host=str(raw.get("host", "")), ports=ports)
+        return HostRule(host="")
 
 
 @dataclass
@@ -216,7 +224,10 @@ class SandboxProfile:
         if self.enforcement.mode == "enforce":
             controls["filesystem"] = "block"
         if self.network.enforcement == "enforced" and self.network.default == "deny":
-            controls["egress"] = "block" if not self.network.allow else "warn"
+            if self.learning.mode in ("observe", "suggest"):
+                controls["egress"] = "warn"
+            else:
+                controls["egress"] = "block" if not self.network.allow else "warn"
         if self.syscalls.profile in ("strict", "default"):
             controls["syscalls"] = "warn"
         if any(

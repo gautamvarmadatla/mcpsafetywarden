@@ -161,12 +161,13 @@ class BubblewrapBackend(SandboxBackend):
         for base in ("/usr", "/bin", "/lib", "/lib64", "/etc/ssl", "/etc/resolv.conf"):
             if os.path.exists(base):
                 argv += ["--ro-bind", base, base]
+        bound = [workdir]
         for path in profile.filesystem.read:
             resolved = os.path.abspath(os.path.expanduser(path))
             if os.path.exists(resolved):
                 argv += ["--ro-bind", resolved, resolved]
+                bound.append(resolved)
         argv += ["--bind", workdir, workdir]
-        bound = [workdir]
         for path in profile.filesystem.write:
             resolved = os.path.abspath(os.path.expanduser(path))
             argv += ["--bind", resolved, resolved]
@@ -369,6 +370,8 @@ def select_backend(profile: SandboxProfile) -> SandboxBackend:
     required = profile.assurance.required
     req_rank = assurance_rank(required)
     usable = available_backends()
+    if not (profile.target.get("wasm")):
+        usable = [b for b in usable if b.name != "wasm"]
 
     meeting = [b for b in usable if assurance_rank(b.assurance) >= req_rank]
     if meeting:

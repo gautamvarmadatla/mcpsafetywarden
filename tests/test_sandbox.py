@@ -448,3 +448,51 @@ def test_bwrap_execution_enforces_fs_and_egress():
         out = subprocess.run([spawn.command, *spawn.args], env=spawn.env, capture_output=True, text=True, timeout=40)
         assert "NET blocked" in out.stdout, f"stdout={out.stdout!r} stderr={out.stderr!r}"
         assert "SSH False" in out.stdout, f"stdout={out.stdout!r} stderr={out.stderr!r}"
+
+
+def test_observe_relaxes_egress_control():
+    observing = from_dict({"network": {"default": "deny", "allow": []}, "learning": {"mode": "observe"}})
+    assert observing.required_controls().get("egress") == "warn"
+    strict = from_dict({"network": {"default": "deny", "allow": []}})
+    assert strict.required_controls().get("egress") == "block"
+
+
+def test_from_dict_tolerant_of_malformed_allow():
+    p = from_dict({"network": {"allow": [123, {"host": "x.com", "ports": ["abc", 443]}, "y.com", None]}})
+    hosts = [r.host for r in p.network.allow]
+    assert "x.com" in hosts and "y.com" in hosts
+    xrule = next(r for r in p.network.allow if r.host == "x.com")
+    assert xrule.ports == [443]
+
+
+def test_broker_malformed_template_skips_injection():
+    set_secret_resolver(lambda ref: "s3cr3t" if ref == "k" else None)
+    p = from_dict({"secrets": [{"ref": "k", "inject_as": "header", "name": "Authorization", "template": "{secret:d}"}]})
+    assert broker.header_injections(p.secrets, "any.com") == {}
+    set_secret_resolver(lambda ref: None)
+
+
+def test_wasm_requires_optin(monkeypatch):
+    import mcpsafetywarden.sandbox.backends as b
+
+    monkeypatch.setattr(b, "available_backends", lambda: [b.WasmBackend(), b.SubprocessBackend()])
+    assert b.select_backend(from_dict({})).name != "wasm"
+    assert b.select_backend(from_dict({"target": {"wasm": True}})).name == "wasm"
+
+
+@pytest.mark.parametrize("host", ["2130706433", "0x7f.0.0.1", "0177.0.0.1", "127.1", "::ffff:169.254.169.254"])
+def test_obfuscated_ip_blocked_even_under_default_allow(host):
+    allowed, _ = netfilter.decide(host, 443, [], block_reserved=True, default="allow")
+    assert allowed is False
+
+
+def test_remote_cert_pin_match_and_mismatch(monkeypatch):
+    from mcpsafetywarden.sandbox import remote
+
+    monkeypatch.setattr(remote.netfilter, "resolve_targets", lambda *a, **k: [(2, 1, 6, ("1.2.3.4", 443))])
+    monkeypatch.setattr(remote, "_cert_sha256", lambda host, targets: "sha256:abc")
+    good = from_dict({"network": {"pin_cert": "sha256:ABC", "block_reserved": False}})
+    remote.verify_remote({"url": "https://mcp.example.com/x"}, good)
+    bad = from_dict({"network": {"pin_cert": "sha256:dead", "block_reserved": False}})
+    with pytest.raises(remote.RemoteVerificationError):
+        remote.verify_remote({"url": "https://mcp.example.com/x"}, bad)

@@ -18,6 +18,7 @@ import logging
 import select
 import socket
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Callable, List, Optional, Tuple
@@ -31,6 +32,7 @@ _log = logging.getLogger(__name__)
 ApprovalFn = Callable[[str, int], bool]
 
 MAX_BODY_BYTES = 32 * 1024 * 1024
+TUNNEL_MAX_SECONDS = 3600
 
 
 def split_hostport(authority: str, default_port: int) -> Tuple[str, int]:
@@ -151,12 +153,16 @@ class _Handler(BaseHTTPRequestHandler):
             return
         self.send_response(200, "Connection Established")
         self.end_headers()
-        _tunnel(self.connection, upstream)
+        _tunnel(self.connection, upstream, time.monotonic() + TUNNEL_MAX_SECONDS)
 
     def _handle_forward(self) -> None:
         parts = urlsplit(self.path)
         host = parts.hostname or ""
-        port = parts.port or 80
+        try:
+            port = parts.port or 80
+        except ValueError:
+            self._deny(host, "invalid port")
+            return
         allowed, reason = self.policy.decide(host, port)
         if not allowed:
             self._deny(host, reason)
@@ -180,6 +186,8 @@ class _Handler(BaseHTTPRequestHandler):
         if query:
             path = f"{path}?{query}"
 
+        upstream = None
+        conn = None
         try:
             upstream = _safe_connect(host, port, self.policy.network.block_reserved)
             conn = _VettedHTTPConnection(host, port, upstream)
@@ -189,6 +197,17 @@ class _Handler(BaseHTTPRequestHandler):
         except OSError as exc:
             self._deny(host, f"forward failed: {exc}")
             return
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except OSError:
+                    pass
+            elif upstream is not None:
+                try:
+                    upstream.close()
+                except OSError:
+                    pass
         if len(data) > MAX_BODY_BYTES:
             self._deny(host, "response exceeds limit")
             return
@@ -228,10 +247,12 @@ class _VettedHTTPConnection(http.client.HTTPConnection):
         self.sock = self._vetted
 
 
-def _tunnel(client: socket.socket, upstream: socket.socket) -> None:
+def _tunnel(client: socket.socket, upstream: socket.socket, deadline: float) -> None:
     sockets = [client, upstream]
     try:
         while True:
+            if time.monotonic() > deadline:
+                break
             readable, _, exceptional = select.select(sockets, [], sockets, 30)
             if exceptional or not readable:
                 break
@@ -258,11 +279,15 @@ class _BoundedThreadingHTTPServer(HTTPServer):
         super().__init__(*args, **kwargs)
         self._pool = ThreadPoolExecutor(max_workers=self.max_workers)
         self._inflight = threading.Semaphore(self.max_workers * 2)
+        self._active: set = set()
+        self._active_lock = threading.Lock()
 
     def process_request(self, request, client_address):
         if not self._inflight.acquire(blocking=False):
             self.shutdown_request(request)
             return
+        with self._active_lock:
+            self._active.add(request)
         self._pool.submit(self._handle, request, client_address)
 
     def _handle(self, request, client_address):
@@ -271,11 +296,20 @@ class _BoundedThreadingHTTPServer(HTTPServer):
         except Exception:
             self.handle_error(request, client_address)
         finally:
+            with self._active_lock:
+                self._active.discard(request)
             self.shutdown_request(request)
             self._inflight.release()
 
     def server_close(self):
         super().server_close()
+        with self._active_lock:
+            active = list(self._active)
+        for sock in active:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
         self._pool.shutdown(wait=False)
 
 
