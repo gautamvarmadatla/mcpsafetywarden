@@ -210,7 +210,7 @@ def test_safe_connect_rejects_rebind_to_reserved(monkeypatch):
 
 def test_broker_strips_crlf():
     set_secret_resolver(lambda ref: "value\r\nX-Injected: evil" if ref == "k" else None)
-    p = from_dict({"secrets": [{"ref": "k", "inject_as": "header", "name": "Authorization"}]})
+    p = from_dict({"secrets": [{"ref": "k", "inject_as": "header", "name": "Authorization", "to": "any.com"}]})
     headers = broker.header_injections(p.secrets, "any.com")
     assert "\r" not in headers["Authorization"] and "\n" not in headers["Authorization"]
     set_secret_resolver(lambda ref: None)
@@ -315,19 +315,25 @@ def test_enforced_no_egress_argv():
     assert ct2.args[ct2.args.index("--network") + 1] == "bridge"
 
 
-def test_deny_paths_masked_only_when_bound():
+def test_deny_paths_masked_only_when_bound(tmp_path):
     from mcpsafetywarden.sandbox.backends import BubblewrapBackend
 
-    unbound = from_dict({"filesystem": {"workdir": ".", "deny": ["~/.ssh", "**/.env"]}})
+    unbound = from_dict({"filesystem": {"workdir": ".", "deny": ["~/.ssh"]}})
     spawn = BubblewrapBackend().wrap("python", [], {}, unbound)
-    assert "--tmpfs" in spawn.args
     assert not any(a.endswith(".ssh") for a in spawn.args)
     assert not any("**" in a for a in spawn.args)
 
-    bound = from_dict({"filesystem": {"workdir": ".", "deny": ["./secret"]}})
+    (tmp_path / "secretdir").mkdir()
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / ".env").write_text("KEY=v")
+    bound = from_dict({"filesystem": {"workdir": str(tmp_path), "deny": [str(tmp_path / "secretdir"), "**/.env"]}})
     spawn2 = BubblewrapBackend().wrap("python", [], {}, bound)
     tmpfs_targets = [spawn2.args[i + 1] for i, a in enumerate(spawn2.args) if a == "--tmpfs"]
-    assert any(t.endswith("secret") for t in tmpfs_targets)
+    assert any(t.endswith("secretdir") for t in tmpfs_targets)
+    masked = [
+        spawn2.args[i + 2] for i, a in enumerate(spawn2.args) if a == "--ro-bind" and spawn2.args[i + 1] == os.devnull
+    ]
+    assert any(m.endswith(".env") for m in masked)
 
 
 def test_container_resource_flags():
@@ -467,8 +473,14 @@ def test_from_dict_tolerant_of_malformed_allow():
 
 def test_broker_malformed_template_skips_injection():
     set_secret_resolver(lambda ref: "s3cr3t" if ref == "k" else None)
-    p = from_dict({"secrets": [{"ref": "k", "inject_as": "header", "name": "Authorization", "template": "{secret:d}"}]})
-    assert broker.header_injections(p.secrets, "any.com") == {}
+    p = from_dict(
+        {
+            "secrets": [
+                {"ref": "k", "inject_as": "header", "name": "Authorization", "to": "h.com", "template": "{secret:d}"}
+            ]
+        }
+    )
+    assert broker.header_injections(p.secrets, "h.com") == {}
     set_secret_resolver(lambda ref: None)
 
 
@@ -496,3 +508,64 @@ def test_remote_cert_pin_match_and_mismatch(monkeypatch):
     bad = from_dict({"network": {"pin_cert": "sha256:dead", "block_reserved": False}})
     with pytest.raises(remote.RemoteVerificationError):
         remote.verify_remote({"url": "https://mcp.example.com/x"}, bad)
+
+
+def test_secret_injection_requires_to_scope():
+    set_secret_resolver(lambda ref: "s3cr3t" if ref == "k" else None)
+    unscoped = from_dict({"secrets": [{"ref": "k", "inject_as": "header", "name": "Authorization"}]})
+    assert broker.header_injections(unscoped.secrets, "attacker.com") == {}
+    scoped = from_dict(
+        {"secrets": [{"ref": "k", "inject_as": "header", "name": "Authorization", "to": "api.example.com"}]}
+    )
+    assert broker.header_injections(scoped.secrets, "api.example.com") == {"Authorization": "s3cr3t"}
+    assert broker.header_injections(scoped.secrets, "attacker.com") == {}
+    unscoped_q = from_dict({"secrets": [{"ref": "k", "inject_as": "query", "name": "api_key"}]})
+    assert broker.query_injections(unscoped_q.secrets, "attacker.com") == {}
+    set_secret_resolver(lambda ref: None)
+
+
+def test_proxy_started_when_backend_cannot_enforce_egress(monkeypatch):
+    import mcpsafetywarden.sandbox.manager as mgr
+
+    started = {"v": False}
+    real = mgr.EgressPolicy
+
+    def spy(*a, **k):
+        started["v"] = True
+        return real(*a, **k)
+
+    monkeypatch.setattr(mgr, "EgressPolicy", spy)
+    profile = from_dict(
+        {
+            "name": "d",
+            "target": {"transport": "stdio"},
+            "assurance": {"on_unavailable": "warn"},
+            "network": {"default": "deny", "allow": []},
+        }
+    )
+    with mgr.sandbox_session("python", [], {}, profile):
+        pass
+    assert started["v"] is True
+
+
+@pytest.mark.parametrize("host", ["100.64.0.1", "100.100.0.5", "100.127.255.254"])
+def test_cgnat_range_blocked(host):
+    allowed, _ = netfilter.decide(host, 443, [], block_reserved=True, default="allow")
+    assert allowed is False
+
+
+def test_wasm_selected_for_wasm_command(monkeypatch):
+    import mcpsafetywarden.sandbox.backends as b
+
+    monkeypatch.setattr(b, "available_backends", lambda: [b.WasmBackend(), b.SubprocessBackend()])
+    assert b.select_backend(from_dict({}), command="server.py").name != "wasm"
+    assert b.select_backend(from_dict({}), command="tool.wasm").name == "wasm"
+
+
+def test_broker_malformed_attribute_template_skips(monkeypatch):
+    set_secret_resolver(lambda ref: "s3cr3t" if ref == "k" else None)
+    p = from_dict(
+        {"secrets": [{"ref": "k", "inject_as": "header", "name": "X", "to": "h.com", "template": "{secret.foo}"}]}
+    )
+    assert broker.header_injections(p.secrets, "h.com") == {}
+    set_secret_resolver(lambda ref: None)

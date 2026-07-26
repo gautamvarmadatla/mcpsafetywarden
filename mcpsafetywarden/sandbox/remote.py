@@ -31,12 +31,16 @@ def _cert_sha256(host: str, targets: list) -> str:
     ctx.verify_mode = ssl.CERT_NONE
     last: Optional[OSError] = None
     for family, socktype, proto, sockaddr in targets:
+        raw = socket.socket(family, socktype, proto)
         try:
-            raw = socket.socket(family, socktype, proto)
             raw.settimeout(10)
             raw.connect(sockaddr)
         except OSError as exc:
             last = exc
+            try:
+                raw.close()
+            except OSError:
+                pass
             continue
         with ctx.wrap_socket(raw, server_hostname=host) as ssock:
             der = ssock.getpeercert(binary_form=True)

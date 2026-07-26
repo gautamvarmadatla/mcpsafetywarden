@@ -92,8 +92,13 @@ def candidate_ips(host: str) -> List[ipaddress._BaseAddress]:
     return out
 
 
+_CGNAT_V4 = ipaddress.ip_network("100.64.0.0/10")
+
+
 def is_reserved_ip(ip: ipaddress._BaseAddress) -> bool:
     if str(ip) in METADATA_IPS:
+        return True
+    if isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT_V4:
         return True
     return bool(
         ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified
@@ -129,6 +134,8 @@ def resolve_targets(host: str, port: int, block_reserved: bool = True):
 def _host_matches_rule(host: str, rule_host: str) -> bool:
     host = normalize_host(host).lower()
     rule = rule_host.lower().rstrip(".")
+    if not host or ".." in host or host.startswith(".") or any(c in host for c in "#@ /?"):
+        return False
     if rule.startswith("*."):
         suffix = rule[1:]
         return host.endswith(suffix) and host != suffix.lstrip(".")

@@ -34,6 +34,21 @@ ApprovalFn = Callable[[str, int], bool]
 MAX_BODY_BYTES = 32 * 1024 * 1024
 TUNNEL_MAX_SECONDS = 3600
 
+_HOP_BY_HOP = frozenset(
+    {
+        "proxy-connection",
+        "connection",
+        "keep-alive",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+        "proxy-authorization",
+        "proxy-authenticate",
+        "content-length",
+    }
+)
+
 
 def split_hostport(authority: str, default_port: int) -> Tuple[str, int]:
     a = (authority or "").strip()
@@ -174,7 +189,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         body = self.rfile.read(length) if length else None
 
-        headers = {k: v for k, v in self.headers.items() if k.lower() != "proxy-connection"}
+        headers = {k: v for k, v in self.headers.items() if k.lower() not in _HOP_BY_HOP}
         headers.update(broker.header_injections(self.policy.secrets, host))
 
         path = parts.path or "/"
@@ -194,7 +209,7 @@ class _Handler(BaseHTTPRequestHandler):
             conn.request(self.command, path, body=body, headers=headers)
             resp = conn.getresponse()
             data = resp.read(MAX_BODY_BYTES + 1)
-        except OSError as exc:
+        except (OSError, http.client.HTTPException) as exc:
             self._deny(host, f"forward failed: {exc}")
             return
         finally:
@@ -288,7 +303,13 @@ class _BoundedThreadingHTTPServer(HTTPServer):
             return
         with self._active_lock:
             self._active.add(request)
-        self._pool.submit(self._handle, request, client_address)
+        try:
+            self._pool.submit(self._handle, request, client_address)
+        except RuntimeError:
+            with self._active_lock:
+                self._active.discard(request)
+            self._inflight.release()
+            self.shutdown_request(request)
 
     def _handle(self, request, client_address):
         try:

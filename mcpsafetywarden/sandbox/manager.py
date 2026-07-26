@@ -67,7 +67,7 @@ def sandbox_session(
     learn = profile.learning.mode in ("observe", "suggest")
     enforce = profile.enforcement.mode == "enforce"
 
-    backend = backends.select_backend(profile)
+    backend = backends.select_backend(profile, command)
     unmet = backends.enforce_controls(profile, backend)
 
     if learn and enforce:
@@ -87,9 +87,9 @@ def sandbox_session(
         )
 
     proxy: Optional[EgressProxy] = None
-    no_egress = backends.enforced_no_egress(profile)
+    backend_enforces_egress = "egress" in backend.capabilities(profile)
     try:
-        if profile.transport() == "stdio" and not no_egress:
+        if profile.transport() == "stdio" and not backend_enforces_egress:
             policy = EgressPolicy(
                 profile.network,
                 secrets=profile.secrets,
@@ -101,8 +101,8 @@ def sandbox_session(
             _log.info(
                 "sandbox '%s': egress proxy at %s (mode=%s)", profile.name, proxy.address, profile.enforcement.mode
             )
-        elif no_egress:
-            _log.info("sandbox '%s': no-egress enforced at backend layer; egress proxy not needed", profile.name)
+        elif backend_enforces_egress:
+            _log.info("sandbox '%s': egress enforced at backend layer; proxy not needed", profile.name)
 
         wrapped = backend.wrap(command, list(args or []), env, profile)
         if "egress" in unmet:

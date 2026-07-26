@@ -54,7 +54,7 @@ def _render(rule: SecretRule) -> Optional[str]:
     secret = _sanitize(secret)
     try:
         return _sanitize(rule.template.format(secret=secret))
-    except (KeyError, IndexError, ValueError):
+    except (KeyError, IndexError, ValueError, AttributeError, TypeError):
         _log.warning("secret template for ref '%s' is malformed; skipping injection", rule.ref)
         return None
 
@@ -64,7 +64,10 @@ def header_injections(secrets: List[SecretRule], dest_host: str) -> Dict[str, st
     for rule in secrets:
         if rule.inject_as != "header" or not rule.name:
             continue
-        if rule.to and not _host_matches_rule(dest_host, rule.to):
+        if not rule.to:
+            _log.debug("secret '%s' has no 'to' scope; not injecting header to avoid broadcasting", rule.ref)
+            continue
+        if not _host_matches_rule(dest_host, rule.to):
             continue
         rendered = _render(rule)
         if rendered is not None:
@@ -88,7 +91,10 @@ def query_injections(secrets: List[SecretRule], dest_host: str) -> Dict[str, str
     for rule in secrets:
         if rule.inject_as != "query" or not rule.name:
             continue
-        if rule.to and not _host_matches_rule(dest_host, rule.to):
+        if not rule.to:
+            _log.debug("secret '%s' has no 'to' scope; not injecting query to avoid broadcasting", rule.ref)
+            continue
+        if not _host_matches_rule(dest_host, rule.to):
             continue
         rendered = _render(rule)
         if rendered is not None:

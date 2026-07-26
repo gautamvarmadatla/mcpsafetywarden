@@ -17,6 +17,7 @@ import os
 import platform
 import shutil
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 from .profile import Resources, SandboxProfile, assurance_rank
@@ -57,6 +58,30 @@ def _under_any(path: str, bases: List[str]) -> bool:
     return False
 
 
+def _expand_glob_deny(pattern: str, bound_dirs: List[str], cap: int = 500) -> List[str]:
+    """Expand a `**/name` deny glob to concrete existing paths under bound dirs."""
+    if not pattern.startswith("**/"):
+        return []
+    name = pattern[3:]
+    out: List[str] = []
+    for base in bound_dirs:
+        try:
+            for p in Path(base).rglob(name):
+                out.append(str(p))
+                if len(out) >= cap:
+                    return out
+        except OSError:
+            continue
+    return out
+
+
+def _as_int(value: object) -> Optional[int]:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 def _apply_posix_limits(command: str, args: List[str], resources: Resources):
     """Apply only safe, long-lived-process-compatible rlimits.
 
@@ -68,10 +93,12 @@ def _apply_posix_limits(command: str, args: List[str], resources: Resources):
     if not _POSIX or shutil.which("sh") is None:
         return command, args
     limits: List[str] = []
-    if resources.max_open_files:
-        limits.append(f"ulimit -n {int(resources.max_open_files)}")
-    if resources.max_processes:
-        limits.append(f"ulimit -u {int(resources.max_processes)}")
+    nofile = _as_int(resources.max_open_files)
+    if nofile is not None:
+        limits.append(f"ulimit -n {nofile}")
+    nproc = _as_int(resources.max_processes)
+    if nproc is not None:
+        limits.append(f"ulimit -u {nproc}")
     if not limits:
         return command, args
     script = "; ".join(limits + ['exec "$@"'])
@@ -79,7 +106,7 @@ def _apply_posix_limits(command: str, args: List[str], resources: Resources):
 
 
 def _posix_resources_supported(resources: Resources) -> bool:
-    return _POSIX and any(v is not None for v in (resources.max_open_files, resources.max_processes))
+    return _POSIX and (_as_int(resources.max_open_files) is not None or _as_int(resources.max_processes) is not None)
 
 
 class SandboxBackend:
@@ -174,14 +201,22 @@ class BubblewrapBackend(SandboxBackend):
             bound.append(resolved)
         for path in profile.filesystem.deny:
             if _has_glob(path):
-                continue
-            resolved = os.path.abspath(os.path.expanduser(path))
-            if _under_any(resolved, bound):
-                argv += ["--tmpfs", resolved]
+                candidates = _expand_glob_deny(path, bound)
+            else:
+                candidates = [os.path.abspath(os.path.expanduser(path))]
+            for resolved in candidates:
+                if not _under_any(resolved, bound) or not os.path.exists(resolved):
+                    continue
+                if os.path.isdir(resolved):
+                    argv += ["--tmpfs", resolved]
+                else:
+                    argv += ["--ro-bind", os.devnull, resolved]
         argv += ["--chdir", workdir]
         inner_cmd, inner_args = _apply_posix_limits(command, list(args), profile.resources)
         argv += ["--", inner_cmd, *inner_args]
-        notes = ["filesystem confined to workdir + declared reads; deny paths masked with tmpfs"]
+        notes = [
+            "filesystem confined to workdir + declared reads; deny paths (incl. glob matches) under bound dirs masked"
+        ]
         notes.append("network isolated (--unshare-net): no egress" if no_egress else "network shared: egress advisory")
         return WrappedSpawn(command=bwrap, args=argv, env=env, backend=self.name, notes=notes)
 
@@ -215,11 +250,16 @@ class SeatbeltBackend(SandboxBackend):
         for path in profile.filesystem.read:
             resolved = os.path.abspath(os.path.expanduser(path))
             lines.append(f'(allow file-read* (subpath "{resolved}"))')
+        workdir_root = [workdir]
         for path in profile.filesystem.deny:
             if _has_glob(path):
-                continue
-            resolved = os.path.abspath(os.path.expanduser(path))
-            lines.append(f'(deny file* (subpath "{resolved}"))')
+                targets = _expand_glob_deny(path, workdir_root)
+            else:
+                targets = [os.path.abspath(os.path.expanduser(path))]
+            for resolved in targets:
+                if '"' in resolved:
+                    continue
+                lines.append(f'(deny file* (subpath "{resolved}"))')
         return "\n".join(lines)
 
     def wrap(self, command, args, env, profile) -> WrappedSpawn:
@@ -309,10 +349,12 @@ class ContainerBackend(SandboxBackend):
             argv += ["--memory", str(profile.resources.memory)]
         if profile.resources.cpu:
             argv += ["--cpus", str(profile.resources.cpu)]
-        if profile.resources.max_processes:
-            argv += ["--pids-limit", str(int(profile.resources.max_processes))]
-        if profile.resources.max_open_files:
-            argv += ["--ulimit", f"nofile={int(profile.resources.max_open_files)}"]
+        pids = _as_int(profile.resources.max_processes)
+        if pids is not None:
+            argv += ["--pids-limit", str(pids)]
+        nofile = _as_int(profile.resources.max_open_files)
+        if nofile is not None:
+            argv += ["--ulimit", f"nofile={nofile}"]
         for key, value in env.items():
             argv += ["-e", f"{key}={value}"]
         argv += [image, command, *args]
@@ -366,11 +408,12 @@ def available_backends() -> List[SandboxBackend]:
     return [b for b in _REGISTRY if b.available()]
 
 
-def select_backend(profile: SandboxProfile) -> SandboxBackend:
+def select_backend(profile: SandboxProfile, command: Optional[str] = None) -> SandboxBackend:
     required = profile.assurance.required
     req_rank = assurance_rank(required)
     usable = available_backends()
-    if not (profile.target.get("wasm")):
+    wants_wasm = bool(profile.target.get("wasm")) or (command is not None and command.endswith(".wasm"))
+    if not wants_wasm:
         usable = [b for b in usable if b.name != "wasm"]
 
     meeting = [b for b in usable if assurance_rank(b.assurance) >= req_rank]
