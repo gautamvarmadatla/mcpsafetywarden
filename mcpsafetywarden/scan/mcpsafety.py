@@ -1070,6 +1070,8 @@ async def _hacker_openai_compat(
                 messages=msgs,
             ),
         )
+        if not getattr(response, "choices", None):
+            break
         msg = response.choices[0].message
         messages.append(msg)
 

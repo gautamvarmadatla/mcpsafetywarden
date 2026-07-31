@@ -986,7 +986,7 @@ def _discover_compose(cwd: Path, registered_server_ids: Optional[Set[str]]) -> L
             continue
         services = data.get("services") or {}
         if not isinstance(services, dict):
-            break
+            continue
         results: List[Dict[str, Any]] = []
         for svc_name, svc in services.items():
             if not isinstance(svc, dict):
@@ -1019,7 +1019,7 @@ def _discover_compose(cwd: Path, registered_server_ids: Optional[Set[str]]) -> L
             if ports:
                 first = ports[0]
                 if isinstance(first, str) and ":" in first:
-                    url = f"http://localhost:{first.split(':')[0]}/mcp"
+                    url = f"http://localhost:{first.split(':')[-2]}/mcp"
                 elif isinstance(first, int):
                     url = f"http://localhost:{first}/mcp"
             transport = "streamable_http" if url else "stdio"

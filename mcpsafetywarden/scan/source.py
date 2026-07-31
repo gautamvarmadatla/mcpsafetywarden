@@ -415,8 +415,8 @@ def _entropy_secret_scan(source_files: Dict[str, str]) -> List[Dict[str, Any]]:
     for path, content in source_files.items():
         try:
             tree = ast.parse(content, filename=path)
-        except SyntaxError:
-            _log.debug("entropy scan: skipping %s (SyntaxError)", path)
+        except (SyntaxError, ValueError, TypeError) as exc:
+            _log.debug("entropy scan: skipping %s (%s)", path, type(exc).__name__)
             continue
 
         parent_map: Dict[int, ast.AST] = {}
@@ -713,7 +713,7 @@ def _ast_deep_analysis(
     for path, content in source_files.items():
         try:
             tree = ast.parse(content, filename=path)
-        except SyntaxError as exc:
+        except (SyntaxError, ValueError, TypeError) as exc:
             _log.debug("AST parse error in %s: %s", path, exc)
             continue
 

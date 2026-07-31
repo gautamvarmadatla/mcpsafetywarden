@@ -413,7 +413,8 @@ def _try_decode_b64(text: str) -> List[str]:
     decoded: List[str] = []
     for match in itertools.islice(_B64_SUSPICIOUS.finditer(text), _MAX_B64_DECODES):
         try:
-            candidate = base64.b64decode(match.group() + "==").decode("utf-8", errors="ignore")
+            raw = match.group()
+            candidate = base64.b64decode(raw + "=" * (-len(raw) % 4)).decode("utf-8", errors="ignore")
             if len(candidate) > 10:
                 text_chars = sum(1 for c in candidate if c.isprintable() or c in "\n\r\t")
                 if text_chars / len(candidate) >= 0.70:
@@ -567,7 +568,7 @@ def resolve_server_crefs(server: Dict[str, Any]) -> Dict[str, Any]:
     if resolved.get("headers"):
         resolved["headers"] = _resolve_crefs(dict(resolved["headers"]))
     if resolved.get("env"):
-        resolved["env"] = _resolve_crefs({str(k): str(v) for k, v in resolved["env"].items()})
+        resolved["env"] = _resolve_crefs({str(k): "" if v is None else str(v) for k, v in resolved["env"].items()})
     return resolved
 
 
@@ -609,7 +610,7 @@ async def open_streams(server: Dict[str, Any]) -> AsyncGenerator[Tuple[Any, Any]
     headers: Dict[str, str] = _resolve_crefs(server.get("headers") or {})
 
     if transport == "stdio":
-        env_override = _resolve_crefs({str(k): str(v) for k, v in (server.get("env") or {}).items()})
+        env_override = _resolve_crefs({str(k): "" if v is None else str(v) for k, v in (server.get("env") or {}).items()})
         resolved_env = {k: v for k, v in _os.environ.items() if k not in _WRAPPER_SECRET_KEYS}
         if env_override:
             resolved_env.update(env_override)

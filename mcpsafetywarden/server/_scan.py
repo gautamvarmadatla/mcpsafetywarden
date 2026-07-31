@@ -119,7 +119,7 @@ async def _execute_scan_core(
     if len(providers_to_run) == 1:
         findings = await _run_one(providers_to_run[0])
         if "error" in findings and "overall_risk_level" not in findings:
-            return json.dumps(findings, indent=2)
+            return findings
     else:
         results = await asyncio.gather(*[_run_one(p) for p in providers_to_run])
         findings = _merge_findings(server_id, list(results))

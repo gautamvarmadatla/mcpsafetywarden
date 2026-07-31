@@ -1214,10 +1214,12 @@ def cleanup_server_graph(server_id: str) -> None:
         _log.debug("graph cleanup_server_graph failed for %s: %s", server_id, exc)
 
 
-def rebuild_from_db() -> Dict[str, int]:
+def rebuild_from_db(server_id: Optional[str] = None) -> Dict[str, int]:
     counts: Dict[str, int] = {"servers": 0, "tools": 0, "findings": 0, "discovered": 0}
     for server in _db.list_servers():
         sid = server["server_id"]
+        if server_id and sid != server_id:
+            continue
         on_server_registered(sid, server["transport"], server.get("command"), server.get("url"))
         counts["servers"] += 1
 
@@ -1283,7 +1285,7 @@ def on_cross_server_analysis(client_id: str) -> None:
                 {
                     row["source_id"]
                     for row in all_exfil
-                    if json.loads(row["metadata"] or "{}").get("client_id") == client_id
+                    if _parse_json_field(row["metadata"]).get("client_id") == client_id
                 }
             )
             if stale_source_ids:
