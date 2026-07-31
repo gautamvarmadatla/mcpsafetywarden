@@ -610,7 +610,9 @@ async def open_streams(server: Dict[str, Any]) -> AsyncGenerator[Tuple[Any, Any]
     headers: Dict[str, str] = _resolve_crefs(server.get("headers") or {})
 
     if transport == "stdio":
-        env_override = _resolve_crefs({str(k): "" if v is None else str(v) for k, v in (server.get("env") or {}).items()})
+        env_override = _resolve_crefs(
+            {str(k): "" if v is None else str(v) for k, v in (server.get("env") or {}).items()}
+        )
         resolved_env = {k: v for k, v in _os.environ.items() if k not in _WRAPPER_SECRET_KEYS}
         if env_override:
             resolved_env.update(env_override)
