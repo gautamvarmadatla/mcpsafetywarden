@@ -100,10 +100,18 @@ def tools(
     server_id: Optional[str] = Query(None),
     effect_class: Optional[str] = Query(None),
     policy: Optional[str] = Query(None),
+    q: Optional[str] = Query(None, max_length=200),
     page: int = Query(1, ge=1),
     limit: int = Query(50, le=200),
 ):
-    return _db.list_tools(server_id=server_id, effect_class=effect_class, policy=policy, page=page, limit=limit)
+    return _db.list_tools(
+        server_id=server_id, effect_class=effect_class, policy=policy, page=page, limit=limit, q=q or None
+    )
+
+
+@api.get("/api/tools/activity")
+def tools_activity(days: int = Query(7, ge=1, le=30), server_id: Optional[str] = Query(None)):
+    return _db.get_tool_activity(days=days, server_id=server_id)
 
 
 @api.get("/api/tools/{server_id}/{tool_name}")
