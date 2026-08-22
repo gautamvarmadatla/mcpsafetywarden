@@ -1,10 +1,13 @@
 """Web dashboard for mcpsafetywarden - FastAPI backend + static SPA."""
 
+import asyncio
+import json
 import logging
 import threading
 import webbrowser
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -253,6 +256,108 @@ def bulk_block_high():
 @api.get("/api/discovered")
 def discovered():
     return _db.get_discovered()
+
+
+# ---------------------------------------------------------------------------
+# Security scans (queued, one server at a time)
+# ---------------------------------------------------------------------------
+
+
+class ScanBody(BaseModel):
+    confirm_authorized: bool = False
+    server_ids: Optional[List[str]] = None
+
+
+_scan_state: Dict[str, Any] = {"current": None, "queue": [], "results": {}}
+_scan_worker: Optional[asyncio.Task] = None
+
+
+def _loads(raw: Any) -> Dict[str, Any]:
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return {"error": "Unreadable response"}
+    return data if isinstance(data, dict) else {"result": data}
+
+
+def _scan_status() -> Dict[str, Any]:
+    return {
+        "current": _scan_state["current"],
+        "queue": list(_scan_state["queue"]),
+        "results": dict(_scan_state["results"]),
+    }
+
+
+async def _drain_scan_queue() -> None:
+    from .server import security_scan_server
+
+    while _scan_state["queue"]:
+        server_id = _scan_state["queue"].pop(0)
+        _scan_state["current"] = server_id
+        try:
+            data = _loads(await security_scan_server(server_id=server_id, confirm_authorized=True, background=False))
+            if data.get("error"):
+                result = {"status": "failed", "error": str(data["error"])}
+            else:
+                result = {"status": "completed", "overall_risk_level": data.get("overall_risk_level")}
+        except Exception as exc:
+            _log.error("dashboard scan failed for %s: %s", server_id, exc, exc_info=True)
+            result = {"status": "failed", "error": "Scan failed. Check the server logs."}
+        result["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _scan_state["results"][server_id] = result
+        _scan_state["current"] = None
+        if len(_scan_state["results"]) > 1000:
+            oldest = sorted(_scan_state["results"].items(), key=lambda kv: kv[1].get("finished_at", ""))
+            for key, _ in oldest[:200]:
+                _scan_state["results"].pop(key, None)
+
+
+def _enqueue_scans(server_ids: List[str]) -> Dict[str, Any]:
+    global _scan_worker
+    queued, skipped = [], []
+    for server_id in server_ids:
+        if server_id == _scan_state["current"] or server_id in _scan_state["queue"]:
+            skipped.append(server_id)
+            continue
+        _scan_state["queue"].append(server_id)
+        queued.append(server_id)
+    if queued and (_scan_worker is None or _scan_worker.done()):
+        _scan_worker = asyncio.get_running_loop().create_task(_drain_scan_queue())
+    return {"queued": queued, "already_queued": skipped, **_scan_status()}
+
+
+def _require_authorization(body: ScanBody) -> None:
+    if not body.confirm_authorized:
+        raise HTTPException(400, "Confirm that you own these servers and are authorized to test them.")
+
+
+@api.post("/api/servers/{server_id}/scan")
+async def start_scan(server_id: str, body: ScanBody):
+    _require_authorization(body)
+    if not _db.get_server(server_id):
+        raise HTTPException(404, f"Server '{server_id}' not found")
+    return _enqueue_scans([server_id])
+
+
+@api.post("/api/scans")
+async def start_scans(body: ScanBody):
+    _require_authorization(body)
+    known = [s["server_id"] for s in _db.list_servers()]
+    wanted = body.server_ids if body.server_ids is not None else known
+    known_set = set(known)
+    return _enqueue_scans([s for s in wanted if s in known_set])
+
+
+@api.get("/api/scans/status")
+def scans_status():
+    return _scan_status()
+
+
+@api.delete("/api/scans/queue")
+def clear_scan_queue():
+    cleared = len(_scan_state["queue"])
+    _scan_state["queue"].clear()
+    return {"cleared": cleared, **_scan_status()}
 
 
 # ---------------------------------------------------------------------------
