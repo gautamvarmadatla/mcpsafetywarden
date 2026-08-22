@@ -5,9 +5,9 @@ import threading
 import webbrowser
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -16,9 +16,20 @@ from . import dashboard_db as _db
 
 _log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
+CLIENT_HEADER = "x-warden-client"
 
 api = FastAPI(title="mcpsafetywarden", version="1.0", docs_url=None, redoc_url=None)
-api.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+@api.middleware("http")
+async def guard_writes(request: Request, call_next):
+    if request.method not in ("GET", "HEAD", "OPTIONS") and request.url.path.startswith("/api/"):
+        if request.headers.get(CLIENT_HEADER) != "dashboard":
+            return JSONResponse(status_code=403, content={"detail": "Write requests must come from the dashboard."})
+        origin = request.headers.get("origin")
+        if origin and urlparse(origin).netloc != request.headers.get("host", ""):
+            return JSONResponse(status_code=403, content={"detail": "Cross-origin write rejected."})
+    return await call_next(request)
 
 
 # ---------------------------------------------------------------------------
