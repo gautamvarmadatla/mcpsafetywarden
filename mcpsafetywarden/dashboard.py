@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import dashboard_db as _db
 
@@ -358,6 +358,60 @@ def clear_scan_queue():
     cleared = len(_scan_state["queue"])
     _scan_state["queue"].clear()
     return {"cleared": cleared, **_scan_status()}
+
+
+# ---------------------------------------------------------------------------
+# Registration and discovery
+# ---------------------------------------------------------------------------
+
+
+class RegisterBody(BaseModel):
+    server_id: str = Field(min_length=1, max_length=128)
+    transport: Optional[str] = None
+    command: Optional[str] = None
+    args: Optional[List[str]] = None
+    url: Optional[str] = None
+    env: Optional[Dict[str, str]] = None
+    headers: Optional[Dict[str, str]] = None
+    github_url: Optional[str] = None
+    auto_inspect: bool = True
+
+
+class OnboardBody(BaseModel):
+    discovery_ids: List[str] = Field(min_length=1)
+
+
+def _raise_on_error(data: Dict[str, Any]) -> Dict[str, Any]:
+    if data.get("error"):
+        raise HTTPException(400, str(data["error"]))
+    return data
+
+
+@api.post("/api/servers")
+async def register(body: RegisterBody):
+    from .server import register_server
+
+    if body.transport and body.transport not in ("stdio", "sse", "streamable_http"):
+        raise HTTPException(400, "transport must be stdio, sse or streamable_http")
+    if not body.command and not body.url:
+        raise HTTPException(400, "Provide a command for stdio servers or a URL for remote servers.")
+    return _raise_on_error(_loads(await register_server(**body.model_dump())))
+
+
+@api.post("/api/discover")
+async def discover():
+    from .server import discover_servers
+
+    return _raise_on_error(_loads(await discover_servers()))
+
+
+@api.post("/api/discovered/onboard")
+async def onboard_discovered(body: OnboardBody):
+    from .server import onboard_discovered_servers
+
+    return _raise_on_error(
+        _loads(await onboard_discovered_servers(discovery_ids=body.discovery_ids, auto_inspect=True))
+    )
 
 
 # ---------------------------------------------------------------------------
