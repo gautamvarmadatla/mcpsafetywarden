@@ -1,0 +1,159 @@
+"""Dashboard REST API tests against an isolated temporary database."""
+
+import asyncio
+import json
+import time
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from fastapi.testclient import TestClient
+
+HEADERS = {"x-warden-client": "dashboard"}
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    from mcpsafetywarden.core import database
+
+    monkeypatch.setattr(database, "DB_PATH", tmp_path / "dash.db")
+    monkeypatch.setattr(database, "_initialized", False)
+
+    database.upsert_server("alpha", "stdio", command="alpha-server")
+    database.upsert_server("beta", "streamable_http", url="https://beta.example/mcp")
+    read_id = database.upsert_tool("alpha", "read_file", "Read a file", {}, {})
+    database.upsert_tool("alpha", "write_file", "Write a file", {}, {})
+    database.upsert_tool("beta", "post_message", "Post a message", {}, {})
+    database.set_tool_policy("alpha", "write_file", "block")
+    database.record_run(read_id, {"path": "a"}, True, False, 12.0, 40, "h", "ok")
+    database.record_run(read_id, {"path": "b"}, False, True, 30.0, 0, "h", "", "boom")
+    database.store_security_scan(
+        "alpha",
+        {
+            "provider": "rules",
+            "overall_risk_level": "HIGH",
+            "summary": "Write access is unconstrained.",
+            "tool_findings": [
+                {"name": "write_file", "risk_level": "HIGH", "finding": "Any path is writable."},
+                {"name": "read_file", "risk_level": "LOW", "finding": "Reads any file."},
+            ],
+            "server_level_risks": [{"risk": "Read then write chain", "risk_level": "MEDIUM"}],
+        },
+    )
+
+    from mcpsafetywarden import dashboard
+
+    dashboard._scan_state.update({"current": None, "queue": [], "results": {}})
+    with TestClient(dashboard.api) as c:
+        yield c
+
+
+def test_writes_require_dashboard_header(client):
+    body = {"server_id": "alpha", "tool_name": "read_file", "policy": "block"}
+    assert client.post("/api/policies", json=body).status_code == 403
+    assert client.post("/api/policies", json=body, headers=HEADERS).status_code == 200
+
+
+def test_cross_origin_write_is_rejected(client):
+    body = {"server_id": "alpha", "tool_name": "read_file", "policy": "block"}
+    r = client.post("/api/policies", json=body, headers={**HEADERS, "origin": "https://evil.example"})
+    assert r.status_code == 403
+
+
+def test_tool_search_and_policy_filter_are_paginated_in_sql(client):
+    r = client.get("/api/tools", params={"q": "file"}).json()
+    assert r["total"] == 2
+    assert {t["tool_name"] for t in r["items"]} == {"read_file", "write_file"}
+
+    blocked = client.get("/api/tools", params={"policy": "block", "limit": 1}).json()
+    assert blocked["total"] == 1
+    assert blocked["items"][0]["tool_name"] == "write_file"
+
+    unset = client.get("/api/tools", params={"policy": "none"}).json()
+    assert unset["total"] == 2
+
+
+def test_tool_activity_counts_recent_runs(client):
+    r = client.get("/api/tools/activity", params={"days": 7}).json()
+    assert len(r["days"]) == 7
+    assert r["days"][-1] == datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    assert sum(r["tools"]["alpha::read_file"]) == 2
+    assert sum(r["servers"]["alpha"]) == 2
+
+
+def test_overview_reports_finding_counts_and_tool_risk(client):
+    o = client.get("/api/overview").json()
+    assert o["finding_counts"] == {"HIGH": 1, "LOW": 1}
+    assert o["tool_risk_distribution"]["HIGH"] == 1
+    assert o["tool_risk_distribution"]["NONE"] == 1
+    assert o["last_scan_at"]
+
+
+def test_findings_include_counts_by_level(client):
+    r = client.get("/api/findings", params={"risk_level": "HIGH"}).json()
+    assert r["total"] == 1
+    assert r["counts"] == {"HIGH": 1, "LOW": 1}
+    assert r["server_risks"][0]["risk"] == "Read then write chain"
+
+
+def test_scans_require_authorization_and_run_in_order(client, monkeypatch):
+    import mcpsafetywarden.server as srv
+
+    seen = []
+
+    async def fake_scan(server_id, confirm_authorized, background):
+        assert confirm_authorized is True and background is False
+        seen.append(server_id)
+        await asyncio.sleep(0.01)
+        return json.dumps({"overall_risk_level": "LOW"})
+
+    monkeypatch.setattr(srv, "security_scan_server", fake_scan)
+
+    assert client.post("/api/servers/alpha/scan", json={}, headers=HEADERS).status_code == 400
+    assert (
+        client.post("/api/servers/missing/scan", json={"confirm_authorized": True}, headers=HEADERS).status_code == 404
+    )
+
+    r = client.post(
+        "/api/scans", json={"confirm_authorized": True, "server_ids": ["alpha", "beta", "ghost"]}, headers=HEADERS
+    )
+    assert r.json()["queued"] == ["alpha", "beta"]
+
+    deadline = time.time() + 5
+    status = client.get("/api/scans/status").json()
+    while (status["current"] or status["queue"]) and time.time() < deadline:
+        time.sleep(0.05)
+        status = client.get("/api/scans/status").json()
+    assert seen == ["alpha", "beta"]
+    assert status["results"]["alpha"]["status"] == "completed"
+
+
+def test_clear_scan_queue(client):
+    from mcpsafetywarden import dashboard
+
+    dashboard._scan_state["queue"].extend(["alpha", "beta"])
+    r = client.delete("/api/scans/queue", headers=HEADERS).json()
+    assert r["cleared"] == 2
+    assert r["queue"] == []
+
+
+def test_register_validates_input(client, monkeypatch):
+    import mcpsafetywarden.server as srv
+
+    async def fake_register(**kwargs):
+        return json.dumps({"server_id": kwargs["server_id"], "tools_discovered": 0})
+
+    monkeypatch.setattr(srv, "register_server", fake_register)
+
+    assert client.post("/api/servers", json={"server_id": "gamma"}, headers=HEADERS).status_code == 400
+    bad = {"server_id": "gamma", "transport": "ftp", "url": "ftp://x"}
+    assert client.post("/api/servers", json=bad, headers=HEADERS).status_code == 400
+    ok = {"server_id": "gamma", "transport": "stdio", "command": "gamma-server"}
+    assert client.post("/api/servers", json=ok, headers=HEADERS).json()["server_id"] == "gamma"
+
+
+def test_runs_stats_bucket_recent_runs(client):
+    r = client.get("/api/runs/stats", params={"hours": 24}).json()
+    assert sum(b["runs"] for b in r["series"]) == 2
+    assert sum(b["failures"] for b in r["series"]) == 1
+    hour = datetime.now(timezone.utc) - timedelta(hours=1)
+    assert all(b["hour"] >= hour.strftime("%Y-%m-%dT00:00:00")[:10] for b in r["series"])
