@@ -20,7 +20,7 @@
 .pop ul{list-style:none;margin:0 0 14px;padding:8px 10px;background:var(--bg-subtle);border-radius:6px}
 .pop li{padding:2px 0}
 .pop .acts{display:flex;justify-content:flex-end;gap:8px}
-.toast{position:absolute;left:50%;bottom:20px;z-index:9;transform:translate(-50%,8px);opacity:0;pointer-events:none;background:var(--ink);color:var(--ink-fg);border-radius:8px;padding:0 6px 0 16px;min-height:44px;display:flex;align-items:center;gap:14px;font-size:14px;box-shadow:var(--shadow-pop);transition:opacity .15s ease-out,transform .2s cubic-bezier(.16,1,.3,1);white-space:nowrap}
+.toast{position:fixed;left:50%;bottom:20px;z-index:9;transform:translate(-50%,8px);opacity:0;pointer-events:none;background:var(--ink);color:var(--ink-fg);border-radius:8px;padding:0 6px 0 16px;min-height:44px;display:flex;align-items:center;gap:14px;font-size:14px;box-shadow:var(--shadow-pop);transition:opacity .15s ease-out,transform .2s cubic-bezier(.16,1,.3,1);white-space:nowrap}
 .toast.on{opacity:1;transform:translate(-50%,0);pointer-events:auto}
 .toast button{height:32px;padding:0 12px;border:0;border-radius:5px;background:transparent;color:inherit;font-weight:600;font-size:14px;cursor:pointer}
 .toast button:hover{background:rgba(127,127,127,.22)}
@@ -173,7 +173,7 @@
 .panel-b p{font-size:15px;line-height:24px;color:var(--text-2)}
 .panel-f{padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center}
 .panel-f .note{font-size:13px;color:var(--muted);margin-left:auto}
-.pal-wrap{position:absolute;inset:0;z-index:10;background:var(--scrim);display:none;justify-content:center;align-items:flex-start;padding-top:96px}
+.pal-wrap{position:fixed;inset:0;z-index:10;background:var(--scrim);display:none;justify-content:center;align-items:flex-start;padding-top:96px}
 .pal-wrap.on{display:flex}
 .pal{width:640px;background:var(--elev);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow-pop);overflow:hidden}
 .pal input{width:100%;height:56px;border:0;border-bottom:1px solid var(--border);background:transparent;padding:0 20px;font-size:16px;outline:none}
@@ -304,7 +304,7 @@
 .link{color:inherit;text-decoration:none;cursor:pointer}
 .link:hover{color:var(--text)}
 .nav{text-decoration:none}
-.dialog-wrap{position:absolute;inset:0;z-index:12;background:var(--scrim-strong);display:flex;align-items:flex-start;justify-content:center;padding:96px 24px 24px;animation:fadein .14s ease-out}
+.dialog-wrap{position:fixed;inset:0;z-index:12;background:var(--scrim-strong);display:flex;align-items:flex-start;justify-content:center;padding:96px 24px 24px;animation:fadein .14s ease-out}
 .dialog{width:560px;max-width:100%;max-height:calc(100% - 48px);display:flex;flex-direction:column;background:var(--elev);border-radius:12px;box-shadow:0 0 0 1px var(--border),var(--shadow-pop);overflow:hidden;animation:pop-in .18s cubic-bezier(.16,1,.3,1)}
 .dialog.wide{width:720px}
 .dialog-h{padding:20px 24px 4px}
