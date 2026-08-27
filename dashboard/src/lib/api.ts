@@ -66,6 +66,7 @@ const get = <T>(path: string, params?: Params) => request<T>("GET", path + qs(pa
 const enc = encodeURIComponent;
 
 export const api = {
+  health: () => get<{ ok: boolean; db_path?: string; server_count?: number; error?: string }>("/api/health"),
   overview: () => get<Overview>("/api/overview"),
 
   servers: () => get<ServerRow[]>("/api/servers"),
