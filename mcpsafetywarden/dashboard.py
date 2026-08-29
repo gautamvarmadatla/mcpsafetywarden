@@ -21,7 +21,17 @@ _log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 CLIENT_HEADER = "x-warden-client"
 
+LOOPBACK = {"localhost", "127.0.0.1", "::1"}
+
 api = FastAPI(title="mcpsafetywarden", version="1.0", docs_url=None, redoc_url=None)
+
+
+def _same_origin(origin: str, host: str) -> bool:
+    parsed = urlparse(origin)
+    if parsed.netloc == host:
+        return True
+    host_name = host.rsplit(":", 1)[0].strip("[]") if not host.startswith("[") else host.split("]")[0].strip("[")
+    return (parsed.hostname or "") in LOOPBACK and host_name in LOOPBACK
 
 
 @api.middleware("http")
@@ -30,7 +40,7 @@ async def guard_writes(request: Request, call_next):
         if request.headers.get(CLIENT_HEADER) != "dashboard":
             return JSONResponse(status_code=403, content={"detail": "Write requests must come from the dashboard."})
         origin = request.headers.get("origin")
-        if origin and urlparse(origin).netloc != request.headers.get("host", ""):
+        if origin and not _same_origin(origin, request.headers.get("host", "")):
             return JSONResponse(status_code=403, content={"detail": "Cross-origin write rejected."})
     return await call_next(request)
 
