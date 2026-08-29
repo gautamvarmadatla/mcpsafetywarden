@@ -1,155 +1,187 @@
-import { useState } from "react";
+import { useEffect, useMemo } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import useSWR from "swr";
-import { api } from "@/api/client";
-import { Card } from "@/components/ui/Card";
-import { RiskBadge } from "@/components/ui/Badge";
-import { Table, Thead, Tbody, Th, Td, Tr } from "@/components/ui/Table";
-import { PageLoading, Empty } from "@/components/ui/Loading";
-import { relativeTime } from "@/lib/utils";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { api } from "@/lib/api";
+import { useScans } from "@/lib/scans";
+import { relativeTime, humanize } from "@/lib/format";
+import type { Finding } from "@/lib/types";
+import Severity, { normLevel, RANK, type Level } from "@/components/ui/Severity";
+import Seg from "@/components/ui/Seg";
+import Button from "@/components/ui/Button";
+import FindingPanel from "@/components/FindingPanel";
+import { Empty, ErrorBanner, SkeletonRows } from "@/components/ui/States";
+import { isTyping } from "@/components/Shell";
 
-const TABS = ["Tool Findings", "Server Risks"] as const;
+const LEVELS: (Level | "ALL")[] = ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"];
+const keyOf = (f: Finding) => `${f.server_id}::${f.name}`;
 
 export default function Findings() {
-  const [tab, setTab] = useState<(typeof TABS)[number]>("Tool Findings");
-  const [riskFilter, setRiskFilter] = useState("");
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const navigate = useNavigate();
+  const scans = useScans();
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab") === "server" ? "server" : "tool";
+  const sev = (params.get("severity")?.toUpperCase() as Level | undefined) ?? "ALL";
+  const open = params.get("open");
+  const sel = params.get("sel");
 
-  const params: Record<string, string> = { limit: "500" };
-  if (riskFilter) params.risk_level = riskFilter;
+  const { data, error, isLoading, mutate } = useSWR(["findings", ""], () => api.findings(), { refreshInterval: 60000 });
 
-  const { data, isLoading } = useSWR(
-    ["findings", riskFilter],
-    () => api.findings(params),
-    { refreshInterval: 60_000 }
+  const update = (patch: Record<string, string | null>, replace = true) => {
+    const next = new URLSearchParams(params);
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null) next.delete(k);
+      else next.set(k, v);
+    }
+    setParams(next, { replace });
+  };
+
+  const sorted = useMemo(
+    () =>
+      [...(data?.items ?? [])].sort(
+        (a, b) => RANK[normLevel(b.risk_level)] - RANK[normLevel(a.risk_level)] || (b.scanned_at ?? "").localeCompare(a.scanned_at ?? "")
+      ),
+    [data]
+  );
+  const visible = sev === "ALL" ? sorted : sorted.filter((f) => normLevel(f.risk_level) === sev);
+  const openFinding = open ? sorted.find((f) => keyOf(f) === open) ?? null : null;
+  const serverRisks = useMemo(
+    () => [...(data?.server_risks ?? [])].sort((a, b) => RANK[normLevel(b.risk_level)] - RANK[normLevel(a.risk_level)]),
+    [data]
   );
 
-  const d = data as any;
-  const findings: any[] = d?.items ?? [];
-  const serverRisks: any[] = d?.server_risks ?? [];
+  useEffect(() => {
+    if (tab !== "tool") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (isTyping() || e.metaKey || e.ctrlKey || e.altKey || document.querySelector(".pal-wrap.on, .dialog-wrap")) return;
+      if (e.key !== "j" && e.key !== "k" && e.key !== "Enter") return;
+      const keys = visible.map(keyOf);
+      if (!keys.length) return;
+      const cur = keys.indexOf(sel ?? "");
+      if (e.key === "Enter") {
+        if (cur >= 0) update({ open: keys[cur] }, false);
+        return;
+      }
+      e.preventDefault();
+      const next = e.key === "j" ? Math.min(cur + 1, keys.length - 1) : Math.max(cur - 1, 0);
+      update({ sel: keys[next], ...(open ? { open: keys[next] } : {}) });
+      document.querySelector(`[data-key="${CSS.escape(keys[next])}"]`)?.scrollIntoView({ block: "nearest" });
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
+
+  const counts = data?.counts ?? {};
+  const total = sorted.length;
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Security Findings</h1>
-        <select
-          value={riskFilter}
-          onChange={(e) => setRiskFilter(e.target.value)}
-          className="px-3 py-1.5 text-sm bg-card border border-border rounded-md focus:outline-none text-foreground"
-        >
-          <option value="">All risk levels</option>
-          <option value="CRITICAL">Critical</option>
-          <option value="HIGH">High</option>
-          <option value="MEDIUM">Medium</option>
-          <option value="LOW">Low</option>
-        </select>
+    <div className="wrap">
+      <div className="ph">
+        <div>
+          <h1>Security findings</h1>
+          <div className="sub">From the latest scan of each server, sorted by severity.</div>
+        </div>
+        <Button loading={scans.isBusy()} onClick={() => scans.requestScan("all")}>
+          Scan all servers
+        </Button>
       </div>
 
-      <div className="flex gap-1 border-b border-border">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm transition-colors border-b-2 -mb-px ${
-              tab === t
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {t} {t === "Tool Findings" ? `(${findings.length})` : `(${serverRisks.length})`}
-          </button>
-        ))}
+      <div className="tabs">
+        <button className={tab === "tool" ? "on" : ""} onClick={() => update({ tab: null })}>
+          Tool findings <span className="c">{total}</span>
+        </button>
+        <button className={tab === "server" ? "on" : ""} onClick={() => update({ tab: "server", open: null })}>
+          Server risks <span className="c">{serverRisks.length}</span>
+        </button>
       </div>
 
-      {isLoading ? (
-        <PageLoading />
-      ) : tab === "Tool Findings" ? (
-        findings.length === 0 ? (
-          <Empty message="No findings. Run a security scan first." />
+      {error && <ErrorBanner error={error} onRetry={() => mutate()} />}
+
+      {isLoading && !data ? (
+        <SkeletonRows />
+      ) : tab === "server" ? (
+        serverRisks.length === 0 ? (
+          <Empty title="No server-level risks">Risks that span several tools on one server appear here after a scan.</Empty>
         ) : (
-          <Card className="p-0">
-            <div className="divide-y divide-border/50">
-              {findings.map((f: any, i: number) => (
-                <div key={i} className="px-4 py-3">
-                  <button
-                    className="w-full flex items-start gap-3 text-left"
-                    onClick={() => setExpanded(expanded === i ? null : i)}
-                  >
-                    {expanded === i ? (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-mono font-medium">{f.name}</span>
-                        <RiskBadge level={f.risk_level} />
-                        <span className="text-xs text-muted-foreground font-mono">{f.server_id}</span>
-                        {(f.risk_tags ?? []).map((tag: string) => (
-                          <span
-                            key={tag}
-                            className="text-xs text-muted-foreground bg-accent px-1.5 py-0.5 rounded"
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5 truncate">{f.finding}</p>
-                    </div>
-                    <span className="text-xs text-muted-foreground flex-shrink-0">
-                      {f.scanned_at && relativeTime(f.scanned_at)}
-                    </span>
-                  </button>
-
-                  {expanded === i && (
-                    <div className="ml-7 mt-3 space-y-2.5">
-                      {f.finding && (
-                        <div>
-                          <p className="text-xs font-medium text-foreground mb-1">Finding</p>
-                          <p className="text-xs text-muted-foreground">{f.finding}</p>
-                        </div>
-                      )}
-                      {f.exploitation_scenario && (
-                        <div>
-                          <p className="text-xs font-medium text-orange-400 mb-1">Exploitation</p>
-                          <p className="text-xs text-muted-foreground">{f.exploitation_scenario}</p>
-                        </div>
-                      )}
-                      {f.remediation && (
-                        <div>
-                          <p className="text-xs font-medium text-green-400 mb-1">Remediation</p>
-                          <p className="text-xs text-muted-foreground">{f.remediation}</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
+          serverRisks.map((r, i) => (
+            <div
+              key={i}
+              className="frow"
+              style={{ gridTemplateColumns: "104px 1fr 200px" }}
+              role="link"
+              tabIndex={0}
+              onClick={() => navigate(`/servers/${encodeURIComponent(r.server_id)}?tab=scan`)}
+              onKeyDown={(e) => e.key === "Enter" && navigate(`/servers/${encodeURIComponent(r.server_id)}?tab=scan`)}
+            >
+              <Severity level={r.risk_level} />
+              <div style={{ minWidth: 0 }}>
+                <div className="ttl" style={{ whiteSpace: "normal", fontWeight: 400 }}>
+                  {r.risk}
                 </div>
-              ))}
-            </div>
-          </Card>
-        )
-      ) : serverRisks.length === 0 ? (
-        <Empty message="No server-level risks found." />
-      ) : (
-        <Card className="p-0">
-          <div className="divide-y divide-border/50">
-            {serverRisks.map((r: any, i: number) => (
-              <div key={i} className="px-4 py-3 flex items-start gap-3">
-                <RiskBadge level={r.risk_level} />
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">{r.risk}</p>
-                  {r.tools_involved?.length > 0 && (
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Tools: {r.tools_involved.join(", ")}
-                    </p>
-                  )}
-                  <p className="text-xs text-muted-foreground mt-0.5 font-mono">{r.server_id}</p>
-                </div>
+                {!!r.tools_involved?.length && <div className="where mono">{r.tools_involved.join(" · ")}</div>}
               </div>
-            ))}
+              <div className="mono muted" style={{ textAlign: "right" }}>
+                {r.server_id}
+              </div>
+            </div>
+          ))
+        )
+      ) : total === 0 ? (
+        <Empty title="No findings" action={<Button variant="primary" onClick={() => scans.requestScan("all")}>Scan all servers</Button>}>
+          Findings appear here after a security scan. Scans probe each server's tools for injection, exfiltration and destructive behaviour.
+        </Empty>
+      ) : (
+        <>
+          <div className="toolbar">
+            <Seg
+              label="Severity"
+              options={LEVELS.map((l) => ({
+                value: l,
+                label: l === "ALL" ? "All" : l[0] + l.slice(1).toLowerCase(),
+                count: l === "ALL" ? total : counts[l] ?? 0,
+              }))}
+              value={sev}
+              onChange={(v) => update({ severity: v === "ALL" ? null : v.toLowerCase() })}
+            />
+            <span className="sp" />
+            <span className="muted" style={{ fontSize: 13 }}>
+              Move with <span className="kbd">j</span> <span className="kbd">k</span>, open with <span className="kbd">Enter</span>
+            </span>
           </div>
-        </Card>
+          {visible.length === 0 && <Empty title={`No ${sev.toLowerCase()} findings`} />}
+          {visible.map((f) => {
+            const k = keyOf(f);
+            return (
+              <div
+                key={k}
+                data-key={k}
+                className={`frow${sel === k || open === k ? " sel" : ""}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => update({ open: k, sel: k }, false)}
+                onKeyDown={(e) => e.key === "Enter" && update({ open: k, sel: k }, false)}
+              >
+                <Severity level={f.risk_level} />
+                <div style={{ minWidth: 0 }}>
+                  <div className="ttl">{f.finding || f.name}</div>
+                  <div className="where mono">
+                    {f.server_id}.{f.name}
+                  </div>
+                </div>
+                <div className="tags">
+                  {(f.risk_tags ?? []).slice(0, 3).map((t) => (
+                    <span key={t} className="tag">
+                      {humanize(t)}
+                    </span>
+                  ))}
+                </div>
+                <div className="time">{relativeTime(f.scanned_at)}</div>
+              </div>
+            );
+          })}
+        </>
       )}
+
+      <FindingPanel finding={openFinding} onClose={() => update({ open: null })} />
     </div>
   );
 }
