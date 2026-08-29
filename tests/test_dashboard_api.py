@@ -59,6 +59,14 @@ def test_cross_origin_write_is_rejected(client):
     assert r.status_code == 403
 
 
+def test_loopback_dev_proxy_origin_is_allowed(client):
+    body = {"server_id": "alpha", "tool_name": "read_file", "policy": "allow"}
+    local = {**HEADERS, "origin": "http://localhost:5173", "host": "127.0.0.1:7070"}
+    assert client.post("/api/policies", json=body, headers=local).status_code == 200
+    rebound = {**HEADERS, "origin": "http://attacker.example:7070", "host": "127.0.0.1:7070"}
+    assert client.post("/api/policies", json=body, headers=rebound).status_code == 403
+
+
 def test_tool_search_and_policy_filter_are_paginated_in_sql(client):
     r = client.get("/api/tools", params={"q": "file"}).json()
     assert r["total"] == 2
