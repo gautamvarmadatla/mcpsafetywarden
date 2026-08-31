@@ -429,6 +429,7 @@ def get_runs(
     end: Optional[str] = None,
     after_id: Optional[int] = None,
     limit: int = 100,
+    before_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     conn = get_connection()
     try:
@@ -452,6 +453,9 @@ def get_runs(
         if after_id:
             clauses.append("tr.run_id > ?")
             params.append(after_id)
+        if before_id:
+            clauses.append("tr.run_id < ?")
+            params.append(before_id)
         where = "WHERE " + " AND ".join(clauses) if clauses else ""
 
         total = conn.execute(
@@ -467,7 +471,7 @@ def get_runs(
             FROM tool_runs tr
             INNER JOIN tools t ON tr.tool_id = t.tool_id
             {where}
-            ORDER BY tr.timestamp DESC
+            ORDER BY tr.timestamp DESC, tr.run_id DESC
             LIMIT ?
             """,
             params + [limit],
