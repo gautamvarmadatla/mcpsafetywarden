@@ -430,6 +430,7 @@ def get_runs(
     after_id: Optional[int] = None,
     limit: int = 100,
     before_id: Optional[int] = None,
+    before_ts: Optional[str] = None,
 ) -> Dict[str, Any]:
     conn = get_connection()
     try:
@@ -453,7 +454,10 @@ def get_runs(
         if after_id:
             clauses.append("tr.run_id > ?")
             params.append(after_id)
-        if before_id:
+        if before_ts and before_id:
+            clauses.append("(tr.timestamp < ? OR (tr.timestamp = ? AND tr.run_id < ?))")
+            params.extend([before_ts, before_ts, before_id])
+        elif before_id:
             clauses.append("tr.run_id < ?")
             params.append(before_id)
         where = "WHERE " + " AND ".join(clauses) if clauses else ""

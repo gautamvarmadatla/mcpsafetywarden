@@ -175,6 +175,7 @@ def runs(
     end: Optional[str] = Query(None),
     after_id: Optional[int] = Query(None),
     before_id: Optional[int] = Query(None),
+    before_ts: Optional[str] = Query(None),
     limit: int = Query(100, le=500),
 ):
     return _db.get_runs(
@@ -185,6 +186,7 @@ def runs(
         end=end,
         after_id=after_id,
         before_id=before_id,
+        before_ts=before_ts,
         limit=limit,
     )
 
