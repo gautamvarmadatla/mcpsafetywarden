@@ -165,3 +165,11 @@ def test_runs_stats_bucket_recent_runs(client):
     assert sum(b["failures"] for b in r["series"]) == 1
     hour = datetime.now(timezone.utc) - timedelta(hours=1)
     assert all(b["hour"] >= hour.strftime("%Y-%m-%dT00:00:00")[:10] for b in r["series"])
+
+
+def test_runs_page_backwards_with_before_id(client):
+    first = client.get("/api/runs", params={"limit": 1}).json()
+    assert first["total"] == 2 and len(first["items"]) == 1
+    older = client.get("/api/runs", params={"limit": 1, "before_id": first["items"][0]["run_id"]}).json()
+    assert len(older["items"]) == 1
+    assert older["items"][0]["run_id"] < first["items"][0]["run_id"]
