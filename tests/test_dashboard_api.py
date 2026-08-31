@@ -173,3 +173,19 @@ def test_runs_page_backwards_with_before_id(client):
     older = client.get("/api/runs", params={"limit": 1, "before_id": first["items"][0]["run_id"]}).json()
     assert len(older["items"]) == 1
     assert older["items"][0]["run_id"] < first["items"][0]["run_id"]
+
+
+def test_runs_cursor_follows_timestamp_order(client):
+    from mcpsafetywarden.core import database
+
+    conn = database.get_connection()
+    ids = [r[0] for r in conn.execute("SELECT run_id FROM tool_runs ORDER BY run_id").fetchall()]
+    conn.execute("UPDATE tool_runs SET timestamp=? WHERE run_id=?", ("2026-01-02T00:00:00+00:00", ids[0]))
+    conn.execute("UPDATE tool_runs SET timestamp=? WHERE run_id=?", ("2026-01-01T00:00:00+00:00", ids[1]))
+    conn.commit()
+    conn.close()
+
+    first = client.get("/api/runs", params={"limit": 1}).json()["items"][0]
+    assert first["run_id"] == ids[0]
+    rest = client.get("/api/runs", params={"limit": 5, "before_id": first["run_id"], "before_ts": first["timestamp"]}).json()
+    assert [r["run_id"] for r in rest["items"]] == [ids[1]]
