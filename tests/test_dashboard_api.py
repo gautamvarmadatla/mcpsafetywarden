@@ -189,3 +189,10 @@ def test_runs_cursor_follows_timestamp_order(client):
     assert first["run_id"] == ids[0]
     rest = client.get("/api/runs", params={"limit": 5, "before_id": first["run_id"], "before_ts": first["timestamp"]}).json()
     assert [r["run_id"] for r in rest["items"]] == [ids[1]]
+
+
+def test_scan_lookup_can_return_null_for_unscanned_servers(client):
+    assert client.get("/api/servers/beta/scan").status_code == 404
+    r = client.get("/api/servers/beta/scan", params={"missing_ok": True})
+    assert r.status_code == 200 and r.json() is None
+    assert client.get("/api/servers/alpha/scan", params={"missing_ok": True}).json()["overall_risk_level"] == "HIGH"

@@ -97,9 +97,11 @@ def server_tools(
 
 
 @api.get("/api/servers/{server_id}/scan")
-def server_scan(server_id: str):
+def server_scan(server_id: str, missing_ok: bool = Query(False)):
     scan = _db.get_latest_scan(server_id)
     if not scan:
+        if missing_ok:
+            return None
         raise HTTPException(404, "No scan found for this server")
     return scan
 
