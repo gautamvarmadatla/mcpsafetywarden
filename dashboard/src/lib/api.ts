@@ -71,7 +71,7 @@ export const api = {
 
   servers: () => get<ServerRow[]>("/api/servers"),
   server: (id: string) => get<ServerDetail>(`/api/servers/${enc(id)}`),
-  serverScan: (id: string) => get<Scan>(`/api/servers/${enc(id)}/scan`),
+  serverScan: (id: string) => get<Scan | null>(`/api/servers/${enc(id)}/scan`, { missing_ok: true }),
   serverSnapshots: (id: string) => get<Snapshot[]>(`/api/servers/${enc(id)}/snapshots`),
 
   tools: (params?: Params) => get<Paged<Tool>>("/api/tools", params),
