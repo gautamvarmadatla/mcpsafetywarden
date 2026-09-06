@@ -89,6 +89,7 @@ export const api = {
   policies: () => get<PolicyRow[]>("/api/policies"),
   setPolicy: (server_id: string, tool_name: string, policy: Policy) =>
     request<{ ok: boolean }>("POST", "/api/policies", { server_id, tool_name, policy }),
+  bulkBlockHigh: () => request<{ blocked: { server_id: string; tool_name: string }[]; count: number }>("POST", "/api/policies/bulk-block-high"),
   deletePolicy: (serverId: string, toolName: string) =>
     request<{ ok: boolean }>("DELETE", `/api/policies/${enc(serverId)}/${enc(toolName)}`),
 
