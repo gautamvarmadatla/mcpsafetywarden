@@ -24,10 +24,12 @@ export default function Servers() {
   const { data: activity } = useSWR(["activity", 7], () => api.activity(7));
 
   const setAdd = (open: boolean) => {
-    const next = new URLSearchParams(params);
-    if (open) next.set("add", "1");
-    else next.delete("add");
-    setParams(next, { replace: true });
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (open) next.set("add", "1");
+      else next.delete("add");
+      return next;
+    }, { replace: true });
   };
 
   const rows = useMemo(() => {

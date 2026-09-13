@@ -27,12 +27,14 @@ export default function Findings() {
   const { data, error, isLoading, mutate } = useSWR(["findings", ""], () => api.findings(), { refreshInterval: 60000 });
 
   const update = (patch: Record<string, string | null>, replace = true) => {
-    const next = new URLSearchParams(params);
-    for (const [k, v] of Object.entries(patch)) {
-      if (v === null) next.delete(k);
-      else next.set(k, v);
-    }
-    setParams(next, { replace });
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === null) next.delete(k);
+        else next.set(k, v);
+      }
+      return next;
+    }, { replace });
   };
 
   const sorted = useMemo(
@@ -54,6 +56,7 @@ export default function Findings() {
     const onKey = (e: KeyboardEvent) => {
       if (isTyping() || e.metaKey || e.ctrlKey || e.altKey || document.querySelector(".pal-wrap.on, .dialog-wrap")) return;
       if (e.key !== "j" && e.key !== "k" && e.key !== "Enter") return;
+      if (e.key === "Enter" && (document.activeElement as HTMLElement | null)?.closest("button, a, [role=button], [role=link]")) return;
       const keys = visible.map(keyOf);
       if (!keys.length) return;
       const cur = keys.indexOf(sel ?? "");
@@ -64,7 +67,7 @@ export default function Findings() {
       e.preventDefault();
       const next = e.key === "j" ? Math.min(cur + 1, keys.length - 1) : Math.max(cur - 1, 0);
       update({ sel: keys[next], ...(open ? { open: keys[next] } : {}) });
-      document.querySelector(`[data-key="${CSS.escape(keys[next])}"]`)?.scrollIntoView({ block: "nearest" });
+      document.querySelector<HTMLElement>(`[data-key="${CSS.escape(keys[next])}"]`)?.focus();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

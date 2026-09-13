@@ -141,10 +141,12 @@ export default function Policies() {
 
   const rows = (data ?? []).filter((p) => filter === "all" || p.policy === filter);
   const setOpen = (k: string | null) => {
-    const next = new URLSearchParams(params);
-    if (k) next.set("open", k);
-    else next.delete("open");
-    setParams(next, { replace: true });
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (k) next.set("open", k);
+      else next.delete("open");
+      return next;
+    }, { replace: true });
   };
 
   const bulkBlock = async () => {
