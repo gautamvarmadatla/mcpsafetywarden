@@ -42,10 +42,12 @@ export default function History() {
   }, [server, tool, result]);
 
   const setParam = (k: string, v: string | null) => {
-    const next = new URLSearchParams(params);
-    if (v === null || v === "") next.delete(k);
-    else next.set(k, v);
-    setParams(next, { replace: true });
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (v === null || v === "") next.delete(k);
+      else next.set(k, v);
+      return next;
+    }, { replace: true });
   };
 
   const all = useMemo(() => [...(data?.items ?? []), ...older], [data, older]);
