@@ -4,7 +4,7 @@ import useSWR from "swr";
 import { api, errorMessage } from "@/lib/api";
 import type { Policy } from "@/lib/types";
 import { buildGraph, RISK_REL, type Graph as G, type GNode } from "@/graph/model";
-import { buildModel, chainFor, highlight, layout, pathSteps, riskyServers, scopeSet, type ChainStep, type FilterKey, type ViewState } from "@/graph/layout";
+import { buildModel, chainFor, focusServers, highlight, layout, pathSteps, scopeSet, type ChainStep, type FilterKey, type ViewState } from "@/graph/layout";
 import { GraphEngine, REL_LABEL, glyph } from "@/graph/engine";
 import Severity from "@/components/ui/Severity";
 import Button from "@/components/ui/Button";
@@ -96,7 +96,9 @@ export default function Graph() {
 
   const policyMap = useMemo(() => new Map<string, Policy>((policies ?? []).map((p) => [`${p.server_id}::${p.tool_name}`, p.policy])), [policies]);
   const graph = useMemo(() => (data ? buildGraph(data, policyMap) : null), [data, policyMap]);
-  const risky = useMemo(() => (graph ? riskyServers(graph) : new Set<string>()), [graph]);
+  const focus = useMemo(() => (graph ? focusServers(graph) : null), [graph]);
+  const risky = useMemo(() => focus?.ids ?? new Set<string>(), [focus]);
+  const focusLabel = focus?.kind === "largest" ? `Largest ${risky.size}` : focus && focus.total > risky.size ? `Top ${risky.size} at risk` : "With risk";
   const serverCount = useMemo(() => graph?.L.filter((n) => n.type === "server").length ?? 0, [graph]);
   const model = useMemo(
     () => (graph ? buildModel(graph, { ...st, sel: null, hover: null }) : null),
@@ -241,7 +243,7 @@ export default function Graph() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (document.querySelector(".pal-wrap.on, .dialog-wrap")) return;
+      if (e.defaultPrevented || document.querySelector(".pal-wrap.on, .dialog-wrap")) return;
       const typing = isTyping();
       if (e.key === "Escape") {
         if (typing) {
@@ -272,6 +274,8 @@ export default function Graph() {
 
   const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== "Enter" || !graph) return;
+    e.preventDefault();
+    e.stopPropagation();
     const needle = q.trim().toLowerCase();
     if (!needle) return;
     const order = ["server", "tool", "finding", "client", "technique", "package", "credential", "cve"];
@@ -497,7 +501,7 @@ export default function Graph() {
                   setSt((s) => ({ ...s, scope: [], sel: null, path: null }));
                 }}
               >
-                {model?.limited ? "Servers with risk" : "All servers"}
+                {model?.limited ? (focus?.kind === "largest" ? `Largest ${risky.size} servers` : focus && focus.total > risky.size ? `Top ${risky.size} servers at risk` : "Servers with risk") : "All servers"}
               </button>
               {st.scope.map((id, i) => {
                 const n = graph!.N[id];
@@ -527,7 +531,7 @@ export default function Graph() {
               <Seg
                 label="Servers"
                 options={[
-                  { value: "risk", label: "With risk", count: risky.size },
+                  { value: "risk", label: focusLabel },
                   { value: "all", label: "All", count: serverCount },
                 ]}
                 value={st.serverScope}
