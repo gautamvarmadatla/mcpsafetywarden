@@ -196,3 +196,26 @@ def test_scan_lookup_can_return_null_for_unscanned_servers(client):
     r = client.get("/api/servers/beta/scan", params={"missing_ok": True})
     assert r.status_code == 200 and r.json() is None
     assert client.get("/api/servers/alpha/scan", params={"missing_ok": True}).json()["overall_risk_level"] == "HIGH"
+
+
+def test_discovered_servers_never_expose_env_or_headers(client):
+    from mcpsafetywarden.core import database
+
+    database.upsert_discovered_server(
+        {
+            "discovery_id": "d-1",
+            "client": "cursor",
+            "client_name": "Cursor",
+            "scope": "user",
+            "config_path": "~/.cursor/mcp.json",
+            "server_name": "gamma",
+            "transport": "stdio",
+            "command": "gamma-server",
+            "env": {"API_TOKEN": "secret-value"},
+            "headers": {"Authorization": "Bearer secret"},
+        }
+    )
+    rows = client.get("/api/discovered").json()
+    assert rows and rows[0]["server_name"] == "gamma"
+    assert "env_json" not in rows[0] and "headers_json" not in rows[0]
+    assert "secret" not in str(rows)
