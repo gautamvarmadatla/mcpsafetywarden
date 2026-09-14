@@ -204,7 +204,7 @@ export class GraphEngine {
 
     const v0 = { ...this.view };
     let v1 = v0;
-    if (opts.fit || !Object.keys(prev).length) v1 = this.fitView(P, opts.ids);
+    if (opts.fit || !Object.keys(prev).length) v1 = this.fitView(P, opts.ids, !opts.ids);
     else if (opts.anchor && prev[opts.anchor] && P[opts.anchor])
       v1 = { k: v0.k, x: v0.x + v0.k * (prev[opts.anchor].x - P[opts.anchor].x), y: v0.y + v0.k * (prev[opts.anchor].y - P[opts.anchor].y) };
     else if (opts.focus && P[opts.focus]) {
@@ -389,12 +389,17 @@ export class GraphEngine {
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
 
-  private fitView(P: Record<string, Box>, ids?: string[]): View {
+  private fitView(P: Record<string, Box>, ids?: string[], readable = false): View {
     const b = this.bounds(P, ids);
     const cw = this.root.clientWidth || 800;
     const ch = this.root.clientHeight || 600;
     const pd = 40;
-    const k = Math.max(0.25, Math.min((cw - pd * 2) / b.w, (ch - pd * 2) / b.h, 1.15));
+    const fitW = (cw - pd * 2) / b.w;
+    const k = Math.max(0.25, Math.min(fitW, (ch - pd * 2) / b.h, 1.15));
+    if (readable && k < 0.55) {
+      const kr = Math.max(0.55, Math.min(fitW, 1.15));
+      return { k: kr, x: Math.max(pd - b.x * kr, (cw - b.w * kr) / 2 - b.x * kr), y: pd - b.y * kr };
+    }
     return { k, x: (cw - b.w * k) / 2 - b.x * k, y: (ch - b.h * k) / 2 - b.y * k };
   }
 

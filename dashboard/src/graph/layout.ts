@@ -91,6 +91,30 @@ export function riskyServers(g: Graph): Set<string> {
   return out;
 }
 
+export const FOCUS_LIMIT = 40;
+
+export function focusServers(g: Graph): { ids: Set<string>; kind: "risk" | "largest"; total: number } | null {
+  const risky = riskyServers(g);
+  if (risky.size) {
+    if (risky.size <= FOCUS_LIMIT) return { ids: risky, kind: "risk", total: risky.size };
+    const score = new Map<string, number>();
+    for (const id of risky) score.set(id, RANK[g.N[id]?.sev ?? "NONE"] * 1000);
+    for (const n of g.L) if (n.type === "tool" && n.server && n.sev) score.set(n.server, (score.get(n.server) ?? 0) + RANK[n.sev] * 50);
+    for (const e of g.E) {
+      if (!RISK_REL.has(e.rel)) continue;
+      for (const id of [g.N[e.s]?.server, g.N[e.t]?.server]) if (id && score.has(id)) score.set(id, score.get(id)! + 1);
+    }
+    const top = [...risky].sort((a, b) => (score.get(b) ?? 0) - (score.get(a) ?? 0) || a.localeCompare(b)).slice(0, FOCUS_LIMIT);
+    return { ids: new Set(top), kind: "risk", total: risky.size };
+  }
+  const servers = g.L.filter((n) => n.type === "server");
+  if (servers.length <= FOCUS_LIMIT) return null;
+  const tools = new Map<string, number>();
+  for (const n of g.L) if (n.type === "tool" && n.server) tools.set(n.server, (tools.get(n.server) ?? 0) + 1);
+  const top = [...servers].sort((a, b) => (tools.get(b.id) ?? 0) - (tools.get(a.id) ?? 0) || a.label.localeCompare(b.label)).slice(0, FOCUS_LIMIT);
+  return { ids: new Set(top.map((n) => n.id)), kind: "largest", total: servers.length };
+}
+
 export function buildModel(g: Graph, st: ViewState): Model {
   const sc = st.scope.length ? st.scope[st.scope.length - 1] : null;
   const inS = sc ? scopeSet(g, sc) : null;
@@ -101,8 +125,9 @@ export function buildModel(g: Graph, st: ViewState): Model {
     if (n?.type === "tool" && n.parent) pexp.add(n.parent);
     if (n?.type === "finding" && n.parent && g.N[n.parent]?.parent) pexp.add(g.N[n.parent].parent!);
   }
-  const risky = riskyServers(g);
-  const limited = st.serverScope === "risk" && !sc && !path && risky.size > 0;
+  const focus = focusServers(g);
+  const risky = focus?.ids ?? new Set<string>();
+  const limited = st.serverScope === "risk" && !sc && !path && !!focus && focus.ids.size < g.L.filter((n) => n.type === "server").length;
   const exp = (sid: string) => !!sc || pexp.has(sid) || st.collapsed[sid] === false;
 
   const memo = new Map<string, string | null>();

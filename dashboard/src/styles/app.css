@@ -256,7 +256,7 @@
 .gmini rect{fill:var(--border-strong)}
 .gmini rect.r{fill:var(--crit);opacity:.55}
 #gminiview{fill:rgba(127,127,127,.08);stroke:var(--text-2);stroke-width:1}
-.ghint{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap;pointer-events:none}
+.ghint{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:6px;white-space:nowrap;pointer-events:none;background:color-mix(in srgb,var(--canvas) 88%,transparent);padding:4px 10px;border-radius:6px}
 .ghint .kbd{margin-left:6px}
 .gins{border-left:1px solid var(--border);min-height:0;overflow:auto;padding:22px 22px 28px;background:var(--bg)}
 .gins h2{font-size:18px;line-height:26px;font-weight:600;letter-spacing:-.01em;margin:6px 0 14px;word-break:break-word}

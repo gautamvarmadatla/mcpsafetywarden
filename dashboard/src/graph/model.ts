@@ -135,6 +135,11 @@ export function buildGraph(data: GraphData, policies: Map<string, Policy>): Grap
     N[o.id] = n;
   }
 
+  for (const n of Object.values(N)) {
+    if (n.type !== "tool" || !n.server || N[n.server]) continue;
+    N[n.server] = { id: n.server, type: "server", label: n.server, sub: "not in graph yet", server: n.server, meta: {}, idx: idx++ };
+  }
+
   const E: GEdge[] = [];
   const seen = new Set<string>();
   const add = (s: string, t: string, rel: string, meta: Record<string, unknown> = {}) => {
@@ -153,6 +158,7 @@ export function buildGraph(data: GraphData, policies: Map<string, Policy>): Grap
     else if (N[r.source] && N[r.target]) add(r.source, r.target, r.relation, r.metadata ?? {});
   }
   for (const c of configs) for (const cl of configIn[c] ?? []) for (const sv of configOut[c] ?? []) add(cl, sv, "declares");
+  for (const n of Object.values(N)) if (n.type === "tool" && n.server && N[n.server]?.sub === "not in graph yet") add(n.server, n.id, "exposes");
 
   for (const e of E) {
     const a = N[e.s];
