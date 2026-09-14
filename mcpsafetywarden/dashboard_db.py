@@ -634,6 +634,7 @@ def get_discovered() -> List[Dict]:
         rows = conn.execute(
             "SELECT * FROM discovered_servers WHERE registered_server_id IS NULL ORDER BY last_seen_at DESC"
         ).fetchall()
-        return [dict(r) for r in rows]
+        hidden = {"env_json", "headers_json"}
+        return [{k: r[k] for k in r.keys() if k not in hidden} for r in rows]
     finally:
         conn.close()
