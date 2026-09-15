@@ -219,3 +219,17 @@ def test_discovered_servers_never_expose_env_or_headers(client):
     assert rows and rows[0]["server_name"] == "gamma"
     assert "env_json" not in rows[0] and "headers_json" not in rows[0]
     assert "secret" not in str(rows)
+
+
+def test_static_files_and_spa_fallback(client):
+    from mcpsafetywarden import dashboard
+
+    if not (dashboard.STATIC_DIR / "index.html").exists():
+        pytest.skip("dashboard bundle not built")
+    assert "text/html" in client.get("/graph").headers["content-type"]
+    icon = dashboard.STATIC_DIR / "favicon.svg"
+    if icon.exists():
+        assert "svg" in client.get("/favicon.svg").headers["content-type"]
+    assert client.get("/api/does-not-exist").status_code == 404
+    leak = client.get("/%2e%2e/pyproject.toml")
+    assert "[project]" not in leak.text
