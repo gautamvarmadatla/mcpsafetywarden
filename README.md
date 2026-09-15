@@ -274,6 +274,7 @@ Set an LLM API key to include LLM-assisted tests; without one they are skipped a
 |---|---|
 | [docs/TOOLS.md](docs/TOOLS.md) | Full reference for all 25 MCP tools |
 | [docs/CLI.md](docs/CLI.md) | CLI subcommands, flags, and examples |
+| [docs/DASHBOARD.md](docs/DASHBOARD.md) | Local web dashboard: screens, scans, shortcuts and security model |
 | [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Kali, Burp Suite, and Snyk setup |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | stdio, HTTP, container, and gateway deployment |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common errors and fixes |

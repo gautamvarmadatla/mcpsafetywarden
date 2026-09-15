@@ -305,3 +305,11 @@ mcpsafetywarden onboard-discovered --client cursor --no-inspect --yes
 **Exit codes:**
 - `0`: success
 - `1`: error (tool not found, blocked by policy, unreachable server, invalid input)
+
+**`dashboard`**
+Launch the local web dashboard. See [DASHBOARD.md](DASHBOARD.md) for what each screen does.
+
+```bash
+mcpsafetywarden dashboard
+mcpsafetywarden dashboard --port 8080 --no-browser
+```
