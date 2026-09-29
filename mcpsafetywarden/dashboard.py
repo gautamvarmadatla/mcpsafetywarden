@@ -1,24 +1,48 @@
 """Web dashboard for mcpsafetywarden - FastAPI backend + static SPA."""
 
+import asyncio
+import json
 import logging
 import threading
 import webbrowser
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import dashboard_db as _db
 
 _log = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
+CLIENT_HEADER = "x-warden-client"
+
+LOOPBACK = {"localhost", "127.0.0.1", "::1"}
 
 api = FastAPI(title="mcpsafetywarden", version="1.0", docs_url=None, redoc_url=None)
-api.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+def _same_origin(origin: str, host: str) -> bool:
+    parsed = urlparse(origin)
+    if parsed.netloc == host:
+        return True
+    host_name = host.rsplit(":", 1)[0].strip("[]") if not host.startswith("[") else host.split("]")[0].strip("[")
+    return (parsed.hostname or "") in LOOPBACK and host_name in LOOPBACK
+
+
+@api.middleware("http")
+async def guard_writes(request: Request, call_next):
+    if request.method not in ("GET", "HEAD", "OPTIONS") and request.url.path.startswith("/api/"):
+        if request.headers.get(CLIENT_HEADER) != "dashboard":
+            return JSONResponse(status_code=403, content={"detail": "Write requests must come from the dashboard."})
+        origin = request.headers.get("origin")
+        if origin and not _same_origin(origin, request.headers.get("host", "")):
+            return JSONResponse(status_code=403, content={"detail": "Cross-origin write rejected."})
+    return await call_next(request)
 
 
 # ---------------------------------------------------------------------------
@@ -73,9 +97,11 @@ def server_tools(
 
 
 @api.get("/api/servers/{server_id}/scan")
-def server_scan(server_id: str):
+def server_scan(server_id: str, missing_ok: bool = Query(False)):
     scan = _db.get_latest_scan(server_id)
     if not scan:
+        if missing_ok:
+            return None
         raise HTTPException(404, "No scan found for this server")
     return scan
 
@@ -100,10 +126,18 @@ def tools(
     server_id: Optional[str] = Query(None),
     effect_class: Optional[str] = Query(None),
     policy: Optional[str] = Query(None),
+    q: Optional[str] = Query(None, max_length=200),
     page: int = Query(1, ge=1),
     limit: int = Query(50, le=200),
 ):
-    return _db.list_tools(server_id=server_id, effect_class=effect_class, policy=policy, page=page, limit=limit)
+    return _db.list_tools(
+        server_id=server_id, effect_class=effect_class, policy=policy, page=page, limit=limit, q=q or None
+    )
+
+
+@api.get("/api/tools/activity")
+def tools_activity(days: int = Query(7, ge=1, le=30), server_id: Optional[str] = Query(None)):
+    return _db.get_tool_activity(days=days, server_id=server_id)
 
 
 @api.get("/api/tools/{server_id}/{tool_name}")
@@ -142,6 +176,8 @@ def runs(
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
     after_id: Optional[int] = Query(None),
+    before_id: Optional[int] = Query(None),
+    before_ts: Optional[str] = Query(None),
     limit: int = Query(100, le=500),
 ):
     return _db.get_runs(
@@ -151,6 +187,8 @@ def runs(
         start=start,
         end=end,
         after_id=after_id,
+        before_id=before_id,
+        before_ts=before_ts,
         limit=limit,
     )
 
@@ -237,6 +275,162 @@ def discovered():
 
 
 # ---------------------------------------------------------------------------
+# Security scans (queued, one server at a time)
+# ---------------------------------------------------------------------------
+
+
+class ScanBody(BaseModel):
+    confirm_authorized: bool = False
+    server_ids: Optional[List[str]] = None
+
+
+_scan_state: Dict[str, Any] = {"current": None, "queue": [], "results": {}}
+_scan_worker: Optional[asyncio.Task] = None
+
+
+def _loads(raw: Any) -> Dict[str, Any]:
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        return {"error": "Unreadable response"}
+    return data if isinstance(data, dict) else {"result": data}
+
+
+def _scan_status() -> Dict[str, Any]:
+    return {
+        "current": _scan_state["current"],
+        "queue": list(_scan_state["queue"]),
+        "results": dict(_scan_state["results"]),
+    }
+
+
+async def _drain_scan_queue() -> None:
+    from .server import security_scan_server
+
+    while _scan_state["queue"]:
+        server_id = _scan_state["queue"].pop(0)
+        _scan_state["current"] = server_id
+        try:
+            data = _loads(await security_scan_server(server_id=server_id, confirm_authorized=True, background=False))
+            if data.get("error"):
+                result = {"status": "failed", "error": str(data["error"])}
+            else:
+                result = {"status": "completed", "overall_risk_level": data.get("overall_risk_level")}
+        except Exception as exc:
+            _log.error("dashboard scan failed for %s: %s", server_id, exc, exc_info=True)
+            result = {"status": "failed", "error": "Scan failed. Check the server logs."}
+        result["finished_at"] = datetime.now(timezone.utc).isoformat()
+        _scan_state["results"][server_id] = result
+        _scan_state["current"] = None
+        if len(_scan_state["results"]) > 1000:
+            oldest = sorted(_scan_state["results"].items(), key=lambda kv: kv[1].get("finished_at", ""))
+            for key, _ in oldest[:200]:
+                _scan_state["results"].pop(key, None)
+
+
+def _enqueue_scans(server_ids: List[str]) -> Dict[str, Any]:
+    global _scan_worker
+    queued, skipped = [], []
+    for server_id in server_ids:
+        if server_id == _scan_state["current"] or server_id in _scan_state["queue"]:
+            skipped.append(server_id)
+            continue
+        _scan_state["queue"].append(server_id)
+        queued.append(server_id)
+    if queued and (_scan_worker is None or _scan_worker.done()):
+        _scan_worker = asyncio.get_running_loop().create_task(_drain_scan_queue())
+    return {"queued": queued, "already_queued": skipped, **_scan_status()}
+
+
+def _require_authorization(body: ScanBody) -> None:
+    if not body.confirm_authorized:
+        raise HTTPException(400, "Confirm that you own these servers and are authorized to test them.")
+
+
+@api.post("/api/servers/{server_id}/scan")
+async def start_scan(server_id: str, body: ScanBody):
+    _require_authorization(body)
+    if not _db.get_server(server_id):
+        raise HTTPException(404, f"Server '{server_id}' not found")
+    return _enqueue_scans([server_id])
+
+
+@api.post("/api/scans")
+async def start_scans(body: ScanBody):
+    _require_authorization(body)
+    known = [s["server_id"] for s in _db.list_servers()]
+    wanted = body.server_ids if body.server_ids is not None else known
+    known_set = set(known)
+    return _enqueue_scans([s for s in wanted if s in known_set])
+
+
+@api.get("/api/scans/status")
+def scans_status():
+    return _scan_status()
+
+
+@api.delete("/api/scans/queue")
+def clear_scan_queue():
+    cleared = len(_scan_state["queue"])
+    _scan_state["queue"].clear()
+    return {"cleared": cleared, **_scan_status()}
+
+
+# ---------------------------------------------------------------------------
+# Registration and discovery
+# ---------------------------------------------------------------------------
+
+
+class RegisterBody(BaseModel):
+    server_id: str = Field(min_length=1, max_length=128)
+    transport: Optional[str] = None
+    command: Optional[str] = None
+    args: Optional[List[str]] = None
+    url: Optional[str] = None
+    env: Optional[Dict[str, str]] = None
+    headers: Optional[Dict[str, str]] = None
+    github_url: Optional[str] = None
+    auto_inspect: bool = True
+
+
+class OnboardBody(BaseModel):
+    discovery_ids: List[str] = Field(min_length=1)
+
+
+def _raise_on_error(data: Dict[str, Any]) -> Dict[str, Any]:
+    if data.get("error"):
+        raise HTTPException(400, str(data["error"]))
+    return data
+
+
+@api.post("/api/servers")
+async def register(body: RegisterBody):
+    from .server import register_server
+
+    if body.transport and body.transport not in ("stdio", "sse", "streamable_http"):
+        raise HTTPException(400, "transport must be stdio, sse or streamable_http")
+    if not body.command and not body.url:
+        raise HTTPException(400, "Provide a command for stdio servers or a URL for remote servers.")
+    return _raise_on_error(_loads(await register_server(**body.model_dump())))
+
+
+@api.post("/api/discover")
+async def discover():
+    from .server import discover_servers
+
+    return _raise_on_error(_loads(await discover_servers()))
+
+
+@api.post("/api/discovered/onboard")
+async def onboard_discovered(body: OnboardBody):
+    from .server import onboard_discovered_servers
+
+    return _raise_on_error(
+        _loads(await onboard_discovered_servers(discovery_ids=body.discovery_ids, auto_inspect=True))
+    )
+
+
+# ---------------------------------------------------------------------------
 # Static SPA serving
 # ---------------------------------------------------------------------------
 
@@ -247,6 +441,12 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
 
     @api.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str):
+        if full_path.startswith("api/"):
+            raise HTTPException(404, "Not found")
+        root = STATIC_DIR.resolve()
+        candidate = (root / full_path).resolve()
+        if full_path and candidate.is_file() and root in candidate.parents:
+            return FileResponse(str(candidate))
         return FileResponse(str(STATIC_DIR / "index.html"))
 else:
 

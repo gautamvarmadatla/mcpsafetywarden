@@ -90,7 +90,36 @@ def get_overview() -> Dict[str, Any]:
             "SELECT server_id, overall_risk_level, provider, scanned_at FROM security_scans ORDER BY scanned_at DESC LIMIT 5"
         ).fetchall()
 
+        finding_counts: Dict[str, int] = {}
+        tool_worst: Dict[str, str] = {}
+        rank = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
+        latest_rows = conn.execute(
+            """
+            SELECT ss.server_id, ss.tool_findings_json FROM security_scans ss
+            INNER JOIN (
+                SELECT server_id, MAX(scanned_at) as max_at FROM security_scans GROUP BY server_id
+            ) latest ON ss.server_id = latest.server_id AND ss.scanned_at = latest.max_at
+            """
+        ).fetchall()
+        for row in latest_rows:
+            for f in _j(row["tool_findings_json"], []):
+                level = str(f.get("risk_level") or "").upper()
+                if level not in rank:
+                    continue
+                finding_counts[level] = finding_counts.get(level, 0) + 1
+                key = f"{row['server_id']}::{f.get('name')}"
+                if rank[level] > rank.get(tool_worst.get(key, ""), 0):
+                    tool_worst[key] = level
+        tool_risk: Dict[str, int] = {}
+        for level in tool_worst.values():
+            tool_risk[level] = tool_risk.get(level, 0) + 1
+        tool_risk["NONE"] = max(0, tool_count - len(tool_worst))
+        last_scan = conn.execute("SELECT MAX(scanned_at) FROM security_scans").fetchone()[0]
+
         return {
+            "finding_counts": finding_counts,
+            "tool_risk_distribution": tool_risk,
+            "last_scan_at": last_scan,
             "server_count": server_count,
             "tool_count": tool_count,
             "blocked_tools": blocked_tools,
@@ -174,6 +203,7 @@ def list_tools(
     policy: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
+    q: Optional[str] = None,
 ) -> Dict[str, Any]:
     conn = get_connection()
     try:
@@ -185,13 +215,22 @@ def list_tools(
         if effect_class:
             where_clauses.append("bp.effect_class = ?")
             params.append(effect_class)
+        if policy == "none":
+            where_clauses.append("tp.policy IS NULL")
+        elif policy:
+            where_clauses.append("tp.policy = ?")
+            params.append(policy)
+        if q:
+            like = f"%{q}%"
+            where_clauses.append("(t.tool_name LIKE ? OR t.server_id LIKE ? OR (t.server_id || '.' || t.tool_name) LIKE ?)")
+            params.extend([like, like, like])
         where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+        joins = """
+            LEFT JOIN behavior_profiles bp ON t.tool_id = bp.tool_id
+            LEFT JOIN tool_policies tp ON t.server_id=tp.server_id AND t.tool_name=tp.tool_name
+        """
 
-        total_row = conn.execute(
-            f"SELECT COUNT(*) FROM tools t LEFT JOIN behavior_profiles bp ON t.tool_id=bp.tool_id {where_sql}",
-            params,
-        ).fetchone()
-        total = total_row[0]
+        total = conn.execute(f"SELECT COUNT(*) FROM tools t {joins} {where_sql}", params).fetchone()[0]
         offset = (page - 1) * limit
 
         rows = conn.execute(
@@ -201,8 +240,7 @@ def list_tools(
                    bp.output_size_p95_bytes, bp.run_count, bp.confidence_json,
                    tp.policy
             FROM tools t
-            LEFT JOIN behavior_profiles bp ON t.tool_id = bp.tool_id
-            LEFT JOIN tool_policies tp ON t.server_id=tp.server_id AND t.tool_name=tp.tool_name
+            {joins}
             {where_sql}
             ORDER BY t.server_id, t.tool_name
             LIMIT ? OFFSET ?
@@ -212,8 +250,6 @@ def list_tools(
 
         items = []
         for r in rows:
-            if policy and r["policy"] != policy:
-                continue
             items.append(
                 {
                     "tool_id": r["tool_id"],
@@ -352,6 +388,7 @@ def get_all_findings(
 
         tool_findings: List[Dict] = []
         server_risks: List[Dict] = []
+        counts: Dict[str, int] = {}
         for row in rows:
             if server_id and row["server_id"] != server_id:
                 continue
@@ -362,6 +399,8 @@ def get_all_findings(
                     "scanned_at": row["scanned_at"],
                     "provider": row["provider"],
                 }
+                level = str(entry.get("risk_level") or "UNKNOWN").upper()
+                counts[level] = counts.get(level, 0) + 1
                 if risk_level and entry.get("risk_level") != risk_level:
                     continue
                 tool_findings.append(entry)
@@ -373,6 +412,7 @@ def get_all_findings(
         return {
             "items": tool_findings[start : start + limit],
             "server_risks": server_risks,
+            "counts": counts,
             "total": total,
             "page": page,
             "limit": limit,
@@ -389,6 +429,8 @@ def get_runs(
     end: Optional[str] = None,
     after_id: Optional[int] = None,
     limit: int = 100,
+    before_id: Optional[int] = None,
+    before_ts: Optional[str] = None,
 ) -> Dict[str, Any]:
     conn = get_connection()
     try:
@@ -412,6 +454,12 @@ def get_runs(
         if after_id:
             clauses.append("tr.run_id > ?")
             params.append(after_id)
+        if before_ts and before_id:
+            clauses.append("(tr.timestamp < ? OR (tr.timestamp = ? AND tr.run_id < ?))")
+            params.extend([before_ts, before_ts, before_id])
+        elif before_id:
+            clauses.append("tr.run_id < ?")
+            params.append(before_id)
         where = "WHERE " + " AND ".join(clauses) if clauses else ""
 
         total = conn.execute(
@@ -427,7 +475,7 @@ def get_runs(
             FROM tool_runs tr
             INNER JOIN tools t ON tr.tool_id = t.tool_id
             {where}
-            ORDER BY tr.timestamp DESC
+            ORDER BY tr.timestamp DESC, tr.run_id DESC
             LIMIT ?
             """,
             params + [limit],
@@ -481,6 +529,37 @@ def get_runs_stats(hours: int = 24) -> Dict[str, Any]:
             )
 
         return {"series": series, "hours": hours}
+    finally:
+        conn.close()
+
+
+def get_tool_activity(days: int = 7, server_id: Optional[str] = None) -> Dict[str, Any]:
+    conn = get_connection()
+    try:
+        now = datetime.now(timezone.utc)
+        labels = [(now - timedelta(days=days - 1 - i)).strftime("%Y-%m-%d") for i in range(days)]
+        index = {d: i for i, d in enumerate(labels)}
+        cutoff = (now - timedelta(days=days)).isoformat()
+        sql = """
+            SELECT t.server_id, t.tool_name, substr(tr.timestamp, 1, 10) AS day, COUNT(*) AS cnt
+            FROM tool_runs tr INNER JOIN tools t ON tr.tool_id = t.tool_id
+            WHERE tr.timestamp > ?
+        """
+        params: List[Any] = [cutoff]
+        if server_id:
+            sql += " AND t.server_id = ?"
+            params.append(server_id)
+        sql += " GROUP BY t.server_id, t.tool_name, day"
+        tools: Dict[str, List[int]] = {}
+        servers: Dict[str, List[int]] = {}
+        for r in conn.execute(sql, params).fetchall():
+            i = index.get(r["day"])
+            if i is None:
+                continue
+            key = f"{r['server_id']}::{r['tool_name']}"
+            tools.setdefault(key, [0] * days)[i] += r["cnt"]
+            servers.setdefault(r["server_id"], [0] * days)[i] += r["cnt"]
+        return {"days": labels, "tools": tools, "servers": servers}
     finally:
         conn.close()
 
@@ -555,6 +634,7 @@ def get_discovered() -> List[Dict]:
         rows = conn.execute(
             "SELECT * FROM discovered_servers WHERE registered_server_id IS NULL ORDER BY last_seen_at DESC"
         ).fetchall()
-        return [dict(r) for r in rows]
+        hidden = {"env_json", "headers_json"}
+        return [{k: r[k] for k in r.keys() if k not in hidden} for r in rows]
     finally:
         conn.close()
