@@ -19,7 +19,7 @@ SERVER = "deepwiki-test"
 SERVER_URL = "https://mcp.deepwiki.com/mcp"
 TOOL_READ = "read_wiki_structure"
 TOOL_CONT = "read_wiki_contents"
-TOOL_ASK = "ask_question"
+TOOL_ASK = "ask_wiki_question"
 REPO = "modelcontextprotocol/python-sdk"
 
 

@@ -28,7 +28,7 @@ class TestReplay:
             await run_replay_test(
                 SERVER,
                 TOOL_READ,
-                args={"repo": REPO},
+                args={"repoName": REPO},
                 approved=True,
             )
         )
@@ -55,7 +55,7 @@ class TestReplay:
             await run_replay_test(
                 SERVER,
                 TOOL_READ,
-                args={"repo": REPO},
+                args={"repoName": REPO},
                 approved=False,
             )
         )
