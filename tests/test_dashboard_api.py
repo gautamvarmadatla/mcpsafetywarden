@@ -187,7 +187,9 @@ def test_runs_cursor_follows_timestamp_order(client):
 
     first = client.get("/api/runs", params={"limit": 1}).json()["items"][0]
     assert first["run_id"] == ids[0]
-    rest = client.get("/api/runs", params={"limit": 5, "before_id": first["run_id"], "before_ts": first["timestamp"]}).json()
+    rest = client.get(
+        "/api/runs", params={"limit": 5, "before_id": first["run_id"], "before_ts": first["timestamp"]}
+    ).json()
     assert [r["run_id"] for r in rest["items"]] == [ids[1]]
 
 

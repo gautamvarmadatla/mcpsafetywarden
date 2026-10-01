@@ -222,7 +222,9 @@ def list_tools(
             params.append(policy)
         if q:
             like = f"%{q}%"
-            where_clauses.append("(t.tool_name LIKE ? OR t.server_id LIKE ? OR (t.server_id || '.' || t.tool_name) LIKE ?)")
+            where_clauses.append(
+                "(t.tool_name LIKE ? OR t.server_id LIKE ? OR (t.server_id || '.' || t.tool_name) LIKE ?)"
+            )
             params.extend([like, like, like])
         where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
         joins = """
