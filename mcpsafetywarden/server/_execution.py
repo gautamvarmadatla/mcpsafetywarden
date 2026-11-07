@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
+
+from pydantic import Field
 
 from ..core import database as db
 from ..core.security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
@@ -10,9 +12,43 @@ from ..scan.args import scan_args_for_threats
 from ..scan.auxiliary import burp_proxy_evidence
 from ..graph import store as _graph_store, explain as _graph_explain
 from ..proxy import client as cm
-from ._app import mcp, _check_mgmt_rate_limit
+from ._app import _check_mgmt_rate_limit
+from ._schemas import (
+    AuditLogOutput,
+    ListServersOutput,
+    ListServerToolsOutput,
+    PingOutput,
+    PreflightOutput,
+    ReplayTestOutput,
+    RetryPolicyOutput,
+    RunHistoryOutput,
+    SafeToolCallOutput,
+    SaferAlternativeOutput,
+    SetToolPolicyOutput,
+    ToolProfileOutput,
+)
+from ._tooling import server_not_found, tool_not_found, warden_tool
 
 _log = logging.getLogger(__name__)
+
+_ServerId = Annotated[str, Field(description="Registered server ID (see list_servers).")]
+_ToolName = Annotated[str, Field(description="Exact tool name on that server (see list_server_tools).")]
+_ToolArgs = Annotated[
+    Optional[Dict[str, Any]],
+    Field(description="Arguments for the wrapped tool, matching its own input schema. Omit for no arguments."),
+]
+_LlmProvider = Annotated[
+    Optional[str],
+    Field(description='LLM for classification and analysis: "anthropic", "openai" or "gemini". Auto-detected.'),
+]
+_Model = Annotated[
+    Optional[str], Field(description="Model ID for the chosen provider. Uses the provider default if omitted.")
+]
+_ApiKey = Annotated[Optional[str], Field(description="API key for the provider. Read from the environment if omitted.")]
+_Approved = Annotated[
+    bool,
+    Field(description="Run even though the risk check recommends approval. Only set after the user confirms."),
+]
 
 
 def _latency_band(p95_ms: Optional[float]) -> str:
@@ -241,7 +277,7 @@ def _llm_suggest_alternatives(
         return []
 
 
-@mcp.tool()
+@warden_tool(ListServersOutput, title="List Servers", read_only=True, idempotent=True, list_key="servers")
 def list_servers() -> str:
     """
     List all registered servers with transport type and tool count.
@@ -265,8 +301,14 @@ def list_servers() -> str:
     )
 
 
-@mcp.tool()
-def list_server_tools(server_id: str) -> str:
+@warden_tool(ListServerToolsOutput, title="List Server Tools", read_only=True, idempotent=True)
+def list_server_tools(
+    server_id: _ServerId,
+    limit: Annotated[
+        Optional[int], Field(ge=1, le=1000, description="Maximum tools to return. Omit to return all.")
+    ] = None,
+    offset: Annotated[int, Field(ge=0, description="Number of tools to skip, for paging with limit.")] = 0,
+) -> str:
     """
     List all known tools for a server with summarized risk profiles (effect class, retry safety, risk level).
 
@@ -276,14 +318,19 @@ def list_server_tools(server_id: str) -> str:
     BEFORE: inspect_server (to populate tool profiles).
     AFTER: safe_tool_call to execute a tool, or set_tool_policy('block') for any HIGH-risk tools.
     """
+    if not db.get_server(server_id):
+        return json.dumps(server_not_found(server_id))
     tools = db.list_tools(server_id)
     if not tools:
         return json.dumps(
             {
                 "error": f"No tools found for '{server_id}'.",
                 "hint": "Run inspect_server first.",
+                "next_step": f"inspect_server(server_id='{server_id}')",
             }
         )
+    total = len(tools)
+    tools = tools[offset : offset + limit] if limit else tools[offset:]
 
     profiles = db.get_profiles_batch([t["tool_id"] for t in tools])
     rows = []
@@ -308,20 +355,28 @@ def list_server_tools(server_id: str) -> str:
             row["impacting_cves"] = tool_meta.get("impacting_cves", [])
         rows.append(row)
 
-    return json.dumps({"server_id": server_id, "tools": rows}, indent=2)
+    return json.dumps({"server_id": server_id, "total": total, "tools": rows}, indent=2)
 
 
-@mcp.tool()
+@warden_tool(PreflightOutput, title="Preflight Risk Check", read_only=True, open_world=True)
 async def preflight_tool_call(
-    server_id: str,
-    tool_name: str,
-    args: Optional[dict] = None,
-    auto_scan_provider: Optional[str] = None,
-    auto_scan_model: Optional[str] = None,
-    auto_scan_api_key: Optional[str] = None,
-    llm_provider: Optional[str] = None,
-    llm_model: Optional[str] = None,
-    llm_api_key: Optional[str] = None,
+    server_id: _ServerId,
+    tool_name: _ToolName,
+    args: _ToolArgs = None,
+    auto_scan_provider: Annotated[
+        Optional[str],
+        Field(
+            description='Provider for a one-time scan if none exists: "anthropic", "openai", "gemini", "cisco" '
+            'or "snyk". Auto-detected.'
+        ),
+    ] = None,
+    auto_scan_model: _Model = None,
+    auto_scan_api_key: Annotated[
+        Optional[str], Field(description="API key or token for the auto-scan provider. Read from the environment.")
+    ] = None,
+    llm_provider: _LlmProvider = None,
+    llm_model: _Model = None,
+    llm_api_key: _ApiKey = None,
 ) -> str:
     """
     Get a risk assessment for a tool WITHOUT executing it.
@@ -353,12 +408,7 @@ async def preflight_tool_call(
 
     tool = db.get_tool(server_id, tool_name)
     if not tool:
-        return json.dumps(
-            {
-                "error": f"Tool '{tool_name}' not found on server '{server_id}'.",
-                "hint": "Run inspect_server first.",
-            }
-        )
+        return json.dumps(tool_not_found(server_id, tool_name))
 
     effective_scan_provider = auto_scan_provider or _detect_llm_provider()
     if effective_scan_provider and not db.get_latest_security_scan(server_id):
@@ -435,8 +485,8 @@ async def preflight_tool_call(
     return json.dumps(_preflight_assessment(profile, tool_name, server_id), indent=2)
 
 
-@mcp.tool()
-def get_tool_profile(server_id: str, tool_name: str) -> str:
+@warden_tool(ToolProfileOutput, title="Get Tool Profile", read_only=True, idempotent=True)
+def get_tool_profile(server_id: _ServerId, tool_name: _ToolName) -> str:
     """
     Get the full raw behavior profile for a tool with all observed metrics and confidence scores.
 
@@ -448,7 +498,7 @@ def get_tool_profile(server_id: str, tool_name: str) -> str:
     """
     tool = db.get_tool(server_id, tool_name)
     if not tool:
-        return json.dumps({"error": f"Tool '{tool_name}' not found on server '{server_id}'."})
+        return json.dumps(tool_not_found(server_id, tool_name))
     profile = db.get_profile(tool["tool_id"])
     if not profile:
         return json.dumps({"error": "No profile yet. Run inspect_server or safe_tool_call first."})
@@ -457,13 +507,13 @@ def get_tool_profile(server_id: str, tool_name: str) -> str:
     )
 
 
-@mcp.tool()
+@warden_tool(RetryPolicyOutput, title="Get Retry Policy", read_only=True, idempotent=True)
 def get_retry_policy(
-    server_id: str,
-    tool_name: str,
-    llm_provider: Optional[str] = None,
-    llm_model: Optional[str] = None,
-    llm_api_key: Optional[str] = None,
+    server_id: _ServerId,
+    tool_name: _ToolName,
+    llm_provider: _LlmProvider = None,
+    llm_model: _Model = None,
+    llm_api_key: _ApiKey = None,
 ) -> str:
     """
     Get the recommended retry policy for a tool: max retries, backoff strategy, and suggested timeout.
@@ -479,7 +529,7 @@ def get_retry_policy(
 
     tool = db.get_tool(server_id, tool_name)
     if not tool:
-        return json.dumps({"error": f"Tool '{tool_name}' not found."})
+        return json.dumps(tool_not_found(server_id, tool_name))
     effective_llm = llm_provider or _detect_llm_provider()
     profile = db.get_profile(tool["tool_id"])
     if profile is None:
@@ -523,13 +573,13 @@ def get_retry_policy(
     )
 
 
-@mcp.tool()
+@warden_tool(SaferAlternativeOutput, title="Suggest Safer Alternative", read_only=True)
 def suggest_safer_alternative(
-    server_id: str,
-    tool_name: str,
-    llm_provider: Optional[str] = None,
-    llm_model: Optional[str] = None,
-    llm_api_key: Optional[str] = None,
+    server_id: _ServerId,
+    tool_name: _ToolName,
+    llm_provider: _LlmProvider = None,
+    llm_model: _Model = None,
+    llm_api_key: _ApiKey = None,
 ) -> str:
     """
     Find lower-risk alternatives to a tool on the same server, ranked by risk reduction.
@@ -550,7 +600,7 @@ def suggest_safer_alternative(
 
     tool = db.get_tool(server_id, tool_name)
     if not tool:
-        return json.dumps({"error": f"Tool '{tool_name}' not found."})
+        return json.dumps(tool_not_found(server_id, tool_name))
 
     effective_llm = llm_provider or _detect_llm_provider()
     profile = db.get_profile(tool["tool_id"])
@@ -688,15 +738,18 @@ def suggest_safer_alternative(
     )
 
 
-@mcp.tool()
+@warden_tool(ReplayTestOutput, title="Run Replay (Idempotency) Test", destructive=True, open_world=True)
 async def run_replay_test(
-    server_id: str,
-    tool_name: str,
-    args: Optional[dict] = None,
-    approved: bool = False,
-    llm_provider: Optional[str] = None,
-    llm_model: Optional[str] = None,
-    llm_api_key: Optional[str] = None,
+    server_id: _ServerId,
+    tool_name: _ToolName,
+    args: _ToolArgs = None,
+    approved: Annotated[
+        bool,
+        Field(description="Required for non-read-only tools, which will really run twice. Confirm with the user."),
+    ] = False,
+    llm_provider: _LlmProvider = None,
+    llm_model: _Model = None,
+    llm_api_key: _ApiKey = None,
 ) -> str:
     """
     Test idempotency by calling a tool TWICE with identical args and comparing outputs.
@@ -719,7 +772,7 @@ async def run_replay_test(
 
     tool = db.get_tool(server_id, tool_name)
     if not tool:
-        return json.dumps({"error": f"Tool '{tool_name}' not found on server '{server_id}'."})
+        return json.dumps(tool_not_found(server_id, tool_name))
 
     profile = db.get_profile(tool["tool_id"])
     if profile is None:
@@ -778,11 +831,16 @@ async def run_replay_test(
         return json.dumps({"error": "Internal error. Check server logs."})
 
 
-@mcp.tool()
+@warden_tool(SetToolPolicyOutput, title="Set Tool Policy", destructive=True, idempotent=True)
 def set_tool_policy(
-    server_id: str,
-    tool_name: str,
-    policy: Optional[str] = None,
+    server_id: _ServerId,
+    tool_name: _ToolName,
+    policy: Annotated[
+        Optional[Literal["allow", "block", "clear"]],
+        Field(
+            description="block = never execute; allow = skip risk checks; clear or null = back to normal risk gating."
+        ),
+    ] = None,
 ) -> str:
     """
     Set a permanent execution policy for a tool, overriding the normal preflight flow.
@@ -800,7 +858,7 @@ def set_tool_policy(
     """
     tool = db.get_tool(server_id, tool_name)
     if not tool:
-        return json.dumps({"error": f"Tool '{tool_name}' not found on server '{server_id}'."})
+        return json.dumps(tool_not_found(server_id, tool_name))
     if policy == "clear":
         policy = None
     if policy is not None and policy not in ("allow", "block"):
@@ -821,8 +879,12 @@ def set_tool_policy(
     return json.dumps(resp, indent=2)
 
 
-@mcp.tool()
-def get_run_history(server_id: str, tool_name: str, limit: int = 20) -> str:
+@warden_tool(RunHistoryOutput, title="Get Run History", read_only=True, idempotent=True)
+def get_run_history(
+    server_id: _ServerId,
+    tool_name: _ToolName,
+    limit: Annotated[int, Field(ge=1, le=200, description="Number of most recent runs to return.")] = 20,
+) -> str:
     """
     Get recent execution history for a tool: timestamps, latency, success/fail, and injection warnings.
 
@@ -834,14 +896,14 @@ def get_run_history(server_id: str, tool_name: str, limit: int = 20) -> str:
     """
     tool = db.get_tool(server_id, tool_name)
     if not tool:
-        return json.dumps({"error": f"Tool '{tool_name}' not found on server '{server_id}'."})
+        return json.dumps(tool_not_found(server_id, tool_name))
     limit = max(1, min(limit, 200))
     runs = db.get_runs(tool["tool_id"], limit)
     return json.dumps({"server_id": server_id, "tool": tool_name, "runs": runs}, indent=2)
 
 
-@mcp.tool()
-async def ping_server(server_id: str) -> str:
+@warden_tool(PingOutput, title="Ping Server", read_only=True, open_world=True, flag_errors=False)
+async def ping_server(server_id: _ServerId) -> str:
     """
     Check if a registered server is reachable. Returns status and round-trip latency.
 
@@ -853,6 +915,8 @@ async def ping_server(server_id: str) -> str:
     """
     from ..scan.auxiliary import kali_recon
 
+    if not db.get_server(server_id):
+        return json.dumps(server_not_found(server_id))
     try:
         result = await cm.ping_server(server_id)
     except ValueError as exc:
@@ -972,18 +1036,26 @@ async def _call_and_format(
         return json.dumps({"error": "Internal error. Check server logs."})
 
 
-@mcp.tool()
+@warden_tool(SafeToolCallOutput, title="Safe Tool Call", destructive=True, open_world=True)
 async def safe_tool_call(
-    server_id: str,
-    tool_name: str,
-    args: Optional[dict] = None,
-    approved: bool = False,
-    use_alternative: Optional[str] = None,
-    show_more_options: bool = False,
-    args_scan_override: bool = False,
-    llm_provider: Optional[str] = None,
-    llm_model: Optional[str] = None,
-    llm_api_key: Optional[str] = None,
+    server_id: _ServerId,
+    tool_name: _ToolName,
+    args: _ToolArgs = None,
+    approved: _Approved = False,
+    use_alternative: Annotated[
+        Optional[str],
+        Field(description="Run this tool from a previous response's alternatives list instead of tool_name."),
+    ] = None,
+    show_more_options: Annotated[
+        bool, Field(description="Return every option, including abort, without running.")
+    ] = False,
+    args_scan_override: Annotated[
+        bool,
+        Field(description="Skip the argument threat scan. Only after reviewing a flagged value as a false positive."),
+    ] = False,
+    llm_provider: _LlmProvider = None,
+    llm_model: _Model = None,
+    llm_api_key: _ApiKey = None,
 ) -> str:
     """
     Execute a tool through the safety proxy. This is the ONLY correct way to call tools on registered servers.
@@ -1009,7 +1081,7 @@ async def safe_tool_call(
     if use_alternative:
         alt_tool = db.get_tool(server_id, use_alternative)
         if not alt_tool:
-            return json.dumps({"error": f"Alternative tool '{use_alternative}' not found on server '{server_id}'."})
+            return json.dumps(tool_not_found(server_id, use_alternative))
         alt_profile = db.get_profile(alt_tool["tool_id"])
         if alt_profile is None:
             loop = asyncio.get_running_loop()
@@ -1074,12 +1146,7 @@ async def safe_tool_call(
 
     tool = db.get_tool(server_id, tool_name)
     if not tool:
-        return json.dumps(
-            {
-                "error": f"Tool '{tool_name}' not found on server '{server_id}'.",
-                "hint": "Run inspect_server first.",
-            }
-        )
+        return json.dumps(tool_not_found(server_id, tool_name))
 
     policy = db.get_tool_policy(server_id, tool_name)
     if policy == "block":
@@ -1261,3 +1328,26 @@ async def safe_tool_call(
         },
         indent=2,
     )
+
+
+@warden_tool(AuditLogOutput, title="Get Audit Log", read_only=True, idempotent=True)
+def get_audit_log(
+    server_id: Annotated[Optional[str], Field(description="Only entries for this registered server.")] = None,
+    tool: Annotated[
+        Optional[str], Field(description='Only entries for this Safety Warden tool, e.g. "set_tool_policy".')
+    ] = None,
+    limit: Annotated[int, Field(ge=1, le=500, description="Maximum entries to return.")] = 50,
+    offset: Annotated[int, Field(ge=0, description="Entries to skip, for paging with limit.")] = 0,
+) -> str:
+    """
+    List the audit trail of state-changing Safety Warden calls, newest first.
+
+    Every call to a non-read-only tool (register_server, onboard_*, inspect_server,
+    check_server_drift, set_tool_policy, safe_tool_call, run_replay_test, security scans,
+    export_graph) is recorded with its time, calling client, server, target tool,
+    arguments (secrets redacted) and outcome (ok | error | blocked | quarantined).
+
+    Use this to review who changed a policy, which tools were executed with approval,
+    or what was blocked. Page with limit/offset; total is the number of matching entries.
+    """
+    return json.dumps(db.get_audit_log(limit=limit, offset=offset, tool=tool, server_id=server_id), indent=2)

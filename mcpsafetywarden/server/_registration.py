@@ -5,7 +5,9 @@ import os as _os
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
+
+from pydantic import Field
 
 from ..core import database as db
 from ..core.security_utils import looks_like_secret as _looks_like_secret
@@ -14,7 +16,6 @@ from ..proxy import discovery as _discovery
 from ..proxy.drift import compare_db_snapshots as _compare_tool_snapshots, check_server_drift as _check_drift
 from ..graph import provenance as _graph_provenance
 from ._app import (
-    mcp,
     _check_mgmt_rate_limit,
     _SHELL_INTERPS,
     _SHELL_EVAL_FLAGS,
@@ -36,8 +37,62 @@ from ._hooks import (
     _gh_on_cross_server_analysis,
 )
 from ..scan.args import SSRF_RE
+from ._schemas import (
+    DiscoverServersOutput,
+    DriftOutput,
+    InspectServerOutput,
+    OnboardDiscoveredOutput,
+    OnboardServerOutput,
+    RegisterServerOutput,
+)
+from ._tooling import server_not_found, warden_tool
 
 _log = logging.getLogger(__name__)
+
+_ServerIdNew = Annotated[
+    str,
+    Field(
+        description=(
+            "ID to register the server under; reused as server_id by every other tool. "
+            "Letters, digits, '-', '_', '.', max 256 chars."
+        )
+    ),
+]
+_ServerId = Annotated[str, Field(description="Registered server ID (see list_servers).")]
+_Transport = Annotated[
+    Optional[Literal["stdio", "sse", "streamable_http"]],
+    Field(description="stdio needs command; sse and streamable_http need url. Inferred when omitted."),
+]
+_Command = Annotated[Optional[str], Field(description='Executable for stdio servers, e.g. "npx" or "uvx".')]
+_Args = Annotated[
+    Optional[List[str]], Field(description='Arguments for the stdio command, e.g. ["-y", "@org/server"].')
+]
+_Url = Annotated[Optional[str], Field(description="Endpoint URL for sse or streamable_http servers.")]
+_Env = Annotated[
+    Optional[Dict[str, str]],
+    Field(description="Environment variables for stdio servers. Secret values are stored as cref_ references."),
+]
+_Headers = Annotated[
+    Optional[Dict[str, str]],
+    Field(
+        description='HTTP headers for remote servers, e.g. {"Authorization": "Bearer ..."}. '
+        "Secret values are stored as cref_ references."
+    ),
+]
+_GithubUrl = Annotated[
+    Optional[str], Field(description="Source repository URL; enables source-code analysis during security scans.")
+]
+_ClassifyProvider = Annotated[
+    Optional[str],
+    Field(description='LLM used to classify tools: "anthropic", "openai" or "gemini". Auto-detected from env keys.'),
+]
+_Model = Annotated[
+    Optional[str], Field(description="Model ID for the chosen provider. Uses the provider default if omitted.")
+]
+_ApiKey = Annotated[Optional[str], Field(description="API key for the provider. Read from the environment if omitted.")]
+_ClientFilter = Annotated[
+    Optional[str], Field(description='Agent client ID, e.g. "cursor", "claude-desktop", "vscode".')
+]
 
 
 async def _is_ssrf_hostname(url: str) -> bool:
@@ -308,20 +363,22 @@ async def _do_register(
     return result
 
 
-@mcp.tool()
+@warden_tool(RegisterServerOutput, title="Register Server", idempotent=True, open_world=True)
 async def register_server(
-    server_id: str,
-    transport: Optional[str] = None,
-    command: Optional[str] = None,
-    args: Optional[list] = None,
-    url: Optional[str] = None,
-    env: Optional[dict] = None,
-    headers: Optional[dict] = None,
-    auto_inspect: bool = True,
-    classify_provider: Optional[str] = None,
-    classify_model: Optional[str] = None,
-    classify_api_key: Optional[str] = None,
-    github_url: Optional[str] = None,
+    server_id: _ServerIdNew,
+    transport: _Transport = None,
+    command: _Command = None,
+    args: _Args = None,
+    url: _Url = None,
+    env: _Env = None,
+    headers: _Headers = None,
+    auto_inspect: Annotated[
+        bool, Field(description="Connect now and discover tools. Set false only if the server is not running yet.")
+    ] = True,
+    classify_provider: _ClassifyProvider = None,
+    classify_model: _Model = None,
+    classify_api_key: _ApiKey = None,
+    github_url: _GithubUrl = None,
 ) -> str:
     """
     Register a server so it can be wrapped, profiled, and called via safe_tool_call.
@@ -369,12 +426,12 @@ async def register_server(
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@warden_tool(InspectServerOutput, title="Inspect Server", idempotent=True, open_world=True)
 async def inspect_server(
-    server_id: str,
-    classify_provider: Optional[str] = None,
-    classify_model: Optional[str] = None,
-    classify_api_key: Optional[str] = None,
+    server_id: _ServerId,
+    classify_provider: _ClassifyProvider = None,
+    classify_model: _Model = None,
+    classify_api_key: _ApiKey = None,
 ) -> str:
     """
     Re-connect to a registered server, enumerate its tools, classify each one, and update stored profiles.
@@ -393,6 +450,8 @@ async def inspect_server(
     rl = _check_mgmt_rate_limit(f"inspect:{server_id}")
     if rl:
         return json.dumps({"error": rl})
+    if not db.get_server(server_id):
+        return json.dumps(server_not_found(server_id))
 
     from ..scan.scanner import detect_llm_provider as _detect_llm_provider
 
@@ -457,10 +516,13 @@ async def inspect_server(
         return json.dumps({"error": "Internal error. Check server logs."})
 
 
-@mcp.tool()
+@warden_tool(DriftOutput, title="Check Server Drift", open_world=True)
 async def check_server_drift(
-    server_id: str,
-    update_baseline: bool = True,
+    server_id: _ServerId,
+    update_baseline: Annotated[
+        bool,
+        Field(description="Save the current tool list as the new baseline after reporting. False = audit only."),
+    ] = True,
 ) -> str:
     """
     Detect tool schema and tool-list changes since the last inspect_server baseline.
@@ -485,6 +547,8 @@ async def check_server_drift(
     rl = _check_mgmt_rate_limit(f"drift:{server_id}")
     if rl:
         return json.dumps({"error": rl})
+    if not db.get_server(server_id):
+        return json.dumps(server_not_found(server_id))
     try:
         result = await _check_drift(server_id, update_baseline=update_baseline)
         if result.get("drift_detected"):
@@ -515,23 +579,29 @@ async def check_server_drift(
         return json.dumps({"error": "Internal error. Check server logs."})
 
 
-@mcp.tool()
+@warden_tool(OnboardServerOutput, title="Onboard One Server", idempotent=True, open_world=True)
 async def onboard_server(
-    server_id: str,
-    transport: Optional[str] = None,
-    command: Optional[str] = None,
-    args: Optional[list] = None,
-    url: Optional[str] = None,
-    env: Optional[dict] = None,
-    headers: Optional[dict] = None,
-    scan_provider: Optional[str] = None,
-    scan_model: Optional[str] = None,
-    scan_api_key: Optional[str] = None,
-    confirm_scan_authorized: bool = True,
-    github_url: Optional[str] = None,
+    server_id: _ServerIdNew,
+    transport: _Transport = None,
+    command: _Command = None,
+    args: _Args = None,
+    url: _Url = None,
+    env: _Env = None,
+    headers: _Headers = None,
+    scan_provider: Annotated[
+        Optional[str],
+        Field(description='LLM for classification and the scan: "anthropic", "openai" or "gemini". Auto-detected.'),
+    ] = None,
+    scan_model: _Model = None,
+    scan_api_key: _ApiKey = None,
+    confirm_scan_authorized: Annotated[
+        bool, Field(description="Confirms you may security-test this server. False skips active probing.")
+    ] = True,
+    github_url: _GithubUrl = None,
 ) -> str:
     """
-    One-shot server onboarding: register + inspect + security scan in a single call.
+    Add ONE server that you describe by command or URL: register + inspect + security scan in one call.
+    For servers already configured in local MCP clients, use discover_servers + onboard_discovered_servers.
 
     This is the preferred entry point for adding a new server. Equivalent to register_server
     then security_scan_server, but handles inspection failures with a source-only fallback.
@@ -656,11 +726,18 @@ async def onboard_server(
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@warden_tool(DiscoverServersOutput, title="Discover Local MCP Servers", read_only=True, idempotent=True)
 async def discover_servers(
-    client: Optional[str] = None,
-    include_project: bool = True,
-    include_community_paths: bool = True,
+    client: Annotated[
+        Optional[str],
+        Field(description='Only scan this client config, e.g. "cursor", "claude-desktop", "vscode". Omit for all.'),
+    ] = None,
+    include_project: Annotated[
+        bool, Field(description="Also scan project-level config files in the current working directory.")
+    ] = True,
+    include_community_paths: Annotated[
+        bool, Field(description="Include community-reported config paths not listed in official client docs.")
+    ] = True,
 ) -> str:
     """
     Scan the local machine for MCP servers configured in known MCP client apps.
@@ -729,19 +806,26 @@ async def discover_servers(
     )
 
 
-@mcp.tool()
+@warden_tool(OnboardDiscoveredOutput, title="Onboard Discovered Servers (Batch)", idempotent=True, open_world=True)
 async def onboard_discovered_servers(
-    discovery_ids: Optional[List[str]] = None,
-    client: Optional[str] = None,
-    all_found: bool = False,
-    auto_inspect: bool = True,
-    classify_provider: Optional[str] = None,
-    classify_model: Optional[str] = None,
-    classify_api_key: Optional[str] = None,
-    github_url: Optional[str] = None,
+    discovery_ids: Annotated[
+        Optional[List[str]], Field(description="discovery_id values from a discover_servers response.")
+    ] = None,
+    client: _ClientFilter = None,
+    all_found: Annotated[
+        bool, Field(description="Register every unregistered server from the last discover_servers scan.")
+    ] = False,
+    auto_inspect: Annotated[
+        bool, Field(description="Connect and discover tools after registering each server.")
+    ] = True,
+    classify_provider: _ClassifyProvider = None,
+    classify_model: _Model = None,
+    classify_api_key: _ApiKey = None,
+    github_url: _GithubUrl = None,
 ) -> str:
     """
-    Register previously discovered servers into the Safety Warden pipeline (register + inspect).
+    Batch-add servers found by discover_servers (pick by discovery_ids, client, or all_found): register + inspect.
+    To add a single server you describe by command or URL, use onboard_server instead.
 
     Must call discover_servers first to populate the discovery cache.
     Skips already-registered servers and servers with only activation_state_only data (5ire).

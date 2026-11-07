@@ -1,7 +1,9 @@
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
+
+from pydantic import Field
 
 from ..core import database as db
 from ..scan.scanner import (
@@ -14,8 +16,29 @@ from ..scan.scanner import (
 from ..scan.mcpsafety import run_mcpsafety_scan, run_mcpsafety_scan_multi, run_deterministic_scan
 from ..graph import store as _graph_store
 from ..proxy import client as cm
-from ._app import mcp, _check_mgmt_rate_limit, _bg_scan_status, _LLM_SHORTHANDS
+from ._app import _check_mgmt_rate_limit, _bg_scan_status, _LLM_SHORTHANDS
 from ._hooks import _gh_on_scan_stored, _gh_on_composition_analysis
+from ._schemas import ScanAllOutput, SecurityScanOutput
+from ._tooling import server_not_found, warden_tool
+
+_Model = Annotated[
+    Optional[str], Field(description="Model ID for the chosen provider. Uses the provider default if omitted.")
+]
+_ConfirmAuthorized = Annotated[
+    bool,
+    Field(
+        description="Confirms you own or are authorized to security-test the target. "
+        "Required for LLM and active-probe scans."
+    ),
+]
+_DestructiveProbes = Annotated[
+    bool,
+    Field(description="Enable path traversal, command injection and credential-file probes. Can cause damage."),
+]
+_SkipWebResearch = Annotated[
+    bool, Field(description="Skip CVE/HackerNews/Arxiv lookups so findings are not sent to external services.")
+]
+_ScanTimeout = Annotated[int, Field(description="Hard timeout per server scan in seconds, clamped to 30-3600.")]
 
 _log = logging.getLogger(__name__)
 
@@ -145,70 +168,87 @@ async def _execute_scan_core(
     return findings
 
 
-@mcp.tool()
+@warden_tool(SecurityScanOutput, title="Security Scan Server", destructive=True, open_world=True)
 async def security_scan_server(
-    server_id: Optional[str] = None,
-    provider: Optional[str] = None,
-    model_id: Optional[str] = None,
-    api_key: Optional[str] = None,
-    confirm_authorized: bool = False,
-    allow_destructive_probes: bool = False,
-    skip_web_research: bool = True,
-    scan_timeout_s: int = 900,
-    background: bool = True,
-    github_url: Optional[str] = None,
+    server_id: Annotated[
+        Optional[str],
+        Field(description="Registered server to audit. Omit and pass github_url for a source-only scan."),
+    ] = None,
+    provider: Annotated[
+        Optional[str],
+        Field(
+            description='Leave null to auto-detect. Otherwise "all", "anthropic", "openai", "gemini", "ollama", '
+            '"cisco" or "snyk".'
+        ),
+    ] = None,
+    model_id: _Model = None,
+    api_key: Annotated[
+        Optional[str],
+        Field(description="Key for the chosen provider (LLM key, Cisco key or Snyk token). Read from env if omitted."),
+    ] = None,
+    confirm_authorized: _ConfirmAuthorized = False,
+    allow_destructive_probes: _DestructiveProbes = False,
+    skip_web_research: _SkipWebResearch = True,
+    scan_timeout_s: _ScanTimeout = 900,
+    background: Annotated[
+        bool, Field(description="Return immediately and poll get_security_scan. False blocks until finished.")
+    ] = True,
+    github_url: Annotated[
+        Optional[str],
+        Field(description="Repository URL. Required when server_id is omitted; enables source-code analysis."),
+    ] = None,
 ) -> str:
     """
-        Run a security audit on a registered server's tools, or a standalone source-only scan.
+    Run a security audit on a registered server's tools, or a standalone source-only scan.
 
-        REQUIRED for any untrusted server before using safe_tool_call.
-        BEFORE: register_server or onboard_server (or pass github_url for source-only mode, no registration needed).
-        AFTER (server_id mode): get_security_scan(server_id) -> set_tool_policy('block') for HIGH-risk tools.
-        AFTER (source-only mode): get_security_scan(github_url) to retrieve results -> review findings ->
-            fix local setup -> re-run onboard_server. set_tool_policy does not apply (no registered server).
+    REQUIRED for any untrusted server before using safe_tool_call.
+    BEFORE: register_server or onboard_server (or pass github_url for source-only mode, no registration needed).
+    AFTER (server_id mode): get_security_scan(server_id) -> set_tool_policy('block') for HIGH-risk tools.
+    AFTER (source-only mode): get_security_scan(github_url) to retrieve results -> review findings ->
+        fix local setup -> re-run onboard_server. set_tool_policy does not apply (no registered server).
 
-        Two modes:
-            server_id provided - full audit of a registered server's tools plus optional source scan.
-            server_id omitted  - standalone source-only scan via github_url, no registration needed.
-                Use this when onboard_server fails inspection (stdio server not yet running locally).
-                Results are stored under github_url as the key - retrieve with get_security_scan(github_url).
-                Review findings, fix local setup, then re-run onboard_server.
+    Two modes:
+        server_id provided - full audit of a registered server's tools plus optional source scan.
+        server_id omitted  - standalone source-only scan via github_url, no registration needed.
+            Use this when onboard_server fails inspection (stdio server not yet running locally).
+            Results are stored under github_url as the key - retrieve with get_security_scan(github_url).
+            Review findings, fix local setup, then re-run onboard_server.
 
-        Runs in the background by default (background=True) - returns immediately and stores
-        results for get_security_scan to retrieve. Set background=False only for CLI or direct
-        Python calls where blocking until completion is desired.
+    Runs in the background by default (background=True) - returns immediately and stores
+    results for get_security_scan to retrieve. Set background=False only for CLI or direct
+    Python calls where blocking until completion is desired.
 
-        IMPORTANT: Always omit provider (leave it null) unless the user explicitly names one.
-        Omitting provider triggers auto-detect: uses any available LLM key from the environment
-        (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY) plus any installed scanners automatically.
-        Never ask the user which provider to use - just omit it and let auto-detect handle it.
+    IMPORTANT: Always omit provider (leave it null) unless the user explicitly names one.
+    Omitting provider triggers auto-detect: uses any available LLM key from the environment
+    (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY) plus any installed scanners automatically.
+    Never ask the user which provider to use - just omit it and let auto-detect handle it.
 
     provider options:
-            null / omitted  - AUTO-DETECT (recommended default): uses all available scanners/LLM keys.
-            "all"           - same as auto-detect but explicit.
-            "anthropic"     - MCPSafety+ 5-stage pentest pipeline (shorthand for mcpsafety+anthropic).
-            "openai"          Shorthand for mcpsafety+<provider>. api_key = LLM provider API key.
-            "gemini"
-            "ollama"          Set OLLAMA_MODEL + optionally OLLAMA_BASE_URL.
-            "cisco"         - YARA + Readiness (always offline); LLM/Behavioral if MCP_SCANNER_LLM_API_KEY
-                              set; cloud engine if MCP_SCANNER_API_KEY set. api_key = Cisco cloud key.
-            "snyk"          - 19 metadata checks: prompt injection, tool shadowing, hardcoded secrets.
-                              api_key = Snyk token (falls back to SNYK_TOKEN env var).
+        null / omitted  - AUTO-DETECT (recommended default): uses all available scanners/LLM keys.
+        "all"           - same as auto-detect but explicit.
+        "anthropic"     - MCPSafety+ 5-stage pentest pipeline (shorthand for mcpsafety+anthropic).
+        "openai"          Shorthand for mcpsafety+<provider>. api_key = LLM provider API key.
+        "gemini"
+        "ollama"          Set OLLAMA_MODEL + optionally OLLAMA_BASE_URL.
+        "cisco"         - YARA + Readiness (always offline); LLM/Behavioral if MCP_SCANNER_LLM_API_KEY
+                          set; cloud engine if MCP_SCANNER_API_KEY set. api_key = Cisco cloud key.
+        "snyk"          - 19 metadata checks: prompt injection, tool shadowing, hardcoded secrets.
+                          api_key = Snyk token (falls back to SNYK_TOKEN env var).
 
     mcpsafety options (apply to "anthropic", "openai", "gemini", "ollama", "all", auto):
-            confirm_authorized:       Required for LLM-based and active-probe scans (default False). Rule-based
-                                      deterministic scan runs without it when no LLM provider is available.
-            allow_destructive_probes: enable path traversal / command injection probes (default False)
-            skip_web_research:        skip CVE/Arxiv research to avoid leaking findings (default True)
-            scan_timeout_s:           hard timeout per scan in seconds (default 900, max 3600)
-            background:               True = return immediately, poll get_security_scan for results (default).
-                                      False = block until complete (safe for CLI/Python direct calls).
+        confirm_authorized:       Required for LLM-based and active-probe scans (default False). Rule-based
+                                  deterministic scan runs without it when no LLM provider is available.
+        allow_destructive_probes: enable path traversal / command injection probes (default False)
+        skip_web_research:        skip CVE/Arxiv research to avoid leaking findings (default True)
+        scan_timeout_s:           hard timeout per scan in seconds (default 900, max 3600)
+        background:               True = return immediately, poll get_security_scan for results (default).
+                                  False = block until complete (safe for CLI/Python direct calls).
 
-        github_url: required when server_id is omitted. Also used to override the stored GitHub URL
-            for an existing registered server. The mcpsafety+ pipeline fetches and analyzes source
-            code for secrets, taint flows, and suspicious patterns.
+    github_url: required when server_id is omitted. Also used to override the stored GitHub URL
+        for an existing registered server. The mcpsafety+ pipeline fetches and analyzes source
+        code for secrets, taint flows, and suspicious patterns.
 
-        Results are stored (keyed by server_id or github_url) and returned directly.
+    Results are stored (keyed by server_id or github_url) and returned directly.
     """
     if provider in _LLM_SHORTHANDS:
         provider = f"mcpsafety+{provider}"
@@ -238,7 +278,7 @@ async def security_scan_server(
     else:
         server = cm.resolve_server_crefs(db.get_server(server_id))
         if not server:
-            return json.dumps({"error": f"Server '{server_id}' not registered."})
+            return json.dumps(server_not_found(server_id))
 
         rl = _check_mgmt_rate_limit(f"scan:{server_id}")
         if rl:
@@ -363,8 +403,13 @@ async def security_scan_server(
         return json.dumps({"error": "Internal error. Check server logs."})
 
 
-@mcp.tool()
-def get_security_scan(server_id: str) -> str:
+@warden_tool(SecurityScanOutput, title="Get Security Scan", read_only=True, idempotent=True)
+def get_security_scan(
+    server_id: Annotated[
+        str,
+        Field(description="Registered server ID, or the github_url used for a source-only security_scan_server run."),
+    ],
+) -> str:
     """
     Retrieve the latest stored security scan report for a server.
 
@@ -389,6 +434,7 @@ def get_security_scan(server_id: str) -> str:
             {
                 "error": f"No security scan found for '{server_id}'.",
                 "hint": "Run security_scan_server first.",
+                "next_step": f"security_scan_server(server_id='{server_id}')",
             }
         )
     result = dict(scan)
@@ -397,16 +443,20 @@ def get_security_scan(server_id: str) -> str:
     return json.dumps(result, indent=2)
 
 
-@mcp.tool()
+@warden_tool(ScanAllOutput, title="Scan All Servers", destructive=True, open_world=True)
 async def scan_all_servers(
-    provider: str,
-    model_id: Optional[str] = None,
-    api_key: Optional[str] = None,
-    confirm_authorized: bool = False,
-    allow_destructive_probes: bool = False,
-    skip_web_research: bool = True,
-    scan_timeout_s: int = 900,
-    server_ids: Optional[List[str]] = None,
+    provider: Annotated[
+        str, Field(description='LLM for the MCPSafety pipeline: "anthropic", "openai", "gemini" or "ollama".')
+    ],
+    model_id: _Model = None,
+    api_key: Annotated[Optional[str], Field(description="LLM API key. Read from the environment if omitted.")] = None,
+    confirm_authorized: _ConfirmAuthorized = False,
+    allow_destructive_probes: _DestructiveProbes = False,
+    skip_web_research: _SkipWebResearch = True,
+    scan_timeout_s: _ScanTimeout = 900,
+    server_ids: Annotated[
+        Optional[List[str]], Field(description="Registered server IDs to scan. Omit to scan every registered server.")
+    ] = None,
 ) -> str:
     """
     Run the MCPSafety 5-stage security pipeline against all registered servers in one call.

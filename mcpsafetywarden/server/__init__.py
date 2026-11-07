@@ -23,6 +23,7 @@ from ._execution import (
     get_run_history,
     ping_server,
     suggest_safer_alternative,
+    get_audit_log,
 )
 from ._scan import security_scan_server, get_security_scan, scan_all_servers
 from ._graph import (
@@ -53,6 +54,7 @@ __all__ = [
     "get_run_history",
     "ping_server",
     "suggest_safer_alternative",
+    "get_audit_log",
     "security_scan_server",
     "get_security_scan",
     "scan_all_servers",

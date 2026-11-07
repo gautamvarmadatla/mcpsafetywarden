@@ -1,15 +1,25 @@
 import json
 import logging
-from typing import Optional
+from typing import Annotated, Literal, Optional
+
+from pydantic import Field
 
 from ..graph import store as _graph_store, builder as _graph_builder, explain as _graph_explain
-from ._app import mcp
+from ._schemas import ClientRiskOutput, CveBlastRadiusOutput, ExportGraphOutput, RiskGraphOutput, ToolRiskOutput
+from ._tooling import warden_tool
 
 _log = logging.getLogger(__name__)
 
 
-@mcp.tool()
-def get_risk_graph(server_id: Optional[str] = None, rebuild: bool = False) -> str:
+@warden_tool(RiskGraphOutput, title="Get Risk Graph", read_only=True, idempotent=True)
+def get_risk_graph(
+    server_id: Annotated[
+        Optional[str], Field(description="Limit the graph to this registered server. Omit for the whole workspace.")
+    ] = None,
+    rebuild: Annotated[
+        bool, Field(description="Rebuild the graph from stored Safety Warden data before returning it.")
+    ] = False,
+) -> str:
     """
     Return the inventory graph of MCP servers, tools, security findings, and their relationships.
 
@@ -59,8 +69,11 @@ def get_risk_graph(server_id: Optional[str] = None, rebuild: bool = False) -> st
         return json.dumps({"error": str(exc)}, indent=2)
 
 
-@mcp.tool()
-def explain_tool_risk(server_id: str, tool_name: str) -> str:
+@warden_tool(ToolRiskOutput, title="Explain Tool Risk", read_only=True, idempotent=True)
+def explain_tool_risk(
+    server_id: Annotated[str, Field(description="Registered server ID (see list_servers).")],
+    tool_name: Annotated[str, Field(description="Exact tool name on that server (see list_server_tools).")],
+) -> str:
     """
     Walk the risk graph for a specific tool and return blast radius, risk paths, and recommended action.
 
@@ -92,8 +105,22 @@ def explain_tool_risk(server_id: str, tool_name: str) -> str:
         return json.dumps({"error": str(exc)}, indent=2)
 
 
-@mcp.tool()
-def export_graph(format: str = "png", server_id: Optional[str] = None, output_path: Optional[str] = None) -> str:
+@warden_tool(ExportGraphOutput, title="Export Risk Graph", idempotent=True)
+def export_graph(
+    format: Annotated[
+        Literal["png", "mermaid", "json"],
+        Field(
+            description="png writes an image file (needs mmdc); mermaid returns diagram source; json returns nodes/edges."
+        ),
+    ] = "png",
+    server_id: Annotated[
+        Optional[str], Field(description="Limit the export to this registered server. Omit for the whole workspace.")
+    ] = None,
+    output_path: Annotated[
+        Optional[str],
+        Field(description="PNG destination path. Defaults to <server_id>_graph.png in the working directory."),
+    ] = None,
+) -> str:
     """
     Export the risk graph in the requested format.
 
@@ -124,8 +151,15 @@ def export_graph(format: str = "png", server_id: Optional[str] = None, output_pa
         return json.dumps({"error": str(exc)}, indent=2)
 
 
-@mcp.tool()
-def explain_client_risk(client_id: str) -> str:
+@warden_tool(ClientRiskOutput, title="Explain Client Risk", read_only=True, idempotent=True)
+def explain_client_risk(
+    client_id: Annotated[
+        str,
+        Field(
+            description='Agent client ID as reported by discover_servers, e.g. "claude-desktop", "cursor", "vscode".'
+        ),
+    ],
+) -> str:
     """
     Analyze cross-server risks for all MCP servers registered under one agent client.
 
@@ -152,10 +186,15 @@ def explain_client_risk(client_id: str) -> str:
         return json.dumps({"error": str(exc)}, indent=2)
 
 
-@mcp.tool()
+@warden_tool(CveBlastRadiusOutput, title="Analyze CVE Blast Radius", read_only=True, idempotent=True)
 def analyze_cve_blast_radius(
-    client_id: Optional[str] = None,
-    vuln_id: Optional[str] = None,
+    client_id: Annotated[
+        Optional[str], Field(description="Limit to servers configured in this agent client. Omit for all clients.")
+    ] = None,
+    vuln_id: Annotated[
+        Optional[str],
+        Field(description='Only report this vulnerability ID, e.g. "CVE-2024-1234" or "GHSA-xxxx-xxxx-xxxx".'),
+    ] = None,
 ) -> str:
     """
     Report CVEs that affect multiple servers, showing the blast radius across the client's workspace.

@@ -271,6 +271,23 @@ def init_db() -> None:
                 ON inventory_relations(source_id);
             CREATE INDEX IF NOT EXISTS idx_inventory_relations_target
                 ON inventory_relations(target_id);
+
+            CREATE TABLE IF NOT EXISTS management_audit (
+                audit_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp    TEXT NOT NULL,
+                tool         TEXT NOT NULL,
+                client       TEXT,
+                server_id    TEXT,
+                target_tool  TEXT,
+                args_json    TEXT NOT NULL,
+                outcome      TEXT NOT NULL,
+                detail       TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_management_audit_ts
+                ON management_audit(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_management_audit_server
+                ON management_audit(server_id, timestamp);
         """)
         conn.commit()
         try:
@@ -653,6 +670,65 @@ def set_tool_policy(server_id: str, tool_name: str, policy: Optional[str]) -> No
                 (server_id, tool_name, policy, datetime.now(timezone.utc).isoformat()),
             )
         conn.commit()
+
+
+def record_audit(
+    tool: str,
+    client: Optional[str],
+    server_id: Optional[str],
+    target_tool: Optional[str],
+    args_json: str,
+    outcome: str,
+    detail: Optional[str] = None,
+) -> None:
+    with db_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO management_audit
+                (timestamp, tool, client, server_id, target_tool, args_json, outcome, detail)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                datetime.now(timezone.utc).isoformat(),
+                tool,
+                client,
+                server_id,
+                target_tool,
+                args_json,
+                outcome,
+                (detail or "")[:500] or None,
+            ),
+        )
+        conn.commit()
+
+
+def get_audit_log(
+    limit: int = 50,
+    offset: int = 0,
+    tool: Optional[str] = None,
+    server_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    where = []
+    params: List[Any] = []
+    if tool:
+        where.append("tool = ?")
+        params.append(tool)
+    if server_id:
+        where.append("server_id = ?")
+        params.append(server_id)
+    clause = f"WHERE {' AND '.join(where)}" if where else ""
+    with db_conn() as conn:
+        total = conn.execute(f"SELECT COUNT(*) FROM management_audit {clause}", params).fetchone()[0]
+        rows = conn.execute(
+            f"SELECT * FROM management_audit {clause} ORDER BY audit_id DESC LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        ).fetchall()
+    entries = []
+    for r in rows:
+        entry = dict(r)
+        entry["args"] = _jloads(entry.pop("args_json"), {})
+        entries.append(entry)
+    return {"total": total, "entries": entries}
 
 
 def get_tool_policy(server_id: str, tool_name: str) -> Optional[str]:
