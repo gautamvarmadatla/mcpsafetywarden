@@ -1,16 +1,26 @@
 # Tool Reference
 
-Complete reference for all 25 MCP tools exposed by mcpsafetywarden.
+Complete reference for all 26 MCP tools exposed by mcpsafetywarden.
+
+## Tool contract
+
+Every tool follows the same contract, so a client or LLM can rely on it without reading the source.
+
+- **Documented inputs.** Every parameter carries a description in its JSON Schema. Fixed value sets are enums (for example `transport`, `policy`, `format`), and numeric limits are schema constraints.
+- **Typed outputs.** Every tool declares an `outputSchema` and returns `structuredContent` that matches it. The same JSON is also returned as text content, unchanged from earlier releases. Tools whose text payload is a bare array (`list_servers`) wrap it as `{"servers": [...], "count": n}` in `structuredContent`.
+- **Errors.** A failed call sets `isError: true` and returns `error` plus `hint` and usually `next_step`. Unknown names list the valid ones (`available_tools`, `registered_servers`) and close matches (`did_you_mean`). `ping_server` reports an unreachable server as a normal result, not an error.
+- **Annotations.** Each tool has a `title` and MCP hints: `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`. `safe_tool_call`, `run_replay_test`, `set_tool_policy`, `security_scan_server` and `scan_all_servers` are marked destructive so clients can ask for confirmation.
+- **Audit trail.** Every call to a non-read-only tool is recorded with time, calling client, server, target tool, redacted arguments and outcome. Read it with [`get_audit_log`](#get_audit_log).
 
 ## Quick reference
 
 | Tool | Category | What it does |
 |---|---|---|
-| [`onboard_server`](#onboard_server) | Setup | Register + inspect + security scan in one call |
+| [`onboard_server`](#onboard_server) | Setup | Add one server by command or URL: register + inspect + scan |
 | [`register_server`](#register_server) | Setup | Register a server; optionally auto-inspect |
 | [`inspect_server`](#inspect_server) | Setup | Refresh tool list and profiles |
 | [`discover_servers`](#discover_servers) | Setup | Scan filesystem for MCP client configs and extract server entries |
-| [`onboard_discovered_servers`](#onboard_discovered_servers) | Setup | Register discovered servers in bulk |
+| [`onboard_discovered_servers`](#onboard_discovered_servers) | Setup | Batch-register servers found by `discover_servers` |
 | [`list_servers`](#list_servers) | Inspection | List all registered servers |
 | [`list_server_tools`](#list_server_tools) | Inspection | List tools on a server with summary profiles |
 | [`get_tool_profile`](#get_tool_profile) | Inspection | Full behavior profile with observed stats |
@@ -21,6 +31,7 @@ Complete reference for all 25 MCP tools exposed by mcpsafetywarden.
 | [`suggest_safer_alternative`](#suggest_safer_alternative) | Execution | LLM-ranked safer substitutes |
 | [`run_replay_test`](#run_replay_test) | Execution | Idempotency test (calls tool twice) |
 | [`set_tool_policy`](#set_tool_policy) | Policy | Permanent allow/block policy for a tool |
+| [`get_audit_log`](#get_audit_log) | Policy | Audit trail of state-changing calls |
 | [`security_scan_server`](#security_scan_server) | Scanning | Live security audit of a server |
 | [`scan_all_servers`](#scan_all_servers) | Scanning | mcpsafety+ pipeline across all servers |
 | [`get_security_scan`](#get_security_scan) | Scanning | Latest stored scan report |
@@ -157,7 +168,7 @@ List all registered servers.
 
 **Parameters** None.
 
-**Returns** JSON array. Each entry: `server_id`, `transport`, `tool_count`, `registered_at`.
+**Returns** JSON array. Each entry: `server_id`, `transport`, `tool_count`, `registered_at`. `structuredContent` is `{"servers": [...], "count": n}`.
 
 ### `list_server_tools`
 
@@ -168,8 +179,10 @@ List all known tools for a server with summarised behavior profiles.
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `server_id` | string | Yes | Server to query |
+| `limit` | int | No | Max tools to return (1-1000). Omit for all |
+| `offset` | int | No | Tools to skip, for paging (default 0) |
 
-**Returns** JSON with `server_id` and `tools` array. Each tool: `tool_name`, `description` (first 100 chars), `effect_class`, `retry_safety`, `destructiveness`, `run_count`, `confidence`, `risk_level`.
+**Returns** JSON with `server_id`, `total` (tools on the server before paging) and `tools` array. Each tool: `tool_name`, `description` (first 100 chars), `effect_class`, `retry_safety`, `destructiveness`, `run_count`, `confidence`, `risk_level`.
 
 ### `get_tool_profile`
 
@@ -483,7 +496,7 @@ Set a permanent execution policy for a tool, overriding the normal preflight flo
 |---|---|---|---|
 | `server_id` | string | Yes | |
 | `tool_name` | string | Yes | |
-| `policy` | string or null | No | `"allow"`, `"block"`, or `null` to clear |
+| `policy` | string or null | No | `"allow"`, `"block"`, `"clear"` or `null` (both clear) |
 
 **Policy semantics**
 
@@ -494,6 +507,23 @@ Set a permanent execution policy for a tool, overriding the normal preflight flo
 | `null` | Remove any existing policy; resume normal preflight-based risk gating. |
 
 **Returns** JSON with `server_id`, `tool`, and `policy` (or `"cleared"`).
+
+### `get_audit_log`
+
+List the audit trail of state-changing calls, newest first. Every call to a non-read-only tool is recorded automatically.
+
+**Parameters**
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `server_id` | string | No | Only entries for this server |
+| `tool` | string | No | Only entries for this Safety Warden tool, e.g. `"set_tool_policy"` |
+| `limit` | int | No | Max entries (1-500, default 50) |
+| `offset` | int | No | Entries to skip, for paging (default 0) |
+
+**Returns** JSON with `total` (matching entries) and `entries`. Each entry: `audit_id`, `timestamp`, `tool`, `client` (MCP client name/version), `server_id`, `target_tool`, `args`, `outcome` (`ok`, `error`, `blocked` or `quarantined`) and `detail`.
+
+Secrets are never stored: `env` and `headers` values, any argument whose name contains `api_key`, `token`, `secret`, `password` or `credential`, and any value that looks like a credential are replaced with `***`.
 
 ## Security scanning
 
@@ -799,18 +829,26 @@ Both limiters are in-process. For multi-replica deployments, replace with a shar
 
 ## Error responses
 
-All tools return JSON. Errors follow a consistent shape:
+All tools return JSON. Errors set `isError: true` and follow a consistent shape:
 
 ```json
-{ "error": "<message>", "hint": "<optional recovery suggestion>" }
+{
+  "error": "Tool 'write' not found on server 'alpha'.",
+  "available_tools": ["read_file", "write_file"],
+  "did_you_mean": ["write_file"],
+  "hint": "Use an exact name from available_tools. If the server changed, re-inspect it.",
+  "next_step": "inspect_server(server_id='alpha')"
+}
 ```
+
+`hint` and `next_step` are present whenever there is a concrete recovery action. Unknown servers return `registered_servers` instead of `available_tools`.
 
 Common errors:
 
 | Error | Cause | Resolution |
 |---|---|---|
 | `Tool '<name>' not found on server '<id>'.` | Tool not yet discovered | Run `inspect_server` |
-| `Server '<id>' not registered.` | Server not in database | Run `register_server` or `onboard_server` |
+| `Server '<id>' is not registered.` | Server not in database | Pick from `registered_servers`, or run `onboard_server` |
 | `Rate limit exceeded.` | Too many calls in the window | Wait and retry |
 | `URL targets a private or restricted address.` | SSRF filter blocked the URL | Use stdio transport for internal servers |
 | `Registering a shell interpreter with an eval flag is not permitted.` | Security policy | Use a dedicated MCP server script |

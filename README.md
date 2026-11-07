@@ -217,10 +217,11 @@ See [docs/TOOLS.md](docs/TOOLS.md) for the full tool reference.
 | `scan_all_servers` | mcpsafety+ pipeline across all registered servers |
 | `get_security_scan` | Latest stored scan report |
 | `set_tool_policy` | Permanent allow/block policy for a tool |
+| `get_audit_log` | Audit trail of state-changing calls (who, what, outcome) |
 | `get_run_history` | Recent execution history for a tool |
 | `ping_server` | Reachability check with latency |
 | `discover_servers` | Scan filesystem for MCP client configs and extract server entries |
-| `onboard_discovered_servers` | Register discovered servers in bulk |
+| `onboard_discovered_servers` | Batch-register servers found by `discover_servers` |
 | `get_risk_graph` | Build or query the inventory risk graph (servers, tools, findings, agent clients) |
 | `explain_tool_risk` | Walk risk paths for a tool: blast radius, composition risks, MITRE tags, recommended action |
 | `explain_client_risk` | Analyze cross-server risks for all servers under one agent client |
@@ -230,7 +231,7 @@ See [docs/TOOLS.md](docs/TOOLS.md) for the full tool reference.
 
 ## CLI Reference
 
-24 subcommands covering all 25 MCP tools. Every command supports `--json` for machine-readable output and `--yes` / `-y` to skip confirmation prompts.
+24 subcommands covering the MCP tools (`get_audit_log` is MCP-only). Every command supports `--json` for machine-readable output and `--yes` / `-y` to skip confirmation prompts.
 
 See [docs/CLI.md](docs/CLI.md) for the full reference with flags and examples.
 
@@ -272,7 +273,7 @@ Set an LLM API key to include LLM-assisted tests; without one they are skipped a
 
 | Doc | Contents |
 |---|---|
-| [docs/TOOLS.md](docs/TOOLS.md) | Full reference for all 25 MCP tools |
+| [docs/TOOLS.md](docs/TOOLS.md) | Full reference for all 26 MCP tools |
 | [docs/CLI.md](docs/CLI.md) | CLI subcommands, flags, and examples |
 | [docs/DASHBOARD.md](docs/DASHBOARD.md) | Local web dashboard: screens, scans, shortcuts and security model |
 | [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Kali, Burp Suite, and Snyk setup |
