@@ -11,7 +11,10 @@ Set DRIFT_SERVER_MODE before launch:
 
 import os
 
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.mcpserver import MCPServer as FastMCP
+except ImportError:
+    from mcp.server.fastmcp import FastMCP
 
 _MODE = os.environ.get("DRIFT_SERVER_MODE", "v1")
 

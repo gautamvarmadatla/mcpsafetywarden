@@ -31,6 +31,8 @@ async def _call_aux_tool(
     """Call one tool on an auxiliary server. Returns text output; never raises."""
     from mcp import ClientSession
 
+    from ..core.mcp_compat import dump
+
     async def _do() -> str:
         async with _open_streams(server_config) as (read, write):
             async with ClientSession(read, write) as session:
@@ -42,7 +44,7 @@ async def _call_aux_tool(
                     if hasattr(c, "text"):
                         parts.append(c.text)
                     elif hasattr(c, "model_dump"):
-                        parts.append(json.dumps(c.model_dump()))
+                        parts.append(json.dumps(dump(c)))
                 return "\n".join(parts)
 
     try:

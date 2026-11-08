@@ -4,11 +4,12 @@ import json
 import logging
 from typing import Annotated, Any, Callable, Dict, List, Optional, Type
 
-from mcp.server.fastmcp import Context
+from ._sdk import Context
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..core import database as db
+from ..core.mcp_compat import mfield
 from ..core.security_utils import looks_like_secret as _looks_like_secret
 from ._app import mcp
 
@@ -65,7 +66,7 @@ def _outcome(data: Dict[str, Any]) -> str:
 
 def _client_name(ctx: Optional[Context]) -> Optional[str]:
     try:
-        info = ctx.session.client_params.clientInfo
+        info = mfield(ctx.session.client_params, "clientInfo")
         return f"{info.name}/{info.version}" if info.version else info.name
     except Exception:
         return None
@@ -183,7 +184,7 @@ def warden_tool(
         def finish(text: str, kwargs: Dict[str, Any], ctx: Optional[Context]) -> CallToolResult:
             result = _structured(text, output, list_key, flag_errors)
             if not read_only:
-                _audit(tool_name, kwargs, result.structuredContent or {}, ctx)
+                _audit(tool_name, kwargs, mfield(result, "structuredContent") or {}, ctx)
             return result
 
         if inspect.iscoroutinefunction(fn):

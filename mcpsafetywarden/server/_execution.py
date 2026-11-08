@@ -6,6 +6,7 @@ from typing import Annotated, Any, Dict, List, Literal, Optional
 from pydantic import Field
 
 from ..core import database as db
+from ..core.mcp_compat import dump
 from ..core.security_utils import sanitise_for_prompt as _sanitise_for_prompt, strip_json_fence as _strip_json_fence
 from ..scan.classifier import classify_tool
 from ..scan.args import scan_args_for_threats
@@ -984,7 +985,7 @@ async def _call_and_format(
         result_items = []
         for item in content:
             if hasattr(item, "model_dump"):
-                result_items.append(item.model_dump())
+                result_items.append(dump(item))
             elif hasattr(item, "text"):
                 result_items.append({"type": "text", "text": item.text})
             else:

@@ -13,7 +13,10 @@ Attack patterns baked in:
 
 import os
 
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.mcpserver import MCPServer as FastMCP
+except ImportError:
+    from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("evil-test-server")
 

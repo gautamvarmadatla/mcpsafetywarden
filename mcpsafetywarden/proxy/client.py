@@ -11,11 +11,11 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
-import httpx
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from ..core import database as db
+from ..core.mcp_compat import dump, mfield, streamable_http_streams
 from ..scan.classifier import classify_tool
 from ..core.profiler import get_or_build_profile, maybe_update_tool_profile
 from ..core.security_utils import (
@@ -659,8 +659,6 @@ async def open_streams(server: Dict[str, Any]) -> AsyncGenerator[Tuple[Any, Any]
             yield read, write
 
     elif transport == "streamable_http":
-        from mcp.client.streamable_http import streamable_http_client
-
         _profile = None
         try:
             from ..sandbox import load_profile
@@ -672,13 +670,8 @@ async def open_streams(server: Dict[str, Any]) -> AsyncGenerator[Tuple[Any, Any]
         if _profile is not None:
             await asyncio.get_running_loop().run_in_executor(None, verify_remote, server, _profile)
 
-        http_client = httpx.AsyncClient(headers=headers) if headers else None
-        try:
-            async with streamable_http_client(server["url"], http_client=http_client) as (read, write, _):
-                yield read, write
-        finally:
-            if http_client:
-                await http_client.aclose()
+        async with streamable_http_streams(server["url"], headers) as (read, write):
+            yield read, write
 
     else:
         raise ValueError(f"Unknown transport '{transport}'. Supported: 'stdio', 'sse', 'streamable_http'.")
@@ -689,9 +682,9 @@ def _extract_annotations(tool) -> Dict[str, Any]:
     if ann is None:
         return {}
     return {
-        k: getattr(ann, k)
+        k: mfield(ann, k)
         for k in ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
-        if getattr(ann, k, None) is not None
+        if mfield(ann, k) is not None
     }
 
 
@@ -699,7 +692,7 @@ def _serialise_content(content: list) -> str:
     items = []
     for c in content:
         if hasattr(c, "model_dump"):
-            items.append(c.model_dump())
+            items.append(dump(c))
         elif hasattr(c, "text"):
             items.append({"type": "text", "text": c.text})
         else:
@@ -733,7 +726,7 @@ async def _list_tools_raw(server: Dict[str, Any]) -> List[Dict[str, Any]]:
                 {
                     "name": t.name,
                     "description": t.description or "",
-                    "schema": t.inputSchema if isinstance(t.inputSchema, dict) else {},
+                    "schema": mfield(t, "inputSchema") if isinstance(mfield(t, "inputSchema"), dict) else {},
                     "annotations": _extract_annotations(t),
                 }
                 for t in result.tools
@@ -900,7 +893,9 @@ async def call_tool_with_telemetry(
                             )
                         )
                         return None
-                    live_schema = live_tool.inputSchema if isinstance(live_tool.inputSchema, dict) else {}
+                    live_schema = (
+                        mfield(live_tool, "inputSchema") if isinstance(mfield(live_tool, "inputSchema"), dict) else {}
+                    )
                     live_hash = db.make_hash(live_schema)
                     live_desc = live_tool.description or ""
                     if live_desc != stored_desc:
@@ -932,7 +927,7 @@ async def call_tool_with_telemetry(
             raise _drift[0]
 
         latency_ms = (time.monotonic() - start) * 1000
-        is_tool_error = bool(getattr(result, "isError", False))
+        is_tool_error = bool(mfield(result, "isError", False))
         success = not is_tool_error
         content = result.content if hasattr(result, "content") and result.content is not None else []
         content = _scrub_content(content)

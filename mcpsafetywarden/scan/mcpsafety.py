@@ -812,6 +812,8 @@ async def _execute_mcp_tool(
     """Execute one tool call during a security scan with arg inspection, output capping, injection quarantine, and audit logging."""
     from mcp import ClientSession
 
+    from ..core.mcp_compat import dump, mfield
+
     block_reason = _inspect_probe_args(tool_name, args, allow_destructive_probes)
     if block_reason:
         tool_row = db.get_tool(server_id, tool_name)
@@ -851,7 +853,7 @@ async def _execute_mcp_tool(
         content = getattr(result, "content", [])
 
         raw = json.dumps(
-            [c.model_dump() if hasattr(c, "model_dump") else str(c) for c in content],
+            [dump(c) if hasattr(c, "model_dump") else str(c) for c in content],
             default=str,
         )
 
@@ -859,7 +861,7 @@ async def _execute_mcp_tool(
             raw = raw.encode()[:HACKER_MAX_RESULT_BYTES].decode("utf-8", errors="ignore")
             raw += "\n[OUTPUT TRUNCATED]"
 
-        is_tool_error = bool(getattr(result, "isError", False))
+        is_tool_error = bool(mfield(result, "isError", False))
         success = not is_tool_error
         if is_tool_error:
             error_msg = "mcp_tool_error"

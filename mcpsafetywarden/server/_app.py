@@ -6,7 +6,7 @@ import os as _os
 import time
 from typing import Dict, Optional
 
-from mcp.server.fastmcp import FastMCP
+from ._sdk import MCPServer
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
@@ -69,7 +69,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-mcp = FastMCP(
+mcp = MCPServer(
     "mcpsafetywarden",
     instructions=(
         "Security proxy that wraps MCP servers to enforce risk gating, behavioral profiling, "
