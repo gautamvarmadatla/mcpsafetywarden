@@ -39,7 +39,7 @@ jobs:
         uses: github/codeql-action/autobuild@ed410739ba306e4ebe5e123421a6bd694e494a2b # v4
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@ed410739ba306e4ebe5e123421a6bd694e494a2b # v4
+        uses: github/codeql-action/analyze@0911ee96d2d6c8def97122c36c5cadd93829a4b4 # v4
         with:
           category: /language:python
 
@@ -65,6 +65,6 @@ jobs:
         uses: github/codeql-action/autobuild@ed410739ba306e4ebe5e123421a6bd694e494a2b # v4
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@ed410739ba306e4ebe5e123421a6bd694e494a2b # v4
+        uses: github/codeql-action/analyze@0911ee96d2d6c8def97122c36c5cadd93829a4b4 # v4
         with:
           category: /language:actions
