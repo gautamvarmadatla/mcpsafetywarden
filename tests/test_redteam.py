@@ -291,3 +291,10 @@ class TestKnownGaps:
                 "GAP: scope_mismatch scores 5.5, cert_changed scores 8.5 - "
                 "these are expert guesses. No feedback loop exists to correct them."
             )
+
+
+def test_mcp2_http_dependencies_are_not_typosquats():
+    from mcpsafetywarden.graph.provenance import check_dependency_typosquatting
+
+    assert check_dependency_typosquatting(["httpx2", "httpcore2", "mcp-types"]) == []
+    assert check_dependency_typosquatting(["httpxx"])
