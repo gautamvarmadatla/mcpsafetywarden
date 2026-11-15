@@ -405,7 +405,10 @@ def test_to_dict_roundtrip_without_raw():
     assert from_dict(d).network.allow[0].host == "api.example.com"
 
 
-def test_integration_subprocess_egress_blocked():
+def test_integration_subprocess_egress_blocked(monkeypatch):
+    import mcpsafetywarden.sandbox.backends as be
+
+    monkeypatch.setattr(be, "available_backends", lambda: [SubprocessBackend()])
     profile = from_dict(
         {
             "name": "it",
@@ -535,6 +538,7 @@ def test_proxy_started_when_backend_cannot_enforce_egress(monkeypatch):
         return real(*a, **k)
 
     monkeypatch.setattr(mgr, "EgressPolicy", spy)
+    monkeypatch.setattr(mgr.backends, "available_backends", lambda: [SubprocessBackend()])
     profile = from_dict(
         {
             "name": "d",
