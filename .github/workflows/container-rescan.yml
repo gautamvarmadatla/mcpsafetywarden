@@ -60,6 +60,7 @@ jobs:
           format: table
           severity: MEDIUM,HIGH,CRITICAL,UNKNOWN
           ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
           exit-code: "1"
         continue-on-error: true
 
@@ -71,6 +72,7 @@ jobs:
           output: image-scan-${{ matrix.registry }}.sarif
           severity: MEDIUM,HIGH,CRITICAL,UNKNOWN
           ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
           exit-code: "0"
         continue-on-error: true
 
