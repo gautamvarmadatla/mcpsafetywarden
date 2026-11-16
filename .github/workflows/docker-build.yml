@@ -37,3 +37,13 @@ jobs:
 
       - name: Smoke test image
         run: docker run --rm mcpsafetywarden:ci mcpsafetywarden --version
+
+      - name: Trivy vulnerability gate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # master
+        with:
+          image-ref: mcpsafetywarden:ci
+          format: table
+          severity: MEDIUM,HIGH,CRITICAL,UNKNOWN
+          ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
+          exit-code: "1"

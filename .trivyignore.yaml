@@ -1,0 +1,17 @@
+vulnerabilities:
+  - id: CVE-2026-114612
+    paths:
+      - "usr/local/lib/python3.12/site-packages/litellm-1.93.2.dist-info/METADATA"
+    statement: "cisco-ai-mcp-scanner pins litellm==1.93.2. The advisory affects the LiteLLM proxy server, which mcpsafetywarden never runs. Remove once the pin is relaxed."
+  - id: GHSA-g5ff-637f-6q2m
+    paths:
+      - "usr/local/lib/python3.12/site-packages/litellm-1.93.2.dist-info/METADATA"
+    statement: "cisco-ai-mcp-scanner pins litellm==1.93.2. The advisory affects the LiteLLM proxy server, which mcpsafetywarden never runs. Remove once the pin is relaxed."
+  - id: CVE-2025-47273
+    purls:
+      - "pkg:pypi/setuptools@70.3.0"
+    statement: "Reported from pip/_vendor/bom.cdx.json for the pkg_resources copy pip vendors. The flaw is in setuptools.package_index, which pip does not vendor. The installed setuptools is patched."
+  - id: CVE-2026-59890
+    purls:
+      - "pkg:pypi/setuptools@70.3.0"
+    statement: "Reported from pip/_vendor/bom.cdx.json for the pkg_resources copy pip vendors. The flaw is in sdist MANIFEST.in handling, which pip does not vendor. The installed setuptools is patched."
